@@ -1,6 +1,6 @@
 # Survivor Isles — เอาชีวิตรอดบนหมู่เกาะ
 
-🎮 **เล่นได้ที่:** https://ai-appsheet.github.io/last-pixel/  ·  ข้อมูลผู้เล่นเก็บใน Google Sheet `LastPixel-DB` (โฟลเดอร์ "เกมเอาชีวิตรอด" ของ tawankonpang@gmail.com) ผ่าน Apps Script `LastPixel-Backend`
+🎮 **เล่นได้ที่:** https://ai-appsheet.github.io/survivor-isles/  ·  ข้อมูลผู้เล่นเก็บใน Google Sheet `LastPixel-DB` (โฟลเดอร์ "เกมเอาชีวิตรอด" ของ tawankonpang@gmail.com) ผ่าน Apps Script `LastPixel-Backend`
 
 เกมเอาชีวิตรอดแบบเนื้อเรื่อง ภาพ pixel art มุมกล้อง 2.5D เล่นบนเว็บได้ทั้งคอม มือถือ และจอยเกม (Phaser 3.90 + TypeScript บน Next.js 15 · เว็บอยู่บน GitHub Pages · เซิร์ฟเวอร์เป็น Google Sheet + Apps Script) กราฟิกในเกมและเสียงสร้างด้วยโค้ด ส่วนภาพประกอบ (หน้าปก ฉากเปิด ตัวละคร บอส ภัยพิบัติ การ์ดเกาะ สัตว์ในตำนาน คลังข้อมูล รวม 79 ภาพ + ภาพตัวอย่างรายไอเทม/มอน 429 ภาพ) เป็นภาพวาดการ์ตูนพิกเซลใน `public/art/`
 

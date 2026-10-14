@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 
 /** Next.js — export เป็นไฟล์ static (out/) สำหรับ GitHub Pages
- *  NEXT_PUBLIC_BASE_PATH: path ของ repo เช่น '/last-pixel' (รันในเครื่องเว้นว่าง) */
+ *  NEXT_PUBLIC_BASE_PATH: path ของ repo เช่น '/survivor-isles' (รันในเครื่องเว้นว่าง) */
 const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? '').replace(/\/+$/, '');
 
 /** @type {import('next').NextConfig} */
