@@ -31,6 +31,8 @@ const INK = '#2a2340';
 const PER_ROW = 4;
 const CW = 108;
 const CH = 152;
+/** แถวปุ่มล่าง (กลับ · ชื่อ · สุ่ม · สุ่มเกาะ) อยู่แถวเดียวกัน ไม่ซ้อนกัน */
+const BAR_Y = 506;
 const GX = 12;
 const GY = 12;
 const GRID_X = 24;
@@ -85,7 +87,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       this.tweens.add({ targets: bgArt, scale: bgArt.scale * 1.05, duration: 14000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     } else this.add.image(0, 0, 'title_sky').setOrigin(0).setScale(1, 1.5).setAlpha(0.5);
     this.add.rectangle(0, 0, W, H, 0x2a2340, 0.55).setOrigin(0);
-    heading(this, W / 2, 8, this.play ? 'เลือกตัวละคร (1/2)' : `ตัวละคร ${CHARACTERS.length} แบบ`, 30, true).setOrigin(0.5, 0);
+    heading(this, W / 2, 8, this.play ? 'เลือกตัวละคร (1/2)' : `ตัวละคร ${CHARACTERS.length} แบบ`, 30).setOrigin(0.5, 0);
     const meta = MetaSave.load();
     this.chosen = CHARACTERS.find((c) => c.id === meta.lastCharacter && MetaSave.isUnlocked(meta, c.id)) ?? CHARACTERS[0];
 
@@ -104,23 +106,23 @@ export class CharacterSelectScene extends Phaser.Scene {
 
     if (this.play) {
       // ช่องตั้งชื่อ (DOM input ทำงานได้ทั้งคอมและมือถือ)
-      txt(this, 24, 428, 'ชื่อผู้เล่น', 14, COLORS.gold);
+      txt(this, 184, BAR_Y, 'ชื่อ', 15, COLORS.gold).setOrigin(0, 0.5);
       const el = document.createElement('input');
       el.type = 'text';
       el.maxLength = 16;
       el.placeholder = 'พิมพ์ชื่อของคุณ';
       el.value = meta.playerName || this.presetName;
       Object.assign(el.style, {
-        width: '230px', height: '36px', fontSize: '18px', fontFamily: FONT, fontWeight: '500', padding: '0 10px', borderRadius: '8px',
+        width: '220px', height: '34px', fontSize: '17px', fontFamily: FONT, fontWeight: '500', padding: '0 10px', borderRadius: '8px',
         border: '2px solid #41a6f6', background: '#1a1c2c', color: '#f4f4f4', outline: 'none',
       });
-      this.nameInput = this.add.dom(24 + 118, 468, el);
-      button(this, 300, 468, 100, 38, '🎲 สุ่ม', () => {
+      this.nameInput = this.add.dom(338, BAR_Y, el);
+      button(this, 508, BAR_Y, 92, 38, '🎲 สุ่ม', () => {
         el.value = `${RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)]}${Math.floor(Math.random() * 99)}`;
       }, true, 14);
-      button(this, 830, 506, 220, 44, 'สุ่มเกาะ ▶', () => this.next(el.value), true, 16);
+      button(this, 836, BAR_Y, 208, 44, 'สุ่มเกาะ ▶', () => this.next(el.value), true, 16);
     }
-    button(this, 100, 506, 150, 40, '← กลับ', () => {
+    button(this, 92, BAR_Y, 140, 40, '← กลับ', () => {
       this.nameInput?.destroy();
       fadeTo(this, 'TitleScene');
     });
@@ -188,10 +190,8 @@ export class CharacterSelectScene extends Phaser.Scene {
     const half = Math.min(role.width / 2 + 6, 44);
     const ly = py + ph + 29 + role.height / 2;
     lines.lineStyle(1, TIER_HEX[info.tier], 0.9).lineBetween(12, ly, CW / 2 - half, ly).lineBetween(CW / 2 + half, ly, CW - 12, ly);
-    // แถวท้ายการ์ด: การ์ดแคบ → ข้อความเดียวตรงกลาง (สองข้อความซ้าย/ขวาเคยทับกัน)
-    const foot = this.ink(CW / 2, CH - 9, 'SURVIVOR ISLES · HERO', 7, '#8a8498').setOrigin(0.5, 0.5);
-    if (foot.width > CW - 20) foot.setScale((CW - 20) / foot.width);
-    parts.push(name, role, lines, foot);
+    // (เอาข้อความท้ายการ์ดออก — การ์ดเตี้ย ข้อความไปทับเส้นกรอบใน)
+    parts.push(name, role, lines);
     if (!unlocked) parts.push(this.ink(CW / 2, py + ph / 2, '🔒', 26, '#ffffff').setOrigin(0.5));
     cont.add(parts);
     const hit = this.add.zone(CW / 2, CH / 2, CW, CH).setInteractive({ useHandCursor: true });
