@@ -245,3 +245,23 @@
   .si-logo span::after { animation: none; display: none; }
   .si-art, .si-head, .si-bottom, .si-tips p, .si-fill, .si-loader { transition: none; }
 }
+
+/* โลโก้แบบภาพ (เหมือนหน้าแรก) — ขยายแบบจุดคม */
+.si-logo-img {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(4px, 1vh, 10px);
+}
+.si-logo-img img {
+  display: block;
+  image-rendering: pixelated;
+  height: clamp(52px, 11.5vh, 120px);
+  width: auto;
+  margin: 0 !important;
+  padding: 0 !important;
+  filter: drop-shadow(0 4px 0 rgba(11, 13, 31, 0.55));
+}
+.si-logo-img::after, .si-logo-img img::after { display: none; }
+.si-sub, .si-tag, .si-step { line-height: 0; text-shadow: none; }
+.si-tips p { line-height: 0; }

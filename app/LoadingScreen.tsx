@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import './loading.css';
+import PixelText from './PixelText';
 
 /**
  * หน้าโหลด (HTML ล้วน — โผล่ทันทีตั้งแต่เปิดเว็บ ก่อนโค้ดเกมโหลดเสร็จ)
@@ -35,6 +36,14 @@ const FLIES = [
 ];
 
 export default function LoadingScreen() {
+  // จอใหญ่ = พิกเซลตัวหนังสือ 3 เท่า · จอเล็ก/เตี้ย = 2 เท่า
+  const [big, setBig] = useState(true);
+  useEffect(() => {
+    const fit = () => setBig(window.innerWidth >= 1000 && window.innerHeight >= 560);
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, []);
   const [tip, setTip] = useState(0);
   const [prog, setProg] = useState(0.04);
   const [shown, setShown] = useState(false);
@@ -101,17 +110,22 @@ export default function LoadingScreen() {
       </div>
 
       <header className="si-head">
-        <h1 className="si-logo" aria-label="Survivor Isles">
-          <span className="w1" data-t="SURVIVOR">SURVIVOR</span>
-          <span className="w2" data-t="ISLES">ISLES</span>
+        {/* โลโก้ = ภาพเดียวกับหน้าแรก (texture tt_logo_w1/w2 ที่เกมวาด) ขยายแบบพิกเซล */}
+        <h1 className="si-logo si-logo-img" aria-label="Survivor Isles">
+          <img src={`${BASE}logo_w1.png`} alt="" className="w1" />
+          <img src={`${BASE}logo_w2.png`} alt="" className="w2" />
         </h1>
-        <p className="si-sub si-px">เอาชีวิตรอดบนหมู่เกาะ</p>
-        <p className="si-tag si-px">สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า</p>
+        <p className="si-sub">
+          <PixelText text="เอาชีวิตรอดบนหมู่เกาะ" px={15} scale={big ? 3 : 2} color="#fff6d8" color2="#ffcd75" />
+        </p>
+        <p className="si-tag">
+          <PixelText text="สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า" px={12} scale={2} color="#e8ecff" color2="#9fd8ff" shadow="#1a2a5a" />
+        </p>
       </header>
 
       <div className="si-bottom">
         <div className="si-row">
-          <span className="si-step si-px">{status(prog)}</span>
+          <span className="si-step"><PixelText text={status(prog)} px={12} scale={2} color="#fff2b0" /></span>
           <span className="si-pct">{pct}%</span>
         </div>
         <div className="si-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
@@ -120,7 +134,7 @@ export default function LoadingScreen() {
         <div className="si-tips">
           {TIPS.map((s, i) => (
             <p key={i} className={i === tip ? 'on' : ''} aria-hidden={i !== tip}>
-              <b>เคล็ดลับ</b> {s}
+              <PixelText text={`เคล็ดลับ  ${s}`} px={11} scale={2} color="#e8ecff" shadow="#0b0d1f" />
             </p>
           ))}
         </div>
