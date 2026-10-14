@@ -64,8 +64,11 @@ export class TitleScene extends Phaser.Scene {
   }
 
   private keyArt?: Phaser.GameObjects.Image;
+  /** ขอบล่างของกล่องเมนู (เข้าระบบแล้ว) — 0 = หน้าฟอร์มเข้าสู่ระบบ */
+  private menuBottom = 0;
 
   create() {
+    this.menuBottom = 0;
     queueArt(this, ART, true);
     queueItemArtIndex(this, true);
     this.keyArt = undefined;
@@ -670,13 +673,15 @@ export class TitleScene extends Phaser.Scene {
     const meta = MetaSave.load();
     const save = SaveManager.load();
     const x = 36;
-    const y = 156;
+    const y = 142;
     const pw = 300;
     const bw = 264;
     const bx = x + pw / 2;
     const gap = 7;
     const rows = 52 + gap + 40 + gap + 40 + gap + 34 + gap + 34;
     fancyPanel(this, x, y, pw, rows + 30, 'gold');
+    // กล่องตัวอย่างด่าน (วนภาพ) วางใต้กล่องเมนูนี้
+    this.menuBottom = y + rows + 30;
     let cy = y + 15;
     const next = (h: number) => {
       const c = cy + h / 2;
@@ -731,7 +736,7 @@ export class TitleScene extends Phaser.Scene {
         this.scene.restart();
       },
     });
-    txt(this, 12, H - 8, 'v0.4 · PC & Mobile · 2.5D', 11, '#8a95a8').setOrigin(0, 1);
+    txt(this, W - 12, H - 6, 'v0.4 · PC & Mobile · 2.5D', 11, '#8a95a8').setOrigin(1, 1);
   }
 
   // ---------------------------------------------------------------- ไฮไลต์บนหน้าปก
@@ -751,10 +756,12 @@ export class TitleScene extends Phaser.Scene {
       { art: 'conquest', tag: 'เป้าหมาย', title: 'พิชิตเกาะร้าง', sub: 'ล้มบอสดันเจี้ยนครบ 3 ด่าน', color: '#a7f070' },
     ].filter((s) => this.textures.exists(`art_${s.art}`));
     if (!slides.length) return;
-    const cw = 292;
-    const ch = 150;
-    const x = W - cw - 18;
-    const y = H - ch - 40;
+    // เข้าระบบแล้ว: ใต้กล่องเมนูทางซ้าย · ยังไม่เข้า (ฟอร์มสูง): มุมขวาล่าง
+    const under = this.menuBottom > 0;
+    const cw = under ? 288 : 292;
+    const y = under ? this.menuBottom + 14 : H - 150 - 40;
+    const ch = under ? H - y - 36 : 150;
+    const x = under ? 42 : W - cw - 18;
     const box = this.add.container(0, 0).setDepth(5);
     const frame = this.add.graphics();
     frame.fillStyle(0x0b0d1f, 0.7).fillRoundedRect(x - 6, y - 6, cw + 12, ch + 34, 10);
@@ -807,7 +814,7 @@ export class TitleScene extends Phaser.Scene {
     const s = 38;
     const gap = 6;
     const total = ids.length * s + (ids.length - 1) * gap;
-    const x0 = W - 18 - 292 - 24 - total;
+    const x0 = this.menuBottom > 0 ? W - 18 - total : W - 18 - 292 - 24 - total;
     const y = H - 40 - s + 2;
     txt(this, x0, y - 18, 'ตัวละคร 7 แบบ · เริ่มเท่ากัน ไม่มีสายอาชีพ', 11, '#fff2b0').setStroke('#0b0d1f', 4).setDepth(5);
     ids.forEach((id, k) => {
@@ -909,7 +916,9 @@ export class TitleScene extends Phaser.Scene {
 
   /** ไฟสถานะการเชื่อมต่อ (มุมซ้ายล่าง เหนือเลขเวอร์ชัน) */
   private drawNet() {
-    const t = txt(this, 12, H - 32, '', 11, COLORS.dim).setOrigin(0, 1).setStroke('#0b0d1f', 3).setDepth(5);
+    // กล่องตัวอย่างด่านอยู่ซ้ายล่าง → ไฟสถานะย้ายไปขวาล่าง (เหนือเลขเวอร์ชัน)
+    const right = this.menuBottom > 0;
+    const t = txt(this, right ? W - 12 : 12, right ? H - 20 : H - 32, '', 11, COLORS.dim).setOrigin(right ? 1 : 0, 1).setStroke('#0b0d1f', 3).setDepth(5);
     const show = () => {
       const s = netStatus();
       t.setText(s === 'online' ? '🟢 ออนไลน์' : s === 'unknown' ? '🟡 กำลังเชื่อมต่อ…' : '⚪ ออฟไลน์ (บันทึกในเครื่อง)');
