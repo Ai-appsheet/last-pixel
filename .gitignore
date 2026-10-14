@@ -1,0 +1,16 @@
+# dependencies / build
+node_modules
+.next
+out
+dist
+*.tsbuildinfo
+
+# ความลับ — .env เก็บ API key ของบริการสร้างภาพ (tools/*.mjs อ่านในเครื่องเท่านั้น) ห้าม commit
+.env
+.env.local
+.env.*.local
+
+# ไฟล์ระบบ / ไฟล์ทดลอง
+.DS_Store
+screenshots/
+art/generated/

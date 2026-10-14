@@ -1,0 +1,58 @@
+# build เกม (Next.js static export) แล้ว deploy ขึ้น GitHub Pages ทุกครั้งที่ push เข้า main
+# ต้องตั้ง Settings → Pages → Source = "GitHub Actions" ก่อน (ครั้งเดียว)
+# URL ของ backend (Apps Script) ใส่ที่ Settings → Secrets and variables → Actions → Variables → API_URL (ไม่ใส่ = เล่นออฟไลน์)
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: ทดสอบ API (Code.gs บน mock backend)
+        run: npm run test:api
+
+      - name: Build (static export → out/)
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          # repo ชื่อ <user>.github.io อยู่ที่ราก · repo อื่นอยู่ใต้ /<ชื่อ repo>/
+          NEXT_PUBLIC_BASE_PATH: ${{ endsWith(github.event.repository.name, '.github.io') && '' || format('/{0}', github.event.repository.name) }}
+          NEXT_PUBLIC_API_URL: ${{ vars.API_URL }}
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
