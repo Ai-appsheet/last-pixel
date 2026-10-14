@@ -355,7 +355,7 @@ const JOBS = [
   ['golem', BOSS('a massive stone golem with mossy rocky body and a glowing orange core', 'a rocky mountain quarry')],
   ['yeti', MOB('a huge white furry yeti roaring', 'a snowy mountain blizzard')],
   ['shade', MOB('a translucent dark shadow ghost with glowing white eyes', 'a haunted dark forest at night')],
-  ['crab_king', BOSS('a terrifying armored crab king with red glowing eyes, rusty spiked crown and huge open pincers, fierce not cute', 'a dark stormy ocean')],
+  ['crab_king', BOSS('an angry roaring crab king with spiky red shell, sharp fangs, golden crown and huge open claws', 'a tropical beach with crashing waves')],
   ['king_boar', BOSS('a gigantic fierce dark reddish-brown wild boar king with massive curved tusks, glowing red eyes, scarred bristly hide and a spiky mane', 'a dense tropical jungle')],
   ['demon_lord', BOSS('a towering demon lord with huge horns, burning eyes, dark armor and a red cape, summoning fireballs', 'a burning volcanic hellscape at night')],
 
