@@ -15,6 +15,7 @@ const env = Object.fromEntries(
 // สไตล์ที่ผู้ใช้เลือกแล้ว — ใช้กับทุกภาพ (ห้ามแก้ข้อความ)
 const STYLE = ', chibi anime character design, big eyes, small adorable proportions, drawn in 16-bit retro pixel art style, pixel sprite shading, vibrant colors, detailed pixel art background, no text, no letters, no watermark';
 // สไตล์ฉาก/ภูมิทัศน์ (การ์ดเกาะ ภัยพิบัติ ฉากหลังคลัง): pixel look เดียวกัน แต่ไม่ใส่ "character design" — ไม่ให้ API ยัดตัวละครใหญ่กลางภาพ
+const FIERCE = ', fierce menacing boss monster design, glowing red eyes, angry scowl, jagged spiked dark armor shell with scars and barnacles, sharp serrated claws, dramatic dark stormy lighting, drawn in 16-bit retro pixel art style, pixel sprite shading, epic game boss key art, no people, no text, no letters, no watermark';
 const STYLE_SCENE = ', cute chibi anime world style, drawn in 16-bit retro pixel art style, pixel sprite shading, vibrant colors, detailed pixel art background, no text, no letters, no watermark';
 /** การ์ดภูมิทัศน์: มุมกว้าง ไม่มีคน — ตัวเกาะ/ตัวภัยต้องเป็นพระเอกของภาพ */
 const L = (name, prompt) => [name, `Wide landscape view, ${prompt}, no people, no characters`, '16:9', STYLE_SCENE];
@@ -29,7 +30,8 @@ const JOBS = [
   ['dungeon_2', 'Abandoned underground mine dungeon, broken minecart rails, wooden beams, glowing gold ore veins, bandaged mummies and shadow ghosts, eerie lantern light'],
   ['dungeon_3', 'Ancient cursed tomb dungeon, skull pillars, purple ghost fire braziers, a demonic altar, little red fire imps flying, cracked stone sarcophagi, ominous red glow'],
   ['boss_golem', 'A gigantic stone golem boss with a glowing orange core and mossy rocky body smashing the ground in a dark cave, debris flying'],
-  ['boss_crab', 'A gigantic crab king boss wearing a golden crown with huge armored claws rising from the sea onto a beach, waves crashing'],
+  // บอสปู: ผู้ใช้ขอให้ดูโหด ไม่น่ารัก → ใช้สไตล์บอสดุ (FIERCE) แทนสไตล์จิบิ
+  ['boss_crab', 'A colossal monstrous crab king boss with a cracked golden crown rising from a stormy sea, giant serrated claws raised to attack, lightning strikes, crashing waves, wrecked ships on a dark beach', '16:9', FIERCE],
   ['boss_demon', 'A towering demon lord boss with huge horns, burning eyes, dark armor and red cape, summoning fireballs over a burning island at night'],
   ['death', 'A fallen chibi survivor lying on a dark beach under a stormy night sky, a dropped torch, a broken sword and a lonely gravestone, melancholic blue and purple tones'],
   ['conquest', 'A triumphant chibi survivor hero raising a sword on the highest peak of a conquered tropical island at sunrise, a flag planted, light rays, victory'],
