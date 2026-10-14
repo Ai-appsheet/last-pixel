@@ -3,12 +3,12 @@ import { Sfx } from '../core/AudioManager';
 import { EventBus } from '../core/EventBus';
 import { MetaSave, todayKey } from '../core/MetaSave';
 import { SaveManager } from '../core/SaveManager';
-import { nextOpenText } from '../core/SpecialIsland';
 import { ACHIEVEMENTS } from '../data/achievements';
-import { CHARACTERS, getCharacter } from '../data/characters';
+import { getCharacter } from '../data/characters';
+import { BIOMES } from '../data/islands';
 import { CONTROL_MODES, getControlMode, setControlMode } from '../core/ControlMode';
 import { getSettings, setSettings } from '../core/Settings';
-import { COLORS, FONT, heading, PIXEL_FONT, pixelTxt, txt } from '../ui/widgets';
+import { chunkyTxt, COLORS, FONT, heading, PIXEL_FONT, txt } from '../ui/widgets';
 import { getAccounts, type AuthResult, type SendResult } from '../core/AccountService';
 import { cancelGoogle, promptGoogleOneTap, renderGoogleButton } from '../core/GoogleSignIn';
 import { apiEnabled, netStatus, onNetStatus } from '../core/backend/Api';
@@ -33,6 +33,9 @@ const COL_X = 36;
 const COL_W = 300;
 /** ขอบบนของกล่องเมนู (ใต้โลโก้ + ชื่อไทย) — ฟอร์มบัญชีใช้ค่าเดียวกัน */
 const PANEL_Y = 156;
+/** กล่องเมนู/การ์ดสไลด์: กว้างใกล้เคียงโลโก้ (~266) กึ่งกลางคอลัมน์ */
+const MENU_W = 290;
+const MENU_X = COL_X + (COL_W - MENU_W) / 2;
 
 /** หน้าแรก: ภาพ key art นิ่ง (title_bg) + โลโก้/เมนูคอลัมน์ซ้าย — เคลื่อนไหวเบาๆ เท่านั้น (แสงวิ้งโลโก้ หิ่งห้อยไม่กี่ดวง ปุ่มหลักเรืองหายใจ) */
 export class TitleScene extends Phaser.Scene {
@@ -258,7 +261,12 @@ export class TitleScene extends Phaser.Scene {
       shines.push(s);
     });
     // ชื่อไทย: ตัวหนาคม ขอบเข้ม อ่านง่าย (ไม่ขยับ)
-    head.add(pixelTxt(this, cx, 136, 'เอาชีวิตรอดบนหมู่เกาะ', 32, COLORS.cream).setOrigin(0.5));
+    // ชื่อไทย: ตัวพิกเซลหนาแบบหน้าโหลด (ครีม → ทอง ขอบ/เงาเข้ม) ให้เข้ากับโลโก้
+    const sub = chunkyTxt(this, cx, 135, 'เอาชีวิตรอดบนหมู่เกาะ', 24, '#fff6d8', {}, { outline: '#1a1030', shadow: '#5a1f2b' }).setOrigin(0.5);
+    const g = sub.context.createLinearGradient(0, 0, 0, sub.height);
+    g.addColorStop(0.2, '#fff6d8');
+    g.addColorStop(1, '#ffcd75');
+    head.add(sub.setFill(g));
     if (this.still) return;
     head.setAlpha(0);
     this.tweens.add({ targets: head, alpha: 1, duration: 500, delay: 100 });
@@ -284,9 +292,9 @@ export class TitleScene extends Phaser.Scene {
     const save = SaveManager.load();
     /** ของที่มีอยู่ก่อนวาดเมนู — ที่เพิ่มหลังจากนี้คือคอลัมน์ซ้าย (ไว้ขยายบนจอเล็ก) */
     const before = new Set(this.children.list);
-    const x = COL_X;
+    const x = MENU_X;
     const y = PANEL_Y;
-    const pw = COL_W;
+    const pw = MENU_W;
     const bw = 264;
     const bx = x + pw / 2;
     // กล่องเมนูกะทัดรัด (ปุ่มหลัก 44 · รอง 34 · เล็ก 30 · ช่องไฟ 6) — ที่เหลือยกให้การ์ดสไลด์ด้านล่าง
@@ -379,33 +387,47 @@ export class TitleScene extends Phaser.Scene {
    * หน้าฟอร์มบัญชี / จอเล็ก ไม่แสดง
    */
   private drawShowcase() {
-    const scenes: { art: string; tag: string; title: string; sub: string; color: string; focus?: number }[] = [
-      { art: 'dungeon_1', tag: 'ด่าน 1', title: 'ถ้ำหินมืด', sub: 'ค้างคาว สไลม์ โครงกระดูก · Lv.1–10', color: '#a77bdb' },
-      { art: 'boss_golem', tag: 'บอส', title: 'โกเลมหินยักษ์', sub: 'ผู้เฝ้าถ้ำหินมืด', color: '#ef7d57' },
-      { art: 'intro_5', tag: 'เรื่องราว', title: 'ขึ้นเกาะร้าง', sub: 'ผู้รอดชีวิตเริ่มต้นจากศูนย์', color: '#73eff7' },
-      { art: 'dungeon_2', tag: 'ด่าน 2', title: 'เหมืองร้าง', sub: 'มัมมี่ เงาหลอน · Lv.10–25', color: '#a77bdb' },
-      { art: 'boss_crab', tag: 'บอส', title: 'ราชาปูยักษ์', sub: 'ขึ้นฝั่งในคืนภัยพิบัติ', color: '#ef7d57' },
-      { art: 'dungeon_3', tag: 'ด่าน 3', title: 'สุสานโบราณ', sub: 'อิมป์ไฟ ปีศาจ · Lv.25+', color: '#a77bdb' },
-      { art: 'boss_demon', tag: 'บอสใหญ่', title: 'ราชาปีศาจ', sub: 'มาเยือนทุก 5 คืน', color: '#ef7d57' },
-      { art: 'special_island', tag: 'เกาะพิเศษ', title: 'เกาะมหาสมบัติ', sub: `เปิดวันละ 2 รอบ · รอบหน้า ${nextOpenText()}`, color: '#ffcd75' },
-      { art: 'market_island', tag: 'เกาะกลาง', title: 'ตลาดผู้รอดชีวิต', sub: 'ซื้อขายกับผู้เล่นคนอื่น · ห้ามต่อสู้', color: '#ffcd75' },
-      { art: 'hz_tsunami', tag: 'ภัยพิบัติ', title: 'คลื่นยักษ์ & อีก 7 ภัย', sub: 'ยิ่งรอดนาน ยิ่งถี่และแรง', color: '#41a6f6' },
-      { art: 'conquest', tag: 'เป้าหมาย', title: 'พิชิตเกาะร้าง', sub: 'ล้มบอสดันเจี้ยนครบ 3 ด่าน', color: '#a7f070' },
+    // สไลด์ = ตัวอย่างแมพ (เกาะ) สลับกับมหันตภัย — ไม่ใช้ภาพที่มีตัวละครเด่นกลางภาพ
+    type Slide = { art: string; tag: string; title: string; sub: string; color: string; bg: string; focus?: number };
+    const short = (d: string) => (d.split('—').pop() ?? d).trim();
+    const maps: Slide[] = (['forest', 'crystal', 'volcanic', 'glacier', 'jungle', 'atoll', 'snow', 'mushroom', 'desert', 'bamboo', 'swamp', 'savanna', 'ruins', 'haunted'] as const)
+      .map((b) => ({ art: `isl_${b}`, tag: 'เกาะ', title: BIOMES[b].name, sub: short(BIOMES[b].desc), color: '#73eff7', bg: '#1f7d7a', focus: 0.5 }));
+    maps.splice(3, 0, { art: 'market_island', tag: 'เกาะกลาง', title: 'ตลาดผู้รอดชีวิต', sub: 'ซื้อขายกับผู้เล่น · ห้ามต่อสู้', color: '#ffcd75', bg: '#1f7d7a', focus: 0.5 });
+    const hz = (art: string, title: string, sub: string): Slide => ({ art, tag: 'มหันตภัย', title, sub, color: '#ef7d57', bg: '#a8323f', focus: 0.35 });
+    const disasters: Slide[] = [
+      hz('hz_tsunami', 'คลื่นยักษ์', 'พาสัตว์ทะเลขึ้นฝั่ง · ถอยจากหาด'),
+      hz('hz_tornado', 'พายุทอร์นาโด', 'ดูดคนและของ · พังสิ่งก่อสร้าง'),
+      hz('hz_eruption', 'ภูเขาไฟระเบิด', 'ลาวาตกใส่ · บ้านหินทนกว่า'),
+      hz('raid_night', 'คืนมอนบุก', 'มอนบุกฐานทุกคืน · สร้างป้อมรับมือ'),
+      hz('hz_meteor', 'อุกกาบาตตก', 'หลบให้ทัน · ได้แร่อุกกาบาต'),
+      hz('hz_blizzard', 'พายุหิมะ', 'หนาวจัด เดินช้า · ก่อไฟ'),
+      hz('raid_sea_rage', 'ทะเลคลั่ง', 'ฉลาม คราเคน ปูยักษ์ขึ้นฝั่ง'),
+      hz('hz_wildfire', 'ไฟป่า', 'ลามตามต้นไม้ · บ้านไม้ติดไฟ'),
+      hz('hz_quake', 'แผ่นดินไหว', 'สิ่งก่อสร้างพัง · หินทนกว่าไม้'),
+      hz('raid_ghost_night', 'คืนหมอกผี', 'วิญญาณเร่ร่อนออกล่า'),
+      hz('hz_flood', 'น้ำท่วม', 'ริมฝั่งเดินช้า · ขึ้นที่สูง'),
+      hz('hz_whirlpool', 'วังน้ำวน', 'ดูดเรือ · แล่นออกด้านข้าง'),
+      hz('raid_skeleton_army', 'กองทัพโครงกระดูก', 'บุกเป็นฝูงยามดึก'),
+      hz('hz_eclipse', 'สุริยุปราคา', 'มอนกลางคืนออกกลางวัน'),
+      hz('hz_toxic_fog', 'หมอกพิษ', 'อย่ายืนในหมอก · หลบในบ้าน'),
+      hz('raid_legend', 'สัตว์ในตำนานบุก', 'มังกรนำทัพบุกเกาะ'),
+      hz('hz_acid_rain', 'ฝนกรด', 'ของ/ผักนอกบ้านเสียหาย'),
+      hz('hz_locusts', 'ฝูงตั๊กแตน', 'กินผักในไร่ · ตั้งหุ่นไล่กา'),
+      hz('hz_stampede', 'ฝูงสัตว์คลั่ง', 'ตั้งหลักในบ้าน/ป้อม'),
     ];
-    // สลับสไลด์ตัวละคร (ภาพเต็มตัว โฟกัสส่วนบนไม่ตัดหัว) แทรกระหว่างฉาก
-    const heroes = CHARACTERS.map((c) => ({ art: `char_${c.id}`, tag: 'ตัวละคร', title: c.name, sub: c.desc, color: '#73eff7', focus: 0.22 }));
-    const slides: typeof scenes = [];
-    for (let i = 0; i < Math.max(scenes.length, heroes.length); i++) {
-      if (scenes[i]) slides.push(scenes[i]);
-      if (heroes[i]) slides.push(heroes[i]);
+    const slides: Slide[] = [];
+    for (let i = 0; i < Math.max(maps.length, disasters.length); i++) {
+      if (maps[i]) slides.push(maps[i]);
+      if (disasters[i]) slides.push(disasters[i]);
     }
     const list = slides.filter((s) => this.textures.exists(`art_${s.art}`));
     if (!list.length) return;
     if (this.menuBottom === 0 || this.compact) return;
-    const cw = 288;
-    const x = COL_X + 6;
-    const y = this.menuBottom + 12;
-    const ch = H - y - 34;
+    // กว้างเท่ากล่องเมนู · ห่างกล่องเมนู 10 · ขอบล่างจอ ≥ 16
+    const cw = MENU_W - 12;
+    const x = MENU_X + 6;
+    const y = this.menuBottom + 16;
+    const ch = H - y - 42;
     if (ch < 48) return;
     const box = this.add.container(0, 0).setDepth(5);
     const frame = this.add.graphics();
@@ -422,7 +444,7 @@ export class TitleScene extends Phaser.Scene {
       i = (n + list.length) % list.length;
       const s = list[i];
       // ภาพสูงขึ้น → เอียงไปทางบน (เห็นหน้า/ส่วนหัวของภาพ)
-      const img = coverCrop(this, s.art, cw, ch, x, y, Math.min(s.focus ?? 0.3, 0.35));
+      const img = coverCrop(this, s.art, cw, ch, x, y, s.focus ?? 0.4);
       if (!img) return;
       box.addAt(img, 1);
       const old = cur;
@@ -437,7 +459,7 @@ export class TitleScene extends Phaser.Scene {
       fitText(label, cw - 120);
       sub.setText(s.sub);
       fitText(sub, cw - label.displayWidth - 12);
-      tag.setText(s.tag).setBackgroundColor(s.color === '#ffcd75' ? '#b86f50' : s.color === '#a7f070' ? '#257179' : s.color === '#41a6f6' ? '#3b5dc9' : s.color === '#ef7d57' ? '#b13e53' : s.color === '#73eff7' ? '#2a9d96' : '#5d275d');
+      tag.setText(s.tag).setBackgroundColor(s.bg);
       count.setText(`${i + 1}/${list.length}`);
     };
     // เปลี่ยนเองทุก 9 วิ (ลดการเคลื่อนไหว/คุณภาพต่ำ = เปลี่ยนเมื่อกดเท่านั้น) · กด = เริ่มนับใหม่

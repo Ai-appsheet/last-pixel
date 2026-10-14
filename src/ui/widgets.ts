@@ -109,16 +109,20 @@ export const PIXEL_TH = '"UnifontThai", monospace';
 
 export type PixelText = Phaser.GameObjects.Text & {
   __pixel?: boolean;
-  /** สีขอบ 1 พิกเซลฟอนต์ (null = ไม่มี) · สีเงาตก 1 พิกเซลฟอนต์ · ตัวหนาเทียม (วาดซ้ำเลื่อน 1 พิกเซลฟอนต์) */
+  /** สีขอบ 1 พิกเซล (null = ไม่มี) · สีเงาตก 1 พิกเซล · ตัวหนาเทียม (วาดซ้ำเลื่อน 1 พิกเซล) */
   __pxOutline?: string | null;
   __pxShadow?: string | null;
   __pxBold?: boolean;
-  /** พิกเซลจอจริงต่อ 1 พิกเซลฟอนต์ (เลขเต็ม) */
+  /** พิกเซลจอจริงต่อ 1 พิกเซลตัวอักษร (เลขเต็ม) */
   __pxM?: number;
   /** พิกเซลจอจริงต่อ 1 หน่วยเกม ตอนสร้าง (ความละเอียดแคนวาส × ซูมกล้อง) */
   __pxD?: number;
   /** ขนาดที่ขอ (หน่วยเกม) */
   __pxWant?: number;
+  /** ขนาดฟอนต์บนแคนวาส (Unifont 16 · ตัวพิกเซลหนา Mitr 11–16) + ฟอนต์/น้ำหนัก */
+  __pxBase?: number;
+  __pxFamily?: string;
+  __pxWeight?: string;
 };
 
 export interface PixelOpts {
@@ -127,36 +131,56 @@ export interface PixelOpts {
   bold?: boolean;
 }
 
-/** ตัวคูณเลขเต็ม m (พิกเซลจอต่อพิกเซลฟอนต์) ที่ให้ขนาดใกล้ size ที่สุด */
-const pixelM = (size: number, D: number) => Math.max(1, Math.round((size * D) / 16));
-
 /**
- * ตั้งขนาดฟอนต์พิกเซล: วาด Unifont ให้ 1 พิกเซลฟอนต์ = m พิกเซลแคนวาส = m พิกเซลจอจริง (ความละเอียดแคนวาส = D)
- * → ขนาดในเกม = 16m/D · บรรทัด/ระยะขอบปัดเป็นพิกเซลฟอนต์ (crispText) → คมทุกพิกเซล ไม่เบลอ/ไม่หยัก
+ * ตั้งขนาดตัวหนังสือพิกเซล: วาดฟอนต์ขนาด base ลงแคนวาสเล็ก (ความละเอียด D/m) แล้วแสดงให้ 1 พิกเซลแคนวาส = m พิกเซลจอจริง
+ * → ขนาดในเกม = base·m/D · ระยะขอบ/บรรทัดปัดเป็นพิกเซลแคนวาส (crispText) → คมทุกพิกเซล ไม่เบลอ/ไม่หยัก
  */
 function applyPixelSize(t: PixelText, m: number) {
   const D = t.__pxD ?? 1;
+  const base = t.__pxBase ?? 16;
   const u = m / D;
+  const fam = t.__pxFamily ?? PIXEL_TH;
+  const met = fam === PIXEL_TH ? { ascent: 14, descent: 2 } : thaiMetrics(base, fam, t.__pxWeight ?? '700') ?? { ascent: Math.ceil(base * 1.2), descent: Math.ceil(base * 0.5) };
   t.__pxM = m;
-  t.style.setStyle({ fontSize: `${(16 * u).toFixed(4)}px`, fontStyle: 'normal', resolution: D, metrics: { ascent: 14 * u, descent: 2 * u, fontSize: 16 * u } }, true, false);
+  t.style.setStyle({
+    fontSize: `${(base * u).toFixed(4)}px`, fontStyle: t.__pxWeight ?? 'normal', resolution: D / m,
+    metrics: { ascent: met.ascent * u, descent: met.descent * u, fontSize: (met.ascent + met.descent) * u },
+  }, true, false);
 }
 
-/**
- * ตัวหนังสือพิกเซลไทย (ชื่อหน้าต่าง · ชื่อเกมภาษาไทย · หัวข้อใหญ่) — ไม่มีเส้นขอบแคนวาส:
- * ตัดขอบแข็ง + ขอบ/เงา/ตัวหนา 1 พิกเซลฟอนต์ ทำบนแคนวาส (crispText.pixelPost) · NEAREST
- */
-export function pixelTxt(scene: Phaser.Scene, x: number, y: number, text: string, size = 16, color = COLORS.text, extra: Style = {}, opts: PixelOpts = {}) {
-  const t = scene.add.text(x, y, '', { fontFamily: PIXEL_TH, color, ...extra }) as PixelText;
+function makePixel(scene: Phaser.Scene, x: number, y: number, text: string, size: number, color: string, extra: Style, opts: PixelOpts, fam: string, weight: string, pick: (D: number) => [number, number]) {
+  const t = scene.add.text(x, y, '', { fontFamily: fam, color, ...extra }) as PixelText;
   t.__pixel = true;
   t.__pxD = renderScale() * (scene.cameras?.main?.zoom || 1);
   t.__pxWant = size;
-  t.__pxBold = opts.bold ?? true;
+  t.__pxFamily = fam;
+  t.__pxWeight = weight;
+  t.__pxBold = opts.bold ?? fam === PIXEL_TH;
   t.__pxOutline = opts.outline === undefined ? '#1a1c2c' : opts.outline;
   t.__pxShadow = opts.shadow === undefined ? '#1a1c2c' : opts.shadow;
-  applyPixelSize(t, pixelM(size, t.__pxD));
+  const [m, base] = pick(t.__pxD);
+  t.__pxBase = base;
+  applyPixelSize(t, m);
   t.setText(text);
   t.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
   return t;
+}
+
+/** ตัวหนังสือพิกเซลไทยเส้นบาง (GNU Unifont 16px) — คมเมื่อขยายเลขเต็ม */
+export function pixelTxt(scene: Phaser.Scene, x: number, y: number, text: string, size = 16, color = COLORS.text, extra: Style = {}, opts: PixelOpts = {}) {
+  return makePixel(scene, x, y, text, size, color, extra, opts, PIXEL_TH, 'normal', (D) => [Math.max(1, Math.round((size * D) / 16)), 16]);
+}
+
+/**
+ * ตัวหนังสือพิกเซลแบบหนา (เหมือนหน้าโหลด app/PixelText.tsx): Mitr ตัวหนาขนาดเล็ก (~20px บนแคนวาส) ตัดขอบแข็ง
+ * + ขอบ/เงา 1 พิกเซล แล้วขยายเลขเต็ม (×2 ขึ้นไป) → ก้อนพิกเซลชัด เข้ากับโลโก้ — ใช้กับชื่อเกมไทย/ชื่อหน้าต่าง/หัวข้อใหญ่
+ */
+export function chunkyTxt(scene: Phaser.Scene, x: number, y: number, text: string, size = 20, color = COLORS.cream, extra: Style = {}, opts: PixelOpts = {}) {
+  return makePixel(scene, x, y, text, size, color, extra, { bold: false, ...opts }, '"Mitr", Kanit, Tahoma, sans-serif', '600', (D) => {
+    // ฟอนต์บนแคนวาส ~20px (เล็กกว่านี้สระ/วรรณยุกต์ไทยตันเป็นก้อน) แล้วขยายเลขเต็ม ≥ 2
+    const m = Math.max(2, Math.round((size * D) / 20));
+    return [m, Phaser.Math.Clamp(Math.round((size * D) / m), 12, 24)];
+  });
 }
 
 /**
@@ -166,16 +190,16 @@ export function pixelTxt(scene: Phaser.Scene, x: number, y: number, text: string
 export function fitPixel(t: Phaser.GameObjects.Text, maxW: number) {
   const p = t as PixelText;
   if (p.__pixel && p.__pxD) {
-    const want = pixelM(p.__pxWant ?? 16, p.__pxD);
+    const want = Math.max(1, Math.round(((p.__pxWant ?? 16) * p.__pxD) / (p.__pxBase ?? 16)));
     if (p.__pxM !== want) applyPixelSize(p, want);
     while (t.width > maxW && (p.__pxM ?? 1) > 1) applyPixelSize(p, (p.__pxM ?? 1) - 1);
   }
   return t.setScale(t.width > maxW ? maxW / t.width : 1);
 }
 
-/** หัวข้อใหญ่ของหน้าจอ: ฟอนต์พิกเซลไทย ไล่สีครีม → ทอง → ส้ม + ขอบ/เงาม่วงเข้ม */
+/** หัวข้อใหญ่ของหน้าจอ: ตัวพิกเซลหนา ไล่สีครีม → ทอง → ส้ม + ขอบ/เงาเข้ม 1 พิกเซล (เข้ากับโลโก้) */
 export function heading(scene: Phaser.Scene, x: number, y: number, text: string, size = 32, _pixel = true) {
-  const t = pixelTxt(scene, x, y, text, size, COLORS.gold, {}, { outline: '#3a2440', shadow: '#3a2440' });
+  const t = chunkyTxt(scene, x, y, text, size, COLORS.gold, {}, { outline: '#1a1030', shadow: '#5a1f2b' });
   const grad = t.context.createLinearGradient(0, 0, 0, t.height);
   grad.addColorStop(0, '#fff2b0');
   grad.addColorStop(0.5, '#ffcd75');

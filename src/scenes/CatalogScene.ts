@@ -610,9 +610,8 @@ export class CatalogScene extends Phaser.Scene {
     const x = HEAD_X;
     const bottom = PREV.y + PREV.h;
     const color = e.info ? '#73eff7' : RARITY[e.rarity].color;
-    const name = e.rarity === 'legendary' && !e.info
-      ? heading(this, x, PREV.y, e.name, 20)
-      : txt(this, x, PREV.y, e.name, 20, color);
+    // ชื่อของ (ตัดบรรทัดได้) = ฟอนต์ปกติ · ระดับเทพ = สีทอง
+    const name = txt(this, x, PREV.y, e.name, 20, e.rarity === 'legendary' && !e.info ? '#ffcd75' : color);
     name.setWordWrapCallback(thaiWrap(HEAD_W)).setMaxLines(2);
     this.head(name);
     let y = PREV.y + name.height + 4;

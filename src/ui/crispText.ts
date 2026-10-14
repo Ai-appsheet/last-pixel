@@ -142,7 +142,7 @@ export function installCrispText(game: Phaser.Game) {
       if (!rd?.gl || !this.texture) return r;
       if (this.__pixel) {
         // ตัวหนังสือพิกเซล (pixelTxt): ขอบแข็ง + ขอบ/เงา/ตัวหนา 1 พิกเซลฟอนต์ แล้วอัปโหลดใหม่แบบ NEAREST
-        pixelPost(this.canvas, this.__pxOutline ?? null, this.__pxShadow ?? null, !!this.__pxBold, this.__pxM ?? 1);
+        pixelPost(this.canvas, this.__pxOutline ?? null, this.__pxShadow ?? null, !!this.__pxBold, 1);
         this.frame.source.glTexture = rd.canvasToTexture(this.canvas, this.frame.source.glTexture ?? undefined, true);
       } else this.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
       return r;
