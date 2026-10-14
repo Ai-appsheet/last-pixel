@@ -8,7 +8,7 @@ import { vehicleKind } from '../data/vehicles';
 import { isInterior } from '../world/Interiors';
 import type { GameScene } from '../scenes/GameScene';
 import type { UpTarget } from './UpgradeSystem';
-import { consume, missingRaw, rawCostOfBuild } from './CraftingSystem';
+import { affordableTimes, consume, missingRaw, rawCostOfBuild } from './CraftingSystem';
 
 /**
  * โหมดสร้าง (B): เลือกชิ้นจากแคตตาล็อก → เงาพรีวิวตามตำแหน่งเมาส์ (เขียว = วางได้)
@@ -150,7 +150,13 @@ export class BuildSystem {
       return;
     }
     const s = this.scene;
-    if (!s.creative && !consume(s.buildNeeds(def), s.materials())) return;
+    if (!s.creative && !consume(s.buildNeeds(def), s.materials())) {
+      // วัตถุดิบไม่พอ → บอกชัดๆ แล้วออกจากโหมดวาง (เดิมกดแล้วเงียบ ดูเหมือนยังวางได้อีก)
+      Sfx.play('error', 250);
+      EventBus.emit('toast', `วัตถุดิบไม่พอสร้าง${def.name}อีก — ออกจากโหมดวาง`, '#b13e53');
+      this.cancel();
+      return;
+    }
     if (s.freeBuilds.delete(def.id)) EventBus.emit('toast', `🎁 สร้าง${def.name}ฟรีแล้ว (สิทธิ์เริ่มต้น)`, '#a7f070');
     if (def.layer === 'terrain') {
       for (let y = 0; y < def.h; y++) {
@@ -169,6 +175,11 @@ export class BuildSystem {
       Sfx.play('place');
     }
     EventBus.emit('build', def.id);
+    // วางเสร็จแล้ววัตถุดิบไม่พอวางชิ้นต่อไป → ออกจากโหมดวางเอง (ไม่ให้เงาค้างเหมือนวางซ้ำได้)
+    if (!s.creative && affordableTimes(s.buildNeeds(def), s.materials()) <= 0) {
+      this.cancel();
+      EventBus.emit('toast', `✔ วาง${def.name}แล้ว`, '#a7f070');
+    }
   }
 
   /** รื้อสิ่งก่อสร้างที่ชี้ */
