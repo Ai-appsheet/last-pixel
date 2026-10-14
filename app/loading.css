@@ -1,3 +1,16 @@
+/* ฟอนต์พิกเซลไทย (GNU Unifont, ตัดเหลือไทย+อังกฤษ) — คมที่ขนาด 16/32/48px เท่านั้น */
+@font-face {
+  font-family: 'UnifontThai';
+  src: url('./fonts/unifont-thai.woff2') format('woff2');
+  font-display: swap;
+}
+.si-px {
+  font-family: 'UnifontThai', 'Mitr', monospace;
+  font-weight: 400;
+  -webkit-font-smoothing: none;
+  font-smooth: never;
+  text-rendering: optimizeSpeed;
+}
 /* หน้าโหลด Survivor Isles — ดู app/LoadingScreen.tsx · ภาพนิ่ง เคลื่อนไหวเบาๆ เท่านั้น (ไม่ซูม ไม่เด้ง) */
 .si-loader {
   position: fixed;
@@ -25,6 +38,7 @@
   height: 100%;
 }
 .si-art {
+  image-rendering: pixelated; /* ภาพพิกเซลอาร์ต: ขยายแบบจุดคม ไม่เบลอ */
   object-fit: cover;
   object-position: 60% 50%;
   opacity: 0;
@@ -119,18 +133,16 @@
 }
 .si-sub {
   margin: clamp(10px, 2.2vh, 22px) 0 0;
-  font-weight: 700;
-  font-size: clamp(18px, 2.4vw, 32px);
-  line-height: 1.35;
+  font-size: 32px;
+  line-height: 1.5;
   color: #fff6d8;
   letter-spacing: 0.01em;
   -webkit-text-stroke: 0;
-  text-shadow: 0 2px 0 #1a1c2c, 2px 0 0 #1a1c2c, -2px 0 0 #1a1c2c, 0 -2px 0 #1a1c2c, 0 4px 0 #5a1f2b, 0 0 14px rgba(0, 0, 0, 0.6);
+  text-shadow: 2px 0 0 #1a1c2c, -2px 0 0 #1a1c2c, 0 2px 0 #1a1c2c, 0 -2px 0 #1a1c2c, 2px 2px 0 #1a1c2c, -2px 2px 0 #1a1c2c, 2px -2px 0 #1a1c2c, -2px -2px 0 #1a1c2c, 0 4px 0 #5a1f2b;
 }
 .si-tag {
   margin: 4px 0 0;
-  font-weight: 500;
-  font-size: clamp(12px, 1.25vw, 17px);
+  font-size: 16px;
   color: #d6e4ee;
   text-shadow: 0 1px 0 #1a1c2c, 0 0 8px rgba(0, 0, 0, 0.8);
 }
@@ -150,8 +162,7 @@
   text-shadow: 0 1px 0 #0b0d1f, 0 0 6px rgba(0, 0, 0, 0.8);
 }
 .si-step {
-  font-size: clamp(13px, 1.2vw, 16px);
-  font-weight: 500;
+  font-size: 16px;
   color: #fff2b0;
 }
 .si-pct {
@@ -207,7 +218,7 @@
 @media (max-height: 480px) {
   .si-head { top: 14px; left: 20px; }
   .si-logo { font-size: clamp(22px, 7vh, 34px); }
-  .si-sub { font-size: 18px; margin-top: 8px; }
+  .si-sub { font-size: 32px; margin-top: 8px; }
   .si-tag { display: none; }
   .si-bottom { bottom: 10px; }
   .si-tips { margin-top: 6px; min-height: 1.6em; }

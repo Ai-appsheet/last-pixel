@@ -1,0 +1,2 @@
+GNU Unifont 18.0.01 (subset: Latin + Thai) — https://unifoundry.com/unifont/
+Dual-licensed: SIL Open Font License 1.1, or GNU GPL 2+ with the GNU font embedding exception.

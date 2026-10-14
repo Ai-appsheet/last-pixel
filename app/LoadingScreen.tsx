@@ -105,13 +105,13 @@ export default function LoadingScreen() {
           <span className="w1" data-t="SURVIVOR">SURVIVOR</span>
           <span className="w2" data-t="ISLES">ISLES</span>
         </h1>
-        <p className="si-sub">เอาชีวิตรอดบนหมู่เกาะ</p>
-        <p className="si-tag">สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า</p>
+        <p className="si-sub si-px">เอาชีวิตรอดบนหมู่เกาะ</p>
+        <p className="si-tag si-px">สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า</p>
       </header>
 
       <div className="si-bottom">
         <div className="si-row">
-          <span className="si-step">{status(prog)}</span>
+          <span className="si-step si-px">{status(prog)}</span>
           <span className="si-pct">{pct}%</span>
         </div>
         <div className="si-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
