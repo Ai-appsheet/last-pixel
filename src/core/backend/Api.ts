@@ -53,10 +53,11 @@ export async function api<T = Record<string, unknown>>(
   const retries = opts.retries ?? (RETRYABLE.has(action) ? 2 : 0);
   const payload = JSON.stringify({ ...body, action, token: token ?? undefined });
   let last: ApiFail = { ok: false, error: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้', code: 'network' };
+  let lost = 0;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt) await sleep(600 * attempt);
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), opts.timeout ?? 20000);
+    const timer = setTimeout(() => ctl.abort(), opts.timeout ?? 30000);
     try {
       const res = await fetch(API_URL, {
         method: 'POST',
@@ -66,6 +67,13 @@ export async function api<T = Record<string, unknown>>(
         signal: ctl.signal,
       });
       const json = (await res.json()) as ApiResult<T>;
+      // บางครั้ง Google redirect หลายทอดจน POST กลายเป็น GET → ได้คำตอบของ doGet ({name:'last-pixel'})
+      // แปลว่าคำขอยังไม่ถูกทำเลย → ส่งใหม่ได้ปลอดภัยทุก action (ไม่นับรอบ retry ปกติ)
+      if ((json as { name?: string }).name === 'last-pixel' && action !== 'ping' && lost < 3) {
+        lost++;
+        attempt--;
+        continue;
+      }
       setStatus('online');
       if (!json.ok && json.code === 'auth' && token) {
         token = null;
