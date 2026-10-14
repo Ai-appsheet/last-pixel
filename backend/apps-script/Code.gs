@@ -3,6 +3,7 @@
  *
  * เก็บทุกอย่างในชีตเดียว: บัญชี session เซฟ ข้อมูลถาวร แผนที่โลก ตลาด อันดับ และ log
  * บัญชีใช้อีเมล + รหัสผ่าน (ยืนยันอีเมลด้วยรหัส 6 หลักที่ส่งผ่าน MailApp) · บัญชีเก่าที่มีแต่ชื่อผู้ใช้ยังเข้าได้ แล้วผูกอีเมลทีหลัง
+ * เข้าสู่ระบบด้วย Google ได้ (auth.google ตรวจ ID token กับ Google ผ่าน UrlFetchApp) — ต้องตั้ง Script Property GOOGLE_CLIENT_ID
  * client (Next.js) ส่ง POST body เป็น JSON แบบ text/plain (ไม่มี CORS preflight) → { action, token?, ... }
  * ตอบกลับ { ok: true, ... } หรือ { ok: false, error: 'ข้อความไทย', code }
  *
@@ -44,11 +45,25 @@ var CFG = {
   LISTINGS_PER_SELLER: 12,
   LISTINGS_MAX: 500,
   LOG_MAX: 3000,
+  /** แชทโลก: ยาวสุด (ตัวอักษร) · ส่งได้ 1 ข้อความ/CHAT_GAP_SEC วิ และ ≤ CHAT_PER_MIN ต่อนาทีต่อบัญชี · เก็บแถวไม่เกิน CHAT_MAX · ส่งให้ client ครั้งละ ≤ CHAT_PAGE (แคช CHAT_CACHE_SEC วิ) */
+  CHAT_MAX_LEN: 140,
+  CHAT_GAP_SEC: 2,
+  CHAT_PER_MIN: 20,
+  CHAT_MAX: 2000,
+  CHAT_PAGE: 50,
+  CHAT_CACHE_SEC: 10,
+  /**
+   * OAuth Client ID ของปุ่ม "Sign in with Google" (xxxx.apps.googleusercontent.com) — แนะนำให้ตั้งใน Script Properties ชื่อ GOOGLE_CLIENT_ID แทน
+   * (ใส่ที่นี่แล้วรัน setup ก็ได้ setup จะคัดลอกไปไว้ใน Script Properties ให้) · ว่างทั้งคู่ = ปิดการเข้าสู่ระบบด้วย Google
+   */
+  GOOGLE_CLIENT_ID: '',
+  /** เรียก auth.google ได้รวมกี่ครั้งต่อ 10 นาที (แต่ละครั้งใช้ UrlFetch ซึ่งมีโควตารายวัน) */
+  MAX_GOOGLE: 300,
 };
 
 var HEADERS = {
-  // 5 คอลัมน์ท้าย (email…verifyTries) เพิ่มทีหลัง — setup() เติมหัวตารางให้ชีตเดิมโดยไม่ยุ่งข้อมูล
-  Accounts: ['id', 'username', 'salt', 'hash', 'createdAt', 'lastLogin', 'playerName', 'character', 'banned', 'email', 'verified', 'verifyHash', 'verifyExp', 'verifyTries'],
+  // คอลัมน์ email…verifyTries และ googleSub เพิ่มทีหลัง — setup() เติมหัวตารางให้ชีตเดิมโดยไม่ยุ่งข้อมูล
+  Accounts: ['id', 'username', 'salt', 'hash', 'createdAt', 'lastLogin', 'playerName', 'character', 'banned', 'email', 'verified', 'verifyHash', 'verifyExp', 'verifyTries', 'googleSub'],
   Sessions: ['token', 'accountId', 'expiresAt'],
   Saves: ['accountId', 'updatedAt', 'version', 'size', 'parts', 'data_1'],
   Meta: ['accountId', 'updatedAt', 'json'],
@@ -57,6 +72,8 @@ var HEADERS = {
   Leaderboard: ['accountId', 'playerName', 'bestPower', 'bestDays', 'kills', 'updatedAt'],
   Log: ['time', 'accountId', 'action', 'detail'],
   Config: ['key', 'value'],
+  // channel: 'world' (ตอนนี้มีช่องเดียว · เผื่อ 'island' ภายหลัง)
+  Chat: ['id', 'time', 'accountId', 'playerName', 'text', 'channel'],
 };
 
 var USERNAME_RE = /^[a-zA-Z0-9_฀-๿]{3,16}$/;
@@ -81,6 +98,9 @@ function setup() {
     setConfig_('worldSeed', Math.floor(Math.random() * 2147483646) + 1);
     setConfig_('worldCreatedAt', Date.now());
   }
+  // Google Sign-In: ใส่ client id ไว้ใน CFG → เก็บลง Script Properties
+  if (CFG.GOOGLE_CLIENT_ID && CFG.GOOGLE_CLIENT_ID !== googleClientId_()) PropertiesService.getScriptProperties().setProperty('GOOGLE_CLIENT_ID', CFG.GOOGLE_CLIENT_ID);
+  Logger.log(googleClientId_() ? 'เข้าสู่ระบบด้วย Google: เปิด (GOOGLE_CLIENT_ID = ' + googleClientId_() + ')' : 'เข้าสู่ระบบด้วย Google: ปิด (ยังไม่ได้ตั้ง Script Property GOOGLE_CLIENT_ID)');
   // ทดลองความเร็วแฮช (ดูใน "บันทึกการดำเนินการ")
   var t = Date.now();
   hashPassword_('benchmark', 'salt', CFG.HASH_ITER);
@@ -115,7 +135,7 @@ function doPost(e) {
   }
 }
 
-var PUBLIC_ACTIONS = { ping: 1, register: 1, login: 1, verify: 1, resend: 1, forgot: 1, reset: 1 };
+var PUBLIC_ACTIONS = { ping: 1, register: 1, login: 1, verify: 1, resend: 1, forgot: 1, reset: 1, 'auth.google': 1 };
 
 var ACTIONS = {
   ping: function () {
@@ -127,6 +147,8 @@ var ACTIONS = {
   login: login_,
   forgot: forgot_,
   reset: reset_,
+  'auth.google': authGoogle_,
+  'account.setName': accountSetName_,
   'email.attach': emailAttach_,
   'email.confirm': emailConfirm_,
   logout: logout_,
@@ -147,6 +169,8 @@ var ACTIONS = {
   'market.claim': marketClaim_,
   'leaderboard.get': leaderboardGet_,
   'leaderboard.submit': leaderboardSubmit_,
+  'chat.post': chatPost_,
+  'chat.get': chatGet_,
 };
 
 function route_(req) {
@@ -378,6 +402,177 @@ function emailConfirm_(req, acc) {
   });
 }
 
+// ---------- เข้าสู่ระบบด้วย Google
+
+var GOOGLE_ISS = ['accounts.google.com', 'https://accounts.google.com'];
+
+/** client id ของ Google Sign-In: Script Property GOOGLE_CLIENT_ID ก่อน แล้วค่อย CFG */
+function googleClientId_() {
+  var id = '';
+  try {
+    id = PropertiesService.getScriptProperties().getProperty('GOOGLE_CLIENT_ID') || '';
+  } catch (e) {
+    /* อ่านไม่ได้ → ใช้ CFG */
+  }
+  return String(id || CFG.GOOGLE_CLIENT_ID || '').trim();
+}
+
+/**
+ * เข้าสู่ระบบด้วย Google: credential = ID token จากปุ่ม Google (Google Identity Services) → ตรวจกับ Google (tokeninfo) แล้ว
+ *  - บัญชีที่ผูก Google นี้ไว้ (googleSub) → เข้าเลย
+ *  - บัญชีที่ใช้อีเมลเดียวกัน → ผูกให้อัตโนมัติ (Google ยืนยันอีเมลแล้ว) แล้วเข้า
+ *  - ไม่มี → สร้างบัญชีใหม่ ชื่อในเกมชั่วคราวจาก given_name · account.needName = true ให้ผู้เล่นยืนยัน/เปลี่ยนชื่อครั้งเดียว (account.setName)
+ */
+function authGoogle_(req) {
+  var clientId = googleClientId_();
+  if (!clientId) return fail_('ยังไม่ได้เปิดใช้การเข้าสู่ระบบด้วย Google', 'google_off');
+  var cred = String(req.credential || '');
+  // ID token เป็น JWT (base64url 3 ท่อนคั่นด้วยจุด)
+  if (cred.length < 20 || cred.length > 4096 || !/^[A-Za-z0-9_\-.]+$/.test(cred)) return fail_('ข้อมูลจาก Google ไม่ถูกต้อง — ลองใหม่อีกครั้ง', 'invalid');
+  var cache = CacheService.getScriptCache();
+  var failsAll = Number(cache.get('fail:*') || 0);
+  if (failsAll >= CFG.MAX_FAILS_ALL) return fail_('ระบบกำลังถูกลองเข้าสู่ระบบจำนวนมาก — ลองใหม่ในอีกสักครู่', 'rate');
+  var calls = Number(cache.get('gauth:count') || 0);
+  if (calls >= CFG.MAX_GOOGLE) return fail_('มีคนเข้าสู่ระบบเยอะเกินไป ลองใหม่ในอีกสักครู่', 'rate');
+  cache.put('gauth:count', String(calls + 1), CFG.FAIL_WINDOW_SEC);
+  var g = googleTokenInfo_(cred, clientId);
+  if (!g.ok) {
+    if (g.code !== 'google_down') cache.put('fail:*', String(failsAll + 1), CFG.FAIL_WINDOW_SEC);
+    log_('', 'google.fail', g.code + (g.why ? ' ' + g.why : ''));
+    delete g.why;
+    return g;
+  }
+  return withLock_(function () {
+    var sh = sheet_('Accounts');
+    var rows = all_(sh);
+    var bySub = -1;
+    var byEmail = -1;
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][14]) === g.sub) bySub = i;
+      if (String(rows[i][9]).toLowerCase() === g.email) byEmail = i;
+    }
+    var now = Date.now();
+    var k = bySub >= 0 ? bySub : byEmail;
+    if (k >= 0) {
+      var a = accFromRow_(rows[k], k);
+      if (a.banned) return fail_('บัญชีนี้ถูกระงับ', 'banned');
+      if (bySub < 0) {
+        if (a.googleSub) return fail_('อีเมลนี้ผูกกับบัญชี Google อื่นแล้ว — เข้าสู่ระบบด้วยอีเมลและรหัสผ่าน', 'google_linked');
+        sh.getRange(a.row, 15, 1, 1).setValues([[t_(g.sub)]]);
+        if (!a.verified) {
+          // สมัครค้างไว้ยังไม่ยืนยัน: คนตั้งรหัสผ่านอาจไม่ใช่เจ้าของอีเมล → ล้างรหัสผ่านเดิม (ตั้งใหม่ได้ทาง "ลืมรหัสผ่าน")
+          sh.getRange(a.row, 3, 1, 2).setValues([[t_(Utilities.getUuid().replace(/-/g, '')), t_(noPassword_())]]);
+          sh.getRange(a.row, 11, 1, 4).setValues([[true, '', '', 0]]);
+          a.verified = true;
+          a.verifyHash = '';
+        }
+        log_(a.id, 'google.link', '');
+      }
+      sh.getRange(a.row, 6, 1, 1).setValues([[now]]);
+      log_(a.id, 'login', 'google');
+      return newSession_(publicAccount_(a));
+    }
+    var regs = Number(cache.get('reg:count') || 0);
+    if (regs >= CFG.MAX_REGISTER) return fail_('มีคนสมัครเยอะเกินไป ลองใหม่ในอีกสักครู่', 'rate');
+    var name = uniqueName_(googleName_(g), rows);
+    var id = 'acc_' + now.toString(36) + Utilities.getUuid().replace(/-/g, '').slice(0, 6);
+    // verifyHash 'name$<อีเมล>$' = ยังไม่ได้ยืนยันชื่อในเกม (ไม่ใช่รหัส — checkCode_ ไม่รับ)
+    var mark = 'name$' + g.email + '$';
+    sh.appendRow([t_(id), t_(name), t_(Utilities.getUuid().replace(/-/g, '')), t_(noPassword_()), now, now, t_(name), '', false, t_(g.email), true, t_(mark), '', 0, t_(g.sub)]);
+    cache.put('reg:count', String(regs + 1), CFG.FAIL_WINDOW_SEC);
+    log_(id, 'register', 'google ' + name);
+    return newSession_(publicAccount_({ id: id, username: name, createdAt: now, email: g.email, verifyHash: mark }));
+  });
+}
+
+/** ตรวจ ID token กับ Google (tokeninfo ตรวจลายเซ็นให้) แล้วเช็ก aud / iss / exp / email_verified เอง → { ok, sub, email, given, name } */
+function googleTokenInfo_(cred, clientId) {
+  var bad = function (why) {
+    return fail_('เข้าสู่ระบบด้วย Google ไม่สำเร็จ — ลองใหม่อีกครั้ง', 'google_bad', { why: why });
+  };
+  var res;
+  try {
+    res = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(cred), { muteHttpExceptions: true });
+  } catch (e) {
+    log_('', 'google.fetch', String(e && e.message ? e.message : e).slice(0, 200));
+    return fail_('ติดต่อ Google ไม่ได้ ลองใหม่อีกครั้ง', 'google_down');
+  }
+  var status = res.getResponseCode();
+  if (status >= 500) return fail_('ติดต่อ Google ไม่ได้ ลองใหม่อีกครั้ง', 'google_down');
+  var p = null;
+  try {
+    p = JSON.parse(res.getContentText());
+  } catch (e) {
+    /* ไม่ใช่ JSON */
+  }
+  if (status !== 200 || !p || typeof p !== 'object' || p.error) return bad('token ' + status);
+  if (String(p.aud) !== clientId) return bad('aud');
+  if (GOOGLE_ISS.indexOf(String(p.iss)) < 0) return bad('iss');
+  if (!(Number(p.exp) * 1000 > Date.now())) return fail_('หมดเวลายืนยันตัวตนกับ Google — กดปุ่ม Google อีกครั้ง', 'google_expired');
+  if (!isTrue_(p.email_verified)) return fail_('อีเมลของบัญชี Google นี้ยังไม่ได้ยืนยัน — ใช้บัญชีอื่น หรือสมัครด้วยอีเมล', 'google_unverified');
+  var email = normEmail_(p.email);
+  var sub = String(p.sub || '');
+  if (!validEmail_(email)) return bad('email');
+  if (!/^[A-Za-z0-9_-]{1,255}$/.test(sub)) return bad('sub');
+  return ok_({ sub: sub, email: email, given: String(p.given_name || ''), name: String(p.name || '') });
+}
+
+/** รหัสผ่านที่ใช้เข้าไม่ได้ (บัญชี Google) — รอบเป็น 0 → login แฮชด้วยรอบปกติแล้วไม่มีทางตรง */
+function noPassword_() {
+  return 'nopw$0$' + Utilities.getUuid().replace(/-/g, '');
+}
+
+/** ชื่อในเกมชั่วคราวจากชื่อใน Google (given_name → name → ส่วนหน้าอีเมล) ตัดให้เข้ากฎ USERNAME_RE */
+function googleName_(g) {
+  var tries = [g.given, g.name, g.email.split('@')[0]];
+  for (var i = 0; i < tries.length; i++) {
+    var s = String(tries[i] || '').trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_฀-๿]/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 16);
+    if (s.length >= 3) return s;
+  }
+  return 'ผู้รอดชีวิต';
+}
+
+/** ชื่อไม่ซ้ำกับบัญชีอื่น (ไม่สนตัวพิมพ์) — ซ้ำ → ต่อท้ายด้วยตัวเลขสุ่ม (ยาวรวม ≤ 16) */
+function uniqueName_(base, rows) {
+  var taken = {};
+  for (var i = 0; i < rows.length; i++) taken[String(rows[i][1]).toLowerCase()] = 1;
+  if (!taken[base.toLowerCase()]) return base;
+  for (var n = 0; n < 60; n++) {
+    var digits = 2 + Math.floor(n / 15);
+    var d = String(Math.floor(Math.random() * Math.pow(10, digits)));
+    while (d.length < digits) d = '0' + d;
+    var cand = base.slice(0, 16 - digits) + d;
+    if (!taken[cand.toLowerCase()]) return cand;
+  }
+  return base.slice(0, 8) + Date.now().toString(36).slice(-8);
+}
+
+/** ยืนยัน/เปลี่ยนชื่อในเกมของบัญชีที่เพิ่งสร้างด้วย Google — ได้ครั้งเดียว (needName) */
+function accountSetName_(req, acc) {
+  var name = String(req.name || '').trim();
+  if (!USERNAME_RE.test(name)) return fail_('ชื่อในเกม 3–16 ตัว (ไทย/อังกฤษ/ตัวเลข/_ ไม่มีเว้นวรรค)', 'invalid');
+  return withLock_(function () {
+    var a = accountById_(acc.id);
+    if (!a) return fail_('ไม่พบบัญชี', 'auth');
+    if (a.verifyHash.split('$')[0] !== 'name') return fail_('ตั้งชื่อในเกมไปแล้ว', 'name_set');
+    var lname = name.toLowerCase();
+    var rows = all_(sheet_('Accounts'));
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i][0]) !== a.id && String(rows[i][1]).toLowerCase() === lname) return fail_('ชื่อในเกมนี้มีคนใช้แล้ว', 'taken');
+    }
+    var sh = sheet_('Accounts');
+    sh.getRange(a.row, 2, 1, 1).setValues([[t_(name)]]);
+    sh.getRange(a.row, 7, 1, 1).setValues([[t_(name)]]);
+    sh.getRange(a.row, 12, 1, 3).setValues([['', '', 0]]);
+    // แคช token ของเครื่องนี้ยังจำชื่อเดิม → ล้าง
+    CacheService.getScriptCache().remove('tok:' + sha256_(String(req.token)));
+    log_(a.id, 'account.setName', name);
+    a.username = name;
+    a.verifyHash = '';
+    return ok_({ account: publicAccount_(a) });
+  });
+}
+
 // ---------- ตัวช่วยบัญชี/อีเมล
 
 function normEmail_(s) {
@@ -408,6 +603,7 @@ function accFromRow_(r, i) {
     row: i + 2, id: String(r[0]), username: String(r[1]), salt: String(r[2]), hash: String(r[3]), createdAt: Number(r[4]),
     playerName: String(r[6] || ''), character: String(r[7] || ''), banned: isTrue_(r[8]),
     email: String(r[9] || '').toLowerCase(), verified: isTrue_(r[10]), verifyHash: String(r[11] || ''), verifyExp: Number(r[12]) || 0, verifyTries: Number(r[13]) || 0,
+    googleSub: String(r[14] || ''),
   };
 }
 
@@ -417,9 +613,9 @@ function accountByEmail_(email) {
   return null;
 }
 
-/** ข้อมูลบัญชีที่ส่งให้ client (username = ชื่อในเกม/ชื่อผู้ใช้เดิม · needEmail = บัญชีเก่าที่ยังไม่ผูกอีเมล) */
+/** ข้อมูลบัญชีที่ส่งให้ client (username = ชื่อในเกม/ชื่อผู้ใช้เดิม · needEmail = บัญชีเก่าที่ยังไม่ผูกอีเมล · needName = บัญชี Google ที่ยังไม่ยืนยันชื่อในเกม) */
 function publicAccount_(a) {
-  return { id: a.id, username: a.username, createdAt: a.createdAt, email: a.email, needEmail: !a.email };
+  return { id: a.id, username: a.username, createdAt: a.createdAt, email: a.email, needEmail: !a.email, needName: String(a.verifyHash || '').indexOf('name$') === 0 };
 }
 
 /** รหัส 6 หลักจาก UUID สุ่ม (48 บิต) */
@@ -785,7 +981,8 @@ function worldHeartbeat_(req, acc) {
     sh.getRange(r, 5, 1, 2).setValues([[level, power]]);
     sh.getRange(r, 8, 1, 2).setValues([[Date.now(), req.alive !== false]]);
   }
-  return ok_({ players: players_(), joined: r > 0 });
+  // บอกข้อความแชทล่าสุดไปด้วย — client จะได้รู้ว่าควร chat.get หรือยัง (อ่านจากแคช ไม่แตะชีตเพิ่ม)
+  return ok_({ players: players_(), joined: r > 0, chat: chatLatest_() });
 }
 
 // ------------------------------------------------------------------ ตลาด (แผงบนเกาะกลาง)
@@ -922,6 +1119,101 @@ function leaderboardSubmit_(req, acc) {
   var res = r > 0 ? write(r) : withLock_(function () { return write(findRow_(sh, 1, acc.id)); });
   CacheService.getScriptCache().remove('leaderboard');
   return res;
+}
+
+// ------------------------------------------------------------------ แชทโลก
+
+/** คำหยาบขั้นพื้นฐาน → แทนด้วย * (เติมได้) */
+var CHAT_BAD_RE = /เหี้ย|ควย|สัส|fuck|shit/gi;
+
+/** ข้อความแชท: ช่องว่าง/ขึ้นบรรทัดติดกัน → เว้นวรรคเดียว · ตัดอักขระควบคุม + < > · trim */
+function cleanChat_(s) {
+  return String(s === undefined || s === null ? '' : s).replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f<>]/g, '').trim();
+}
+
+function chatMsg_(r) {
+  return { id: String(r[0]), time: Number(r[1]) || 0, accountId: String(r[2]), name: String(r[3] || ''), text: String(r[4] || ''), channel: String(r[5] || 'world') };
+}
+
+/** CHAT_PAGE ข้อความท้ายสุดจากชีต (เก่า→ใหม่) — อ่านเฉพาะแถวท้าย ไม่ดึงทั้งชีต */
+function chatRead_(sh) {
+  var n = sh.getLastRow() - 1;
+  if (n <= 0) return [];
+  var count = Math.min(n, CFG.CHAT_PAGE);
+  return sh.getRange(2 + n - count, 1, count, HEADERS.Chat.length).getValues().map(chatMsg_);
+}
+
+/** ข้อความล่าสุดจากแคช (CHAT_CACHE_SEC วิ) — chat.get ส่วนใหญ่จึงไม่แตะชีตเลย */
+function chatRecent_() {
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get('chat:recent');
+  if (hit) return JSON.parse(hit);
+  var list = chatRead_(sheet_('Chat'));
+  cache.put('chat:recent', JSON.stringify(list), CFG.CHAT_CACHE_SEC);
+  return list;
+}
+
+function chatLatest_() {
+  var list = chatRecent_();
+  var last = list.length ? list[list.length - 1] : null;
+  return { latestId: last ? last.id : '', latest: last ? last.time : 0 };
+}
+
+/**
+ * ส่งข้อความ: text (1–CHAT_MAX_LEN หลังตัดแต่ง) · playerName (ชื่อในเกมล่าสุด ไม่ส่ง = ชื่อในบัญชี) · channel ('world')
+ * จำกัดต่อบัญชีด้วย CacheService: เว้น CHAT_GAP_SEC วิระหว่างข้อความ · ≤ CHAT_PER_MIN ต่อนาที (หน้าต่างคงที่นับจากข้อความแรก)
+ * lock เฉพาะตอนเขียน (time ไม่ซ้ำและเพิ่มขึ้นเสมอ → id เรียงตามเวลาได้ · client ใช้ `since` = time ที่เห็นล่าสุด)
+ */
+function chatPost_(req, acc) {
+  var text = cleanChat_(req.text);
+  if (!text) return fail_('พิมพ์ข้อความก่อนส่ง', 'invalid');
+  if (text.length > CFG.CHAT_MAX_LEN) return fail_('ข้อความยาวเกิน ' + CFG.CHAT_MAX_LEN + ' ตัวอักษร', 'too_long');
+  var channel = String(req.channel || 'world');
+  if (channel !== 'world') return fail_('ไม่รู้จักช่องแชท', 'invalid');
+  var cache = CacheService.getScriptCache();
+  var now = Date.now();
+  var gapKey = 'chatgap:' + acc.id;
+  if (cache.get(gapKey)) return fail_('ส่งเร็วเกินไป — รอ ' + CFG.CHAT_GAP_SEC + ' วินาที', 'rate', { wait: CFG.CHAT_GAP_SEC });
+  var minKey = 'chatmin:' + acc.id;
+  var win = String(cache.get(minKey) || '0|' + now).split('|');
+  var count = Number(win[0]) || 0;
+  var start = Number(win[1]) || now;
+  if (now - start >= 60000) {
+    count = 0;
+    start = now;
+  }
+  if (count >= CFG.CHAT_PER_MIN) {
+    var wait = Math.ceil((start + 60000 - now) / 1000);
+    return fail_('ส่งข้อความบ่อยเกินไป — พัก ' + wait + ' วินาที', 'rate', { wait: wait });
+  }
+  cache.put(gapKey, '1', CFG.CHAT_GAP_SEC);
+  cache.put(minKey, (count + 1) + '|' + start, 120);
+  var name = cleanName_(req.playerName) || acc.playerName || acc.username;
+  var masked = text.replace(CHAT_BAD_RE, function (m) { return '*'.repeat(m.length); });
+  return withLock_(function () {
+    var sh = sheet_('Chat');
+    var last = sh.getLastRow();
+    var time = Date.now();
+    if (last > 1) {
+      var prev = Number(sh.getRange(last, 2, 1, 1).getValues()[0][0]) || 0;
+      if (time <= prev) time = prev + 1;
+    }
+    var row = ['C' + time.toString(36), time, acc.id, name, masked, channel];
+    sh.appendRow(row.map(function (v, i) { return i === 1 ? v : t_(v); }));
+    // เก็บไม่เกิน CHAT_MAX แถว (ลบทีละ 200 แถวเก่าสุด)
+    if (last > CFG.CHAT_MAX + 200) sh.deleteRows(2, 200);
+    cache.put('chat:recent', JSON.stringify(chatRead_(sh)), CFG.CHAT_CACHE_SEC);
+    return ok_({ message: chatMsg_(row) });
+  });
+}
+
+/** since = time ของข้อความที่เห็นล่าสุด (0 = เอาทั้งหมด) → ข้อความที่ใหม่กว่า ≤ CHAT_PAGE ข้อความ เก่า→ใหม่ + serverTime (ให้ client เทียบนาฬิกา) */
+function chatGet_(req) {
+  var since = Number(req.since) || 0;
+  var channel = String(req.channel || 'world');
+  var list = chatRecent_();
+  var out = list.filter(function (m) { return m.time > since && m.channel === channel; });
+  return ok_({ messages: out, serverTime: Date.now(), latest: list.length ? list[list.length - 1].time : 0 });
 }
 
 // ------------------------------------------------------------------ ตัวช่วย

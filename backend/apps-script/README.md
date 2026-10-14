@@ -1,14 +1,72 @@
 # ตั้งค่าเซิร์ฟเวอร์เกม (Google Sheet + Apps Script)
 
-เซิร์ฟเวอร์ของ Survivor Isles (ชื่อเดิม LAST PIXEL) คือ Google Sheet หนึ่งไฟล์ที่มีโค้ด Apps Script ติดอยู่ ชีตนี้เก็บบัญชีผู้เล่น เซฟเกม แผนที่โลก ตลาด และตารางอันดับ ทำให้เล่นต่อจากเครื่องไหนก็ได้ บัญชีใช้ **อีเมล + รหัสผ่าน** และยืนยันอีเมลด้วยรหัส 6 หลักที่เซิร์ฟเวอร์ส่งผ่าน Gmail ของเจ้าของชีต (MailApp)
+เซิร์ฟเวอร์ของ Survivor Isles (ชื่อเดิม LAST PIXEL) คือ Google Sheet หนึ่งไฟล์ที่มีโค้ด Apps Script ติดอยู่ ชีตนี้เก็บบัญชีผู้เล่น เซฟเกม แผนที่โลก ตลาด และตารางอันดับ ทำให้เล่นต่อจากเครื่องไหนก็ได้ บัญชีใช้ **อีเมล + รหัสผ่าน** และยืนยันอีเมลด้วยรหัส 6 หลักที่เซิร์ฟเวอร์ส่งผ่าน Gmail ของเจ้าของชีต (MailApp) · เปิดปุ่ม **"Sign in with Google"** เพิ่มได้ (ดู [ตั้งค่า Google Sign-In](#-ตั้งค่า-google-sign-in-ปุ่มเข้าสู่ระบบด้วย-google))
 
 ใช้บัญชี Google ธรรมดาได้ ไม่เสียเงิน ทำครั้งเดียวประมาณ 10 นาที
 
 > ไฟล์ในโฟลเดอร์นี้
 > - `Code.gs` โค้ดเซิร์ฟเวอร์ทั้งหมด
-> - `appsscript.json` การตั้งค่าโปรเจกต์ (เขตเวลาไทย การเปิดเป็นเว็บแอป และสิทธิ์ที่ใช้: แก้ชีต + ส่งอีเมล)
+> - `appsscript.json` การตั้งค่าโปรเจกต์ (เขตเวลาไทย การเปิดเป็นเว็บแอป และสิทธิ์ที่ใช้: แก้ชีต + ส่งอีเมล + เชื่อมต่อบริการภายนอก — ใช้ถาม Google ว่าการเข้าสู่ระบบด้วย Google ถูกต้องไหม)
 
 ---
+
+## 🔑 ตั้งค่า Google Sign-In (ปุ่มเข้าสู่ระบบด้วย Google)
+
+ผู้เล่นกดปุ่ม **"ลงชื่อเข้าใช้ด้วย Google"** บนหน้าแรกได้ ไม่ต้องตั้งรหัสผ่านหรือรอรหัสทางอีเมล · คนที่มีบัญชีอีเมลอยู่แล้วกดปุ่ม Google ด้วยอีเมลเดียวกัน = ผูกเข้าบัญชีเดิมให้เอง · คนใหม่ได้บัญชีใหม่แล้วเกมให้ยืนยันชื่อในเกมหนึ่งครั้ง
+ถ้าไม่ทำขั้นตอนนี้ เกมไม่มีปุ่ม Google (สมัคร/เข้าด้วยอีเมลได้ตามเดิม) · ทำครั้งเดียวประมาณ 15 นาที ไม่เสียเงิน
+
+**ก. สร้าง Client ID ใน Google Cloud Console** (ใช้บัญชี Google เจ้าของเกม)
+1. เปิด https://console.cloud.google.com/ → แถบบนสุด กดช่องเลือกโปรเจกต์ → **โปรเจกต์ใหม่** (New project) → ชื่อ `Survivor Isles` → **สร้าง** แล้วเลือกโปรเจกต์นี้
+2. เมนูซ้าย **API และบริการ → หน้าจอขอความยินยอม OAuth** (APIs & Services → OAuth consent screen · คอนโซลรุ่นใหม่ชื่อ **Google Auth Platform**) → **เริ่มต้นใช้งาน** (Get started)
+   - **ชื่อแอป** (App name): `Survivor Isles`
+   - **อีเมลสนับสนุนผู้ใช้** (User support email): เลือกอีเมลของคุณ
+   - **กลุ่มเป้าหมาย** (Audience / User type): **ภายนอก** (External)
+   - **ข้อมูลติดต่อ** (Developer contact): อีเมลของคุณ → ติ๊กยอมรับนโยบาย → **สร้าง**
+   - ไปที่ **กลุ่มเป้าหมาย** (Audience) → กด **เผยแพร่แอป** (Publish app) → ยืนยัน — ถ้าค้างไว้ที่ "การทดสอบ" (Testing) จะเข้าได้เฉพาะอีเมลที่เพิ่มเป็นผู้ทดสอบ (เกมขอแค่ชื่อ อีเมล รูปโปรไฟล์ ซึ่ง Google ไม่ต้องตรวจแอป)
+3. เมนู **ไคลเอ็นต์** (Clients) หรือ **API และบริการ → ข้อมูลเข้าสู่ระบบ → + สร้างข้อมูลเข้าสู่ระบบ → รหัสไคลเอ็นต์ OAuth** (Credentials → Create credentials → OAuth client ID)
+   - **ประเภทแอปพลิเคชัน** (Application type): **เว็บแอปพลิเคชัน** (Web application)
+   - **ชื่อ**: `Survivor Isles เว็บ` (อะไรก็ได้)
+   - **ต้นทาง JavaScript ที่ได้รับอนุญาต** (Authorized JavaScript origins) กด **+ เพิ่ม URI** ใส่ทีละบรรทัด (พิมพ์ให้ตรง ไม่มี `/` ท้าย ไม่มี `/last-pixel`):
+     - `https://ai-appsheet.github.io`
+     - `http://localhost:5173`
+     - `http://localhost` (Google แนะนำให้ใส่คู่กับพอร์ตตอนทดสอบในเครื่อง)
+   - **URI การเปลี่ยนเส้นทางที่ได้รับอนุญาต** (Authorized redirect URIs): **เว้นว่าง**
+   - กด **สร้าง** → คัดลอก **รหัสไคลเอ็นต์** (Client ID) หน้าตาแบบ `1234567890-abcdefg.apps.googleusercontent.com` (ไม่ต้องใช้ "รหัสลับไคลเอ็นต์" / Client secret)
+
+**ข. ใส่ Client ID ให้เกม (GitHub)**
+1. repo บน GitHub → **Settings → Secrets and variables → Actions** → แท็บ **Variables** → **New repository variable**
+2. Name: `GOOGLE_CLIENT_ID` · Value: วาง Client ID → **Add variable**
+
+**ค. ใส่ Client ID ให้เซิร์ฟเวอร์ (Apps Script)**
+1. เปิดชีต `LastPixel-DB` → **ส่วนขยาย → Apps Script** → วาง `Code.gs` และ `appsscript.json` ใหม่ทั้งไฟล์ → 💾 บันทึก (เหมือน "แก้โค้ดแล้วต้องทำอะไร")
+2. ⚙ **การตั้งค่าโปรเจกต์** (Project Settings) → เลื่อนลงล่างสุด **พร็อพเพอร์ตี้ของสคริปต์** (Script Properties) → **เพิ่มพร็อพเพอร์ตี้ของสคริปต์** → พร็อพเพอร์ตี้ `GOOGLE_CLIENT_ID` · ค่า: วาง Client ID (ค่าเดียวกับข้อ ข.) → **บันทึกพร็อพเพอร์ตี้ของสคริปต์**
+   (อีกทาง: ใส่ใน `CFG.GOOGLE_CLIENT_ID` ใน Code.gs แล้วรัน `setup` — setup จะคัดลอกไปเป็น Script Property ให้)
+3. กลับไป **เครื่องมือแก้ไข** → เลือกฟังก์ชัน **`setup`** → ▶ **เรียกใช้**
+   - Google จะ **ขอสิทธิ์ใหม่** ข้อ **"เชื่อมต่อกับบริการภายนอก"** (Connect to an external service) → **ตรวจสอบสิทธิ์** → เลือกบัญชี → **ขั้นสูง** → **ไปที่ … (ไม่ปลอดภัย)** → **อนุญาต** — สิทธิ์นี้ใช้ถาม Google (`oauth2.googleapis.com/tokeninfo`) ว่า token ที่ผู้เล่นส่งมาถูกต้องไหม ไม่ได้ส่งข้อมูลไปที่อื่น
+   - บันทึกการดำเนินการต้องขึ้น `ชีต Accounts: เพิ่มคอลัมน์ googleSub (ข้อมูลเดิมอยู่ครบ)` และ `เข้าสู่ระบบด้วย Google: เปิด (GOOGLE_CLIENT_ID = …)`
+4. **ทำให้ใช้งานได้ → จัดการการทำให้ใช้งานได้** → ✏ → **เวอร์ชัน: เวอร์ชันใหม่** → **ทำให้ใช้งานได้** (URL เดิม)
+
+**ง. build เว็บใหม่** — แท็บ **Actions** → **Deploy to GitHub Pages** → **Run workflow** (หรือ push โค้ด) · รันในเครื่อง: ใส่ `NEXT_PUBLIC_GOOGLE_CLIENT_ID=<Client ID>` ใน `.env.local` แล้วเปิด `npm run dev` ใหม่ (ปุ่ม Google ใช้กับ Apps Script จริงเท่านั้น — `npm run mock-api` รับแต่ token ปลอมของเทสต์)
+
+**จ. ทดสอบ** เปิดเกม → หน้าเข้าสู่ระบบมีปุ่มสีฟ้า **"ลงชื่อเข้าใช้ด้วย Google"** → เลือกบัญชี → บัญชีใหม่ขึ้นหน้า **"ตั้งชื่อในเกม"** → ยืนยัน → เข้าเกาะ · ในชีต `Accounts` แถวนั้นมีค่าในคอลัมน์ `googleSub`
+
+| อาการ | แก้ |
+|---|---|
+| ไม่มีปุ่ม Google | ยังไม่ได้ตั้ง Variable `GOOGLE_CLIENT_ID` บน GitHub หรือยังไม่ได้ build ใหม่ · เล่นแบบออฟไลน์ (ไม่มี `API_URL`) ก็ไม่มีปุ่ม |
+| กดปุ่มแล้ว Google ขึ้น `origin_mismatch` / "The given origin is not allowed" | ข้อ ก.3 ต้นทาง JavaScript ไม่ตรง (ต้องเป็น `https://ai-appsheet.github.io` เป๊ะ) · แก้แล้วรอ 5 นาที–ไม่กี่ชั่วโมงให้ Google อัปเดต |
+| เลือกบัญชีแล้วขึ้น "Access blocked" / เข้าได้แค่บางคน | หน้าจอขอความยินยอมยังเป็น "การทดสอบ" → ข้อ ก.2 กด **เผยแพร่แอป** |
+| เกมขึ้น "ยังไม่ได้เปิดใช้การเข้าสู่ระบบด้วย Google" | ยังไม่ได้ตั้ง Script Property `GOOGLE_CLIENT_ID` (ข้อ ค.2) หรือยังไม่ได้ deploy เวอร์ชันใหม่ |
+| เกมขึ้น "เข้าสู่ระบบด้วย Google ไม่สำเร็จ" ทุกครั้ง | Client ID บน GitHub กับใน Script Property ไม่ตรงกัน · ดูชีต `Log` แถว `google.fail` (`aud` = client id ไม่ตรง) |
+| ขึ้น "อีเมลนี้ผูกกับบัญชี Google อื่นแล้ว" | บัญชีนั้นผูกกับบัญชี Google คนละอันไว้แล้ว — ถ้าเป็นเจ้าของจริง ลบค่าในช่อง `googleSub` ของแถวนั้นแล้วให้กดใหม่ |
+
+## ⚡ อัปเดตเพิ่มแชทโลก (เซิร์ฟเวอร์ที่ใช้อยู่แล้ว ~2 นาที)
+
+ข้อมูลเดิมไม่หาย URL เดิมไม่เปลี่ยน · ถ้าไม่ทำ เกมเวอร์ชันใหม่จะขึ้น "แชทต้องออนไลน์"/ส่งไม่สำเร็จ ส่วนอื่นเล่นได้ปกติ
+
+1. เปิดชีต `LastPixel-DB` → **ส่วนขยาย → Apps Script** → คลิก `Code.gs` → ลบโค้ดเดิมทั้งหมด → วาง `backend/apps-script/Code.gs` ใหม่ทั้งไฟล์ → 💾 บันทึก
+2. ช่องเลือกฟังก์ชันด้านบน เลือก **`setup`** → ▶ **เรียกใช้** — จะได้ชีต **`Chat`** ใบใหม่ (`id, time, accountId, playerName, text, channel`) ชีตอื่นไม่ถูกแตะ (ไม่ขอสิทธิ์เพิ่ม)
+3. **ทำให้ใช้งานได้ → จัดการการทำให้ใช้งานได้** → ✏ ที่รายการเดิม → **เวอร์ชัน: เวอร์ชันใหม่** → **ทำให้ใช้งานได้** (URL เดิม)
+4. ทดสอบ: เข้าเกม → แผง 💬 มุมซ้ายล่าง (มือถือ: ปุ่ม 💬 ใต้แผงสถานะ) → พิมพ์แล้ว Enter → ข้อความขึ้นในชีต `Chat`
 
 ## ⚡ อัปเดตเซิร์ฟเวอร์ที่ใช้อยู่แล้วเป็นระบบอีเมล (ทำครั้งเดียว ~5 นาที)
 
@@ -105,10 +163,13 @@
 | แบนผู้เล่น | ชีต `Accounts` ช่อง `banned` ของคนนั้นพิมพ์ `TRUE` (มีผลภายใน 10 นาที) |
 | ผู้เล่นไม่ได้รับอีเมลรหัส | ให้ดูโฟลเดอร์สแปมก่อน · ยืนยันให้เองได้: ชีต `Accounts` ช่อง `verified` พิมพ์ `TRUE` แล้วให้เขาเข้าสู่ระบบใหม่ · ดูชีต `Log` หา `mail.fail` (โควตาเต็ม/ส่งไม่ได้) |
 | เปลี่ยนอีเมลของบัญชี | แก้ช่อง `email` (ตัวพิมพ์เล็ก ห้ามซ้ำกับบัญชีอื่น) · ช่องว่าง = กลับเป็นบัญชีแบบเก่าที่เข้าด้วยชื่อผู้ใช้แล้วให้ผูกอีเมลใหม่ |
+| ผู้เล่นที่สมัครด้วย Google อยากใช้รหัสผ่านด้วย | ให้กด "ลืมรหัสผ่าน?" ด้วยอีเมล Google นั้น → ตั้งรหัสผ่านใหม่ → เข้าได้ทั้งสองทาง |
+| ยกเลิกการผูก Google ของบัญชี | ลบค่าในช่อง `googleSub` (กดปุ่ม Google ด้วยอีเมลเดิมอีกครั้งจะผูกใหม่ให้เอง) |
 | บัญชีสมัครค้างไม่ยืนยัน | ไม่ต้องทำอะไร — เกิน 1 วันแล้วมีคนสมัครด้วยอีเมล/ชื่อเดียวกัน ระบบลบแถวค้างให้เอง (ลบแถวเองก็ได้ถ้า `verified` ไม่ใช่ `TRUE`) |
 | ลบเกาะคนที่เลิกเล่น | ลบแถวของคนนั้นในชีต `World` (ช่องเกาะจะว่างให้คนใหม่) |
 | รีเซ็ตโลกใหม่ทั้งหมด | ลบแถว `worldSeed` ในชีต `Config` + ลบแถวข้อมูลใน `World` `Saves` แล้วรัน `setup` อีกครั้ง (เซฟเดิมจะใช้ไม่ได้ เพราะเกาะถูกสร้างจาก seed) |
 | ดูว่าเกิดอะไรขึ้น | ชีต `Log` (สมัคร ยืนยันอีเมล เข้าระบบ ใส่รหัสผิด ลืมรหัสผ่าน ผูกอีเมล ส่งอีเมลไม่สำเร็จ เข้าโลก ซื้อของ error) เก็บล่าสุดประมาณ 3,000 แถว |
+| ดู/ลบข้อความแชท | ชีต `Chat` (ล่าสุดประมาณ 2,000 แถว) ลบแถวที่ไม่เหมาะสมได้เลย (คนอื่นเห็นผลใน ~10 วิ) · คนก่อกวนให้ `banned` ในชีต `Accounts` · เพิ่มคำหยาบที่ `CHAT_BAD_RE` ใน Code.gs |
 
 **ห้ามแก้หัวตาราง (แถวแรก) หรือสลับลำดับคอลัมน์** โค้ดอ่านข้อมูลตามตำแหน่งคอลัมน์ (คอลัมน์ใหม่ต่อท้ายเสมอ `setup` เติมหัวตารางที่ขาดให้เอง)
 
@@ -116,8 +177,17 @@
 
 - **รูปแบบคำขอ**: `POST` ไปที่ URL เว็บแอป body เป็น JSON ส่งแบบ `Content-Type: text/plain;charset=utf-8` (เบราว์เซอร์จะไม่ยิง CORS preflight ซึ่ง Apps Script ตอบไม่ได้) เช่น `{"action":"save.get","token":"t..."}`
 - **คำตอบ**: `{ "ok": true, ... }` หรือ `{ "ok": false, "error": "ข้อความภาษาไทย", "code": "auth" }`
-- **action**: `ping` · บัญชี `register` `verify` `resend` `login` `forgot` `reset` `email.attach` `email.confirm` `logout` `me` · `save.get` `save.put` `save.clear` · `meta.get` `meta.put` · `world.get` `world.join` `world.leave` `world.heartbeat` · `market.list` `market.post` `market.buy` `market.cancel` `market.claim` · `leaderboard.get` `leaderboard.submit` (ทุกอันยกเว้น `ping` `register` `verify` `resend` `login` `forgot` `reset` ต้องมี `token`)
-- **code ที่ใช้บ่อย**: `auth` (token หมดอายุ) · `stale` (มีเซฟใหม่กว่าจากเครื่องอื่น) · `rate` (ลองรหัสผิด/ขอรหัสบ่อยเกิน) · `invalid` · `taken` (ชื่อในเกมซ้ำ) · `email_taken` · `bad_login` · `unverified` · `use_email` · `bad_code` · `expired` · `too_many` · `cooldown` (+ `wait` วินาที) · `mail` · `mail_quota` · `has_email` · `sold` · `full` · `busy` · `too_large`
+- **action**: `ping` · บัญชี `register` `verify` `resend` `login` `forgot` `reset` `auth.google` `account.setName` `email.attach` `email.confirm` `logout` `me` · `save.get` `save.put` `save.clear` · `meta.get` `meta.put` · `world.get` `world.join` `world.leave` `world.heartbeat` · `market.list` `market.post` `market.buy` `market.cancel` `market.claim` · `leaderboard.get` `leaderboard.submit` · แชทโลก `chat.get` `chat.post` (ทุกอันยกเว้น `ping` `register` `verify` `resend` `login` `forgot` `reset` `auth.google` ต้องมี `token`)
+- **code ที่ใช้บ่อย**: `auth` (token หมดอายุ) · `stale` (มีเซฟใหม่กว่าจากเครื่องอื่น) · `rate` (ลองรหัสผิด/ขอรหัสบ่อยเกิน/ส่งแชทถี่เกิน + `wait` วินาที) · `invalid` · `taken` (ชื่อในเกมซ้ำ) · `email_taken` · `bad_login` · `unverified` · `use_email` · `bad_code` · `expired` · `too_many` · `cooldown` (+ `wait` วินาที) · `mail` · `mail_quota` · `has_email` · `sold` · `full` · `busy` · `too_large` · `too_long` (แชทเกิน 140 ตัว) · Google: `google_off` (ยังไม่ตั้ง GOOGLE_CLIENT_ID) `google_bad` `google_expired` `google_unverified` `google_linked` `google_down` `name_set`
+
+**แชทโลก** (ชีต `Chat`)
+
+| action | ส่ง | ได้ |
+|---|---|---|
+| `chat.post` 🔑 | text (1–140 ตัวหลังตัดแต่ง), playerName?, channel? (`world`) | `{ message }` · เซิร์ฟเวอร์ตัดอักขระควบคุม/`<>` รวมช่องว่าง ปิดคำหยาบด้วย `*` · เว้น 2 วิ และ ≤ 20 ข้อความ/นาที/บัญชี → `rate` + `wait` |
+| `chat.get` 🔑 | since (time ของข้อความที่เห็นล่าสุด · 0 = ทั้งหมด), channel? | `{ messages[] (≤ 50 เก่า→ใหม่), serverTime, latest }` — อ่านจากแคช 10 วิ แทบไม่แตะชีต |
+
+`message` = `{ id, time, accountId, name, text, channel }` · `time` ไม่ซ้ำและเพิ่มขึ้นเสมอ (ใช้เป็น `since`) · ชีตเก็บไม่เกิน ~2,200 แถว (ลบ 200 แถวเก่าสุดเมื่อเกิน) · `world.heartbeat` แถม `chat: { latestId, latest }` · เกมโพล `chat.get` ทุก 6 วิ (ซ่อนแท็บ 20 วิ) — 30 คนออนไลน์ ≈ 330 คำขอแชท/นาที (ดู DESIGN.md 10.6)
 
 **บัญชีและอีเมล**
 
@@ -131,8 +201,10 @@
 | `reset` | email, code, password | token ใหม่ · ยืนยันอีเมลให้ด้วย · token เดิมทุกเครื่องใช้ไม่ได้ |
 | `email.attach` 🔑 | email | ส่งรหัสไปที่อีเมลนั้น (บัญชีเก่าที่ยังไม่มีอีเมลเท่านั้น) |
 | `email.confirm` 🔑 | code | account (มี email แล้ว) — ต่อไปต้องเข้าด้วยอีเมล |
+| `auth.google` | credential (ID token จากปุ่ม Google) | token, expiresAt, account เหมือน login · เซิร์ฟเวอร์ถาม Google ที่ `oauth2.googleapis.com/tokeninfo` แล้วเช็ก aud = `GOOGLE_CLIENT_ID`, iss, exp, email_verified · มีบัญชีอีเมลนี้ → ผูกให้ (คอลัมน์ `googleSub`) · ไม่มี → สร้างบัญชีใหม่ (ชื่อชั่วคราวจากชื่อใน Google + `needName: true`) |
+| `account.setName` 🔑 | name | account — ยืนยัน/เปลี่ยนชื่อในเกมของบัญชี Google ใหม่ ได้ครั้งเดียว (`name_set` ถ้าตั้งไปแล้ว) |
 
-`account` = `{ id, username (ชื่อในเกม/ชื่อผู้ใช้เดิม), createdAt, email, needEmail }` · 🔑 = ต้องมี token
+`account` = `{ id, username (ชื่อในเกม/ชื่อผู้ใช้เดิม), createdAt, email, needEmail, needName }` · 🔑 = ต้องมี token
 
 - **กติกา**: อีเมลเก็บตัวพิมพ์เล็ก ห้ามซ้ำ · รหัสผ่านใหม่ 8–64 ตัว มีตัวอักษรและตัวเลข (บัญชีเก่ารหัส 6 ตัวยังเข้าได้) · ชื่อในเกม 3–16 ตัว ไทย/อังกฤษ/ตัวเลข/_ ห้ามซ้ำ (เทียบกับชื่อผู้ใช้เดิมด้วย)
 - **รหัสยืนยัน**: 6 หลัก อายุ 15 นาที ใส่ผิดได้ 5 ครั้ง (ครบแล้วต้องขอใหม่) ขอใหม่ได้ทุก 60 วิต่ออีเมลต่อประเภท ≤ 6 ฉบับ/ชั่วโมง/อีเมล ≤ 40 ฉบับ/10 นาทีทั้งระบบ · ชีตเก็บแค่ `<ประเภท>$<อีเมล>$<SHA-256>` ในช่อง `verifyHash` ไม่เก็บตัวรหัส
@@ -141,4 +213,4 @@
 - **token**: สุ่ม 256 บิต อายุ 30 วัน ชีต `Sessions` เก็บแค่แฮช SHA-256 ของ token (คนเปิดชีตเห็นก็เอาไปใช้ไม่ได้)
 - **เซฟ**: บีบอัดด้วย gzip + base64 แล้วแบ่งช่องละ ≤ 45,000 ตัวอักษร (ช่องของชีตรับได้ 50,000) ลงคอลัมน์ `data_1`, `data_2`, … ของชีต `Saves` เซฟหลังบีบอัดยาวได้สูงสุด 2 ล้านตัวอักษร
 - **ล็อก**: งานที่ชนกันได้ (สมัคร รับช่องเกาะ ซื้อขาย สร้างแถวใหม่) ใช้ `LockService` ทีละคำขอ เช่น สองคนกดซื้อของชิ้นเดียวกัน จะได้แค่คนเดียว
-- **ทดสอบในเครื่อง**: `npm run test:api` จะรัน `Code.gs` ตัวนี้ใน Node (จำลองชีตและ MailApp ในหน่วยความจำ) แล้วทดสอบทุก action รวมสมัคร→ยืนยัน, รหัสผิด/หมดอายุ, รอส่งใหม่, ลืมรหัสผ่าน, บัญชีเก่า→ผูกอีเมล และการเติมคอลัมน์ตอน `setup` · `npm run mock-api` พิมพ์หัวเรื่องอีเมล (มีรหัส) ลง console · action `__mail` `__clock` `__legacy` มีเฉพาะใน mock ไม่มีใน Code.gs
+- **ทดสอบในเครื่อง**: `npm run test:api` จะรัน `Code.gs` ตัวนี้ใน Node (จำลองชีตและ MailApp ในหน่วยความจำ) แล้วทดสอบทุก action รวมสมัคร→ยืนยัน, รหัสผิด/หมดอายุ, รอส่งใหม่, ลืมรหัสผ่าน, บัญชีเก่า→ผูกอีเมล, เข้าสู่ระบบด้วย Google (token ปลอม — mock จำลอง `UrlFetchApp` ไม่ออกเน็ต) และการเติมคอลัมน์ตอน `setup` · `npm run mock-api` พิมพ์หัวเรื่องอีเมล (มีรหัส) ลง console · action `__mail` `__clock` `__legacy` มีเฉพาะใน mock ไม่มีใน Code.gs
