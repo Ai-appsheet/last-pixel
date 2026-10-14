@@ -2,15 +2,14 @@ import Phaser from 'phaser';
 
 /** ภาพประกอบที่สร้างจาก AI (public/art/<name>.jpg) → texture key `art_<name>` */
 export const ART = [
-  'keyart', 'cover', 'intro_1', 'intro_2', 'intro_3', 'intro_4', 'intro_5',
+  // title_bg = ภาพหน้าแรก (ทิวทัศน์หมู่เกาะ + วัดบนหน้าผา + ทีมฮีโร่) · cover/keyart = ภาพปกเดิม (ใช้ในหน้าอื่น)
+  'title_bg', 'keyart', 'cover', 'intro_1', 'intro_2', 'intro_3', 'intro_4', 'intro_5',
   'dungeon_1', 'dungeon_2', 'dungeon_3', 'boss_golem', 'boss_crab', 'boss_demon',
   'death', 'conquest', 'special_island',
   'hz_quake', 'hz_lightning', 'hz_stampede', 'hz_heatwave', 'hz_coldsnap', 'hz_wildfire', 'hz_meteor', 'hz_tsunami',
   'raid_night', 'market_island',
   'cat_weapons', 'cat_gear', 'cat_build', 'cat_boat', 'cat_machine', 'cat_mobs', 'cat_shop', 'cat_elixir',
   'char_mechanic', 'char_medic', 'char_hunter', 'char_farmer', 'char_scout', 'char_shaman', 'char_robot',
-  // ภาพหน้าตัวละคร 160×160 (ครอปจาก char_*) สำหรับแถบตัวละครหน้าแรก
-  'loader/mechanic', 'loader/medic', 'loader/hunter', 'loader/farmer', 'loader/scout', 'loader/shaman', 'loader/robot',
   // การ์ดขึ้นเกาะไบโอมครั้งแรก (isl_<biome>)
   'isl_forest', 'isl_snow', 'isl_desert', 'isl_jungle', 'isl_volcanic', 'isl_ruins',
   'isl_swamp', 'isl_mushroom', 'isl_crystal', 'isl_bamboo', 'isl_savanna', 'isl_glacier', 'isl_atoll', 'isl_haunted',

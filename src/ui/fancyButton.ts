@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { Sfx } from '../core/AudioManager';
+import { quality } from '../core/Quality';
 import { PALETTE } from '../data/palette';
+import { reducedMotion } from './layout';
 import { pixelTxt, txt } from './widgets';
 
 /**
@@ -254,6 +256,8 @@ export interface FancyButtonOptions {
   size?: number;
   /** แสงเรืองเต้นเป็นจังหวะ (ปุ่มหลัก) */
   pulse?: boolean;
+  /** แสงเรืองหายใจช้าๆ จางๆ (ปุ่มหลักหน้าแรก) — ลดการเคลื่อนไหว/คุณภาพต่ำ = เรืองนิ่ง */
+  breathe?: boolean;
   /** ประกายดาวลอยรอบปุ่ม */
   sparkle?: boolean;
   /** แสงวิ้งพาดผ่านเป็นระยะ */
@@ -267,6 +271,8 @@ export class FancyButton extends Phaser.GameObjects.Container {
   private sub?: Phaser.GameObjects.Text;
   private icon?: Phaser.GameObjects.Image;
   private glow: Phaser.GameObjects.Image;
+  /** ความสว่างแสงเรืองตอนปกติ (ไม่ชี้) */
+  private restGlow = 0;
   private shine: Phaser.GameObjects.Sprite;
   private content: Phaser.GameObjects.GameObject[] = [];
   private pulseTween?: Phaser.Tweens.Tween;
@@ -323,6 +329,9 @@ export class FancyButton extends Phaser.GameObjects.Container {
     // แสงเรืองเต้น
     if (opts.pulse && this.enabled) {
       this.pulseTween = scene.tweens.add({ targets: this.glow, alpha: { from: 0.18, to: 0.7 }, duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    } else if (opts.breathe && this.enabled) {
+      if (reducedMotion() || quality() === 'low') this.glow.setAlpha((this.restGlow = 0.3));
+      else this.pulseTween = scene.tweens.add({ targets: this.glow, alpha: { from: 0.12, to: 0.4 }, duration: 2600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     }
     // แสงวิ้งเป็นระยะ
     if (opts.shine && this.enabled) {
@@ -385,7 +394,7 @@ export class FancyButton extends Phaser.GameObjects.Container {
         this.hovered = false;
         this.pressed = false;
         this.applyState('idle');
-        this.glow.setAlpha(0);
+        this.glow.setAlpha(this.restGlow);
         this.pulseTween?.resume();
         scene.tweens.killTweensOf(this);
         scene.tweens.add({ targets: this, scale: 1, duration: 160, ease: 'Sine.easeOut' });

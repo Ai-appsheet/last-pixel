@@ -1,31 +1,13 @@
 'use client';
 import { useEffect, useState } from 'react';
 import './loading.css';
-import PixelText from './PixelText';
 
 /**
  * หน้าโหลด (HTML ล้วน — โผล่ทันทีตั้งแต่เปิดเว็บ ก่อนโค้ดเกมโหลดเสร็จ)
- * สไลด์ภาพบอส/สัตว์ในตำนาน/เกาะ + โลโก้เด้ง + ตัวละคร 7 ตัว + หลอดโหลด + เคล็ดลับ
+ * ภาพ key art นิ่งเต็มจอ (ไม่ซูม/ไม่เลื่อน) + โลโก้ + ชื่อไทย + หลอดโหลด + เคล็ดลับ — เคลื่อนไหวแค่แสงวิ้งช้าๆ บนโลโก้กับหิ่งห้อยไม่กี่ดวง
  * เกมแจ้งความคืบหน้าผ่าน window event 'si:progress' (detail 0..1) และปิดหน้าโหลดด้วย 'si:ready'
  */
 const BASE = `${(process.env.NEXT_PUBLIC_BASE_PATH ?? '').replace(/\/+$/, '')}/art/loader/`;
-
-const SLIDES: { img: string; tag: string; title: string }[] = [
-  { img: 'cover', tag: 'ผจญภัย', title: 'รวมทีมเอาชีวิตรอดบนหมู่เกาะ' },
-  { img: 'boss_demon', tag: 'บอส', title: 'จอมมารเพลิง' },
-  { img: 'legend_frost_dragon', tag: 'สัตว์ในตำนาน', title: 'มังกรน้ำแข็ง' },
-  { img: 'isl_crystal', tag: 'เกาะ', title: 'เกาะคริสตัล' },
-  { img: 'raid_blood_moon', tag: 'คืนอันตราย', title: 'คืนพระจันทร์เลือด' },
-  { img: 'special_island', tag: 'เกาะพิเศษ', title: 'เกาะมหาสมบัติ' },
-  { img: 'legend_phoenix', tag: 'สัตว์ในตำนาน', title: 'หงส์เพลิง' },
-  { img: 'hz_tsunami', tag: 'มหันตภัย', title: 'สึนามิถล่มเกาะ' },
-  { img: 'market_island', tag: 'เกาะกลาง', title: 'ตลาดนัดผู้รอดชีวิต' },
-  { img: 'dungeon_2', tag: 'ดันเจี้ยน', title: 'สุสานใต้ดิน' },
-  { img: 'legend_kraken', tag: 'สัตว์ในตำนาน', title: 'คราเคนยักษ์' },
-  { img: 'boss_crab', tag: 'บอส', title: 'ราชาปูยักษ์' },
-];
-
-const HEROES = ['mechanic', 'medic', 'hunter', 'farmer', 'scout', 'shaman', 'robot'];
 
 const TIPS = [
   'ตีต้นไม้และก้อนหินเพื่อเก็บวัตถุดิบ แล้วกด B เปิดสมุดแปลน',
@@ -38,22 +20,35 @@ const TIPS = [
   'กด Enter เพื่อคุยกับผู้เล่นทั่วโลกในห้องแชท',
 ];
 
-const STEPS = ['เติมน้ำทะเล…', 'ปลูกต้นมะพร้าว…', 'ซ่อนกล่องสมบัติ…', 'ปลุกบอสในถ้ำ…', 'ฝึกปูยักษ์…', 'จุดกองไฟ…', 'เตรียมเรือ…'];
+/** ข้อความสถานะตามช่วงความคืบหน้า (ไม่วนเร็ว — เปลี่ยนตามการโหลดจริง) */
+const status = (p: number) =>
+  p >= 1 ? 'พร้อมแล้ว! ออกเดินทางกัน' : p < 0.3 ? 'กำลังเตรียมหมู่เกาะ…' : p < 0.6 ? 'กำลังโหลดภาพและเสียง…' : p < 0.85 ? 'กำลังสร้างตัวละครและมอนสเตอร์…' : 'เกือบเสร็จแล้ว…';
 
-const LOGO = 'SURVIVOR';
-const LOGO2 = 'ISLES';
+/** หิ่งห้อย: ตำแหน่ง/ความเร็วคงที่ (ไม่สุ่มทุกครั้งที่ render) */
+const FLIES = [
+  { x: 58, y: 62, d: 26, k: 0 },
+  { x: 71, y: 48, d: 31, k: 6 },
+  { x: 84, y: 70, d: 24, k: 11 },
+  { x: 47, y: 78, d: 29, k: 3 },
+  { x: 92, y: 55, d: 34, k: 15 },
+  { x: 64, y: 84, d: 27, k: 9 },
+];
 
 export default function LoadingScreen() {
-  const [slide, setSlide] = useState(0);
   const [tip, setTip] = useState(0);
-  const [step, setStep] = useState(0);
   const [prog, setProg] = useState(0.04);
+  const [shown, setShown] = useState(false);
   const [gone, setGone] = useState(false);
-  // ขนาดพิกเซลของตัวหนังสือ: จอเล็ก/เตี้ย (มือถือแนวนอน) = 2 เท่า, จอคอม = 3 เท่า
-  const [px3, setPx3] = useState(3);
   const [hidden, setHidden] = useState(false);
+  // ตั้งค่าคุณภาพ "ต่ำ" ในเกม (เก็บใน localStorage เดียวกับ src/core/Settings.ts) → งดเอฟเฟกต์ทั้งหมด
+  const [low, setLow] = useState(false);
 
   useEffect(() => {
+    try {
+      setLow(JSON.parse(localStorage.getItem('lastpixel.game.settings.v1') ?? '{}').quality === 'low');
+    } catch {
+      /* อ่านไม่ได้ = ใช้ค่าปกติ */
+    }
     // ระหว่างโหลดโค้ดเกม: หลอดค่อยๆ ขยับเอง (ไม่เกิน 55%) — พอเกมเริ่มจะส่งค่าจริงมาแทน
     let real = 0;
     const fake = setInterval(() => setProg((p) => (real ? p : Math.min(0.55, p + (0.6 - p) * 0.06))), 200);
@@ -61,108 +56,73 @@ export default function LoadingScreen() {
       real = Math.max(real, Number((e as CustomEvent).detail) || 0);
       setProg((p) => Math.max(p, real));
     };
+    // ?loader = ค้างหน้าโหลดไว้ (ไว้ตรวจดีไซน์/ถ่ายภาพหน้าจอ)
+    const hold = new URLSearchParams(location.search).has('loader');
     const onReady = () => {
       setProg(1);
+      if (hold) return;
       setTimeout(() => setGone(true), 250);
-      setTimeout(() => setHidden(true), 1100);
+      setTimeout(() => setHidden(true), 900);
     };
-    const fit = () => setPx3(window.innerWidth < 900 || window.innerHeight < 500 ? 2 : 3);
-    fit();
-    window.addEventListener('resize', fit);
     window.addEventListener('si:progress', onProg);
     window.addEventListener('si:ready', onReady);
-    const s = setInterval(() => setSlide((i) => (i + 1) % SLIDES.length), 3200);
-    const t = setInterval(() => setTip((i) => (i + 1) % TIPS.length), 4200);
-    const st = setInterval(() => setStep((i) => (i + 1) % STEPS.length), 1300);
+    // เคล็ดลับเปลี่ยนทุก 7 วิ (เฟดข้ามนุ่มๆ)
     setTip(Math.floor(Math.random() * TIPS.length));
+    const t = setInterval(() => setTip((i) => (i + 1) % TIPS.length), 7000);
+    // ภาพยังไม่มาก็โชว์ส่วนอื่นได้เลย (กันค้างจอดำถ้าภาพโหลดช้า)
+    const show = setTimeout(() => setShown(true), 1200);
     return () => {
       clearInterval(fake);
-      clearInterval(s);
       clearInterval(t);
-      clearInterval(st);
+      clearTimeout(show);
       window.removeEventListener('si:progress', onProg);
       window.removeEventListener('si:ready', onReady);
-      window.removeEventListener('resize', fit);
     };
   }, []);
 
   if (hidden) return null;
   const pct = Math.round(prog * 100);
-  const cur = SLIDES[slide];
 
   return (
-    <div className={`si-loader${gone ? ' si-gone' : ''}`} aria-busy={!gone} aria-label="กำลังโหลดเกม">
-      {/* สไลด์พื้นหลัง: โหลดเฉพาะภาพปัจจุบัน + ภาพถัดไป */}
-      <div className="si-slides">
-        {SLIDES.map((s, i) => {
-          const near = i === slide || i === (slide + 1) % SLIDES.length || i === 0;
-          return (
-            <div
-              key={s.img}
-              className={`si-slide${i === slide ? ' on' : ''}`}
-              style={near ? { backgroundImage: `url(${BASE}${s.img}.jpg)` } : undefined}
-            />
-          );
-        })}
-      </div>
+    <div className={`si-loader${shown ? ' si-in' : ''}${low ? ' si-low' : ''}${gone ? ' si-gone' : ''}`} aria-busy={!gone} aria-label="กำลังโหลดเกม">
+      <img
+        className="si-art"
+        src={`${BASE}title_bg.jpg`}
+        srcSet={`${BASE}title_bg.jpg 960w, ${BASE}title_bg_hd.jpg 1920w`}
+        sizes="100vw"
+        alt=""
+        onLoad={() => setShown(true)}
+      />
       <div className="si-shade" />
-      <div className="si-sparkles" aria-hidden>
-        {Array.from({ length: 18 }, (_, i) => (
-          <i key={i} style={{ left: `${(i * 53) % 100}%`, animationDelay: `${(i * 0.37) % 4}s`, animationDuration: `${4 + (i % 5)}s` }} />
+      <div className="si-flies" aria-hidden>
+        {FLIES.map((f, i) => (
+          <i key={i} style={{ left: `${f.x}%`, top: `${f.y}%`, animationDuration: `${f.d}s`, animationDelay: `-${f.k}s` }} />
         ))}
       </div>
 
-      <div className="si-top">
+      <header className="si-head">
         <h1 className="si-logo" aria-label="Survivor Isles">
-          <span className="w1">
-            {LOGO.split('').map((c, i) => (
-              <b key={i} style={{ animationDelay: `${i * 0.08}s` }}>{c}</b>
-            ))}
-          </span>
-          <span className="w2">
-            {LOGO2.split('').map((c, i) => (
-              <b key={i} style={{ animationDelay: `${(i + LOGO.length) * 0.08}s` }}>{c}</b>
-            ))}
-          </span>
+          <span className="w1" data-t="SURVIVOR">SURVIVOR</span>
+          <span className="w2" data-t="ISLES">ISLES</span>
         </h1>
-        <p className="si-sub">
-          <PixelText text="เอาชีวิตรอดบนหมู่เกาะ" px={16} scale={px3} color="#fff6d8" color2="#ffcd75" />
-          <br />
-          <PixelText text="สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า" px={12} scale={2} color="#e8ecff" color2="#8ee6ff" shadow="#1a2a5a" />
-        </p>
-      </div>
-
-      <div className="si-caption" key={cur.img}>
-        <span className="si-tag">
-          <PixelText text={cur.tag} px={12} scale={2} color="#ffffff" outline="#5a1f2b" shadow="#5a1f2b" />
-        </span>
-        <span className="si-title">
-          <PixelText text={cur.title} px={14} scale={2} color="#ffffff" color2="#ffe08a" />
-        </span>
-        <span className="si-dots">
-          {SLIDES.map((s, i) => (
-            <em key={s.img} className={i === slide ? 'on' : ''} />
-          ))}
-        </span>
-      </div>
+        <p className="si-sub">เอาชีวิตรอดบนหมู่เกาะ</p>
+        <p className="si-tag">สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า</p>
+      </header>
 
       <div className="si-bottom">
-        <div className="si-heroes" aria-hidden>
-          {HEROES.map((h, i) => (
-            <img key={h} src={`${BASE}${h}.jpg`} alt="" style={{ animationDelay: `${i * 0.12}s` }} />
-          ))}
-        </div>
-        <div className="si-bar">
-          <div className="si-fill" style={{ width: `${pct}%` }}>
-            <img className="si-rider" src={`${BASE}hunter.jpg`} alt="" />
-          </div>
+        <div className="si-row">
+          <span className="si-step">{status(prog)}</span>
           <span className="si-pct">{pct}%</span>
         </div>
-        <div className="si-step">
-          <PixelText text={pct >= 100 ? 'พร้อมแล้ว! ออกเดินทางกัน' : STEPS[step]} px={12} scale={2} color="#ffe9a8" />
+        <div className="si-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+          <div className="si-fill" style={{ transform: `scaleX(${Math.max(0.02, prog)})` }} />
         </div>
-        <div className="si-tip" key={tip}>
-          💡 <b>เคล็ดลับ</b> {TIPS[tip]}
+        <div className="si-tips">
+          {TIPS.map((s, i) => (
+            <p key={i} className={i === tip ? 'on' : ''} aria-hidden={i !== tip}>
+              <b>เคล็ดลับ</b> {s}
+            </p>
+          ))}
         </div>
       </div>
     </div>

@@ -49,7 +49,7 @@ export class BootScene extends Phaser.Scene {
   /** โหลดภาพประกอบ (ไม่มีไฟล์ก็ข้ามได้ เกมยังเล่นได้) */
   preload() {
     // โหลดแค่ภาพหน้าปก/หน้าโหลด ที่เหลือโหลดเบื้องหลังทีหลัง (เข้าเกมได้เร็ว)
-    queueArt(this, ['keyart']);
+    queueArt(this, ['keyart', 'title_bg']);
     report(0.6);
     this.load.on('progress', (v: number) => report(0.6 + v * 0.15));
   }
