@@ -9,6 +9,9 @@ import { TiltPipeline } from '../gfx/TiltPipeline';
 import { coverImage, queueArt } from '../ui/art';
 import { fadeTo } from '../ui/transition';
 
+/** แจ้งหน้าโหลด HTML (app/LoadingScreen.tsx) — ความคืบหน้า 0..1 / พร้อมแล้ว */
+const report = (v: number) => window.dispatchEvent(new CustomEvent('si:progress', { detail: v }));
+
 /** ชุดแฟชั่น (ที่ไม่ใช่ชุดเกราะพื้นฐาน) → ไอเทมที่สุ่มได้จากกล่อง */
 const BASIC = new Set(['tunic', 'leather', 'fur', 'iron', 'gold', 'meteor', 'crab', 'none']);
 
@@ -46,6 +49,8 @@ export class BootScene extends Phaser.Scene {
   preload() {
     // โหลดแค่ภาพหน้าปก/หน้าโหลด ที่เหลือโหลดเบื้องหลังทีหลัง (เข้าเกมได้เร็ว)
     queueArt(this, ['keyart']);
+    report(0.6);
+    this.load.on('progress', (v: number) => report(0.6 + v * 0.15));
   }
 
   create() {
@@ -61,13 +66,17 @@ export class BootScene extends Phaser.Scene {
     if (r.pipelines && !r.pipelines.getPostPipeline('TiltPipeline')) r.pipelines.addPostPipeline('TiltPipeline', TiltPipeline);
     this.time.delayedCall(30, () => {
       buildAllTextures(this);
+      report(0.85);
       registerCostumes(this);
+      report(0.92);
       const fonts = document.fonts
         ? Promise.all([document.fonts.load(`700 16px ${FONT}`), document.fonts.load(`16px ${PIXEL_FONT}`)])
         : Promise.resolve();
       Promise.race([fonts, new Promise((r) => setTimeout(r, 3000))]).finally(() => {
         label.destroy();
         fadeTo(this, 'TitleScene', undefined, 180);
+        // ให้หน้าแรกได้วาดก่อน แล้วค่อยเฟดหน้าโหลดออก
+        setTimeout(() => window.dispatchEvent(new Event('si:ready')), 450);
       });
     });
   }

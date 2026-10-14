@@ -79,6 +79,8 @@ class AudioManagerImpl {
       /* ใช้ค่าเริ่มต้น */
     }
     if (typeof window === 'undefined') return;
+    // ?mute ใน URL = ปิดเสียงทั้งหมด (ใช้ตอนทดสอบระบบ ไม่ให้เพลงหลายแท็บดังซ้อนกัน) — ไม่บันทึกลงการตั้งค่า
+    if (new URLSearchParams(location.search).has('mute')) this.settings.muted = true;
     // โหลดโมดูลซ้ำ (hot reload / เปิดเกมใหม่ในหน้าเดิม) → ปิดเสียงของตัวเก่าให้หมด ไม่ให้เพลงซ้อน/ค้าง
     const w = window as unknown as { __lpAudio?: { shutdown?: () => void } };
     try {

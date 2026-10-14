@@ -1,0 +1,279 @@
+/* หน้าโหลด Survivor Isles — ดู app/LoadingScreen.tsx */
+.si-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow: hidden;
+  background: #0b0d1f;
+  color: #fff;
+  font-family: 'Mitr', 'Itim', Kanit, Thonburi, Tahoma, sans-serif;
+  transition: opacity 0.8s ease, transform 0.8s ease;
+  user-select: none;
+}
+.si-loader.si-gone {
+  opacity: 0;
+  transform: scale(1.04);
+  pointer-events: none;
+}
+
+/* ---------- สไลด์พื้นหลัง (ซูมช้าๆ + เฟดข้าม) ---------- */
+.si-slides,
+.si-slide,
+.si-shade {
+  position: absolute;
+  inset: 0;
+}
+.si-slide {
+  background: #0b0d1f center / cover no-repeat;
+  image-rendering: pixelated;
+  opacity: 0;
+  transform: scale(1.12);
+  transition: opacity 1.1s ease;
+}
+.si-slide.on {
+  opacity: 1;
+  animation: si-kenburns 4.5s ease-out forwards;
+}
+@keyframes si-kenburns {
+  from { transform: scale(1.14) translate(1.5%, 1%); }
+  to { transform: scale(1.02) translate(0, 0); }
+}
+.si-shade {
+  background:
+    radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(11, 13, 31, 0.55) 80%),
+    linear-gradient(to bottom, rgba(11, 13, 31, 0.75) 0%, rgba(11, 13, 31, 0) 28%, rgba(11, 13, 31, 0) 52%, rgba(11, 13, 31, 0.92) 100%);
+}
+
+/* ---------- ประกายดาวลอยขึ้น ---------- */
+.si-sparkles i {
+  position: absolute;
+  bottom: -10px;
+  width: 6px;
+  height: 6px;
+  background: #ffe9a8;
+  box-shadow: 0 0 8px 2px rgba(255, 205, 117, 0.8);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  animation: si-rise linear infinite;
+  opacity: 0;
+}
+@keyframes si-rise {
+  0% { transform: translateY(0) scale(0.6) rotate(0); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translateY(-105vh) scale(1.2) rotate(180deg); opacity: 0; }
+}
+
+/* ---------- โลโก้ ---------- */
+.si-top {
+  position: absolute;
+  top: clamp(10px, 5vh, 48px);
+  left: 0;
+  right: 0;
+  text-align: center;
+  padding: 0 16px;
+}
+.si-logo {
+  margin: 0;
+  font-family: 'Press Start 2P', monospace;
+  font-size: clamp(22px, 5.4vw, 64px);
+  line-height: 1.15;
+  letter-spacing: 0.04em;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 0.5em;
+}
+.si-logo b {
+  display: inline-block;
+  font-weight: normal;
+  animation: si-bounce 2.6s ease-in-out infinite;
+}
+.si-logo .w1 b {
+  color: #ffcd75;
+  text-shadow: 0 3px 0 #b8582c, 0 6px 0 #5a1f2b, 0 0 18px rgba(255, 180, 80, 0.55);
+}
+.si-logo .w2 b {
+  color: #8ee6ff;
+  text-shadow: 0 3px 0 #2a6fb0, 0 6px 0 #1a2a5a, 0 0 18px rgba(110, 200, 255, 0.55);
+}
+@keyframes si-bounce {
+  0%, 70%, 100% { transform: translateY(0); }
+  80% { transform: translateY(-10px) rotate(-3deg); }
+  90% { transform: translateY(2px); }
+}
+.si-sub {
+  margin: 10px 0 0;
+  font-family: 'Mali', 'Mitr', sans-serif;
+  font-weight: 700;
+  font-size: clamp(13px, 1.9vw, 22px);
+  color: #fff6d8;
+  text-shadow: 0 2px 0 #0b0d1f, 0 0 10px rgba(0, 0, 0, 0.8);
+}
+
+/* ---------- ป้ายชื่อสไลด์ ---------- */
+.si-caption {
+  position: absolute;
+  left: clamp(12px, 3vw, 40px);
+  bottom: clamp(150px, 31vh, 250px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  animation: si-pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+@keyframes si-pop {
+  from { transform: translateX(-24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.si-tag {
+  background: linear-gradient(#ff7a6b, #d6404f);
+  border: 2px solid #fff2b0;
+  border-radius: 999px;
+  padding: 2px 12px;
+  font-size: clamp(11px, 1.4vw, 15px);
+  font-weight: 600;
+  box-shadow: 0 3px 0 #5a1f2b;
+}
+.si-title {
+  font-family: 'Mali', 'Mitr', sans-serif;
+  font-weight: 700;
+  font-size: clamp(16px, 2.6vw, 30px);
+  text-shadow: 0 2px 0 #0b0d1f, 0 0 12px rgba(0, 0, 0, 0.9);
+}
+.si-dots {
+  display: flex;
+  gap: 5px;
+  width: 100%;
+}
+.si-dots em {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  transition: all 0.3s;
+}
+.si-dots em.on {
+  width: 22px;
+  border-radius: 4px;
+  background: #ffcd75;
+}
+
+/* ---------- ส่วนล่าง: ตัวละคร + หลอดโหลด + เคล็ดลับ ---------- */
+.si-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(10px, 4vh, 40px);
+  transform: translateX(-50%);
+  width: min(720px, calc(100% - 32px));
+  text-align: center;
+}
+.si-heroes {
+  display: flex;
+  justify-content: center;
+  gap: clamp(4px, 1vw, 10px);
+  margin-bottom: clamp(6px, 1.6vh, 14px);
+}
+.si-heroes img {
+  width: clamp(34px, 6.2vw, 64px);
+  height: clamp(34px, 6.2vw, 64px);
+  border-radius: 50%;
+  border: 3px solid #ffcd75;
+  box-shadow: 0 4px 0 #5a1f2b, 0 0 14px rgba(255, 205, 117, 0.45);
+  background: #2a2f4a;
+  object-fit: cover;
+  animation: si-hop 1.4s ease-in-out infinite;
+}
+@keyframes si-hop {
+  0%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-9px) rotate(-4deg); }
+  60% { transform: translateY(0) rotate(0); }
+}
+.si-bar {
+  position: relative;
+  height: clamp(18px, 3vh, 26px);
+  border-radius: 999px;
+  background: rgba(11, 13, 31, 0.8);
+  border: 3px solid #fff2b0;
+  box-shadow: 0 4px 0 #5a1f2b, inset 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+.si-fill {
+  position: relative;
+  height: 100%;
+  min-width: 18px;
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.22) 0 10px, transparent 10px 20px),
+    linear-gradient(#ffe08a, #ff9f43);
+  background-size: 28px 28px, 100% 100%;
+  animation: si-stripes 0.8s linear infinite;
+  transition: width 0.35s ease;
+}
+@keyframes si-stripes {
+  to { background-position: 28px 0, 0 0; }
+}
+.si-rider {
+  position: absolute;
+  right: -16px;
+  top: 50%;
+  width: clamp(28px, 4.6vh, 40px);
+  height: clamp(28px, 4.6vh, 40px);
+  border-radius: 50%;
+  border: 2px solid #fff;
+  object-fit: cover;
+  transform: translateY(-50%);
+  animation: si-ride 0.5s ease-in-out infinite alternate;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.7);
+}
+@keyframes si-ride {
+  to { transform: translateY(-62%) rotate(6deg); }
+}
+.si-pct {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: 'Press Start 2P', monospace;
+  font-size: clamp(9px, 1.4vh, 12px);
+  color: #fff;
+  text-shadow: 0 1px 0 #0b0d1f, 0 0 4px #0b0d1f;
+}
+.si-step {
+  margin-top: 8px;
+  font-size: clamp(12px, 1.8vh, 16px);
+  color: #ffe9a8;
+  text-shadow: 0 1px 0 #0b0d1f;
+}
+.si-tip {
+  margin: 6px auto 0;
+  max-width: 600px;
+  font-size: clamp(12px, 1.8vh, 15px);
+  line-height: 1.6;
+  color: #e8ecff;
+  background: rgba(11, 13, 31, 0.6);
+  border-radius: 12px;
+  padding: 4px 12px;
+  animation: si-fadein 0.5s ease;
+}
+.si-tip b {
+  color: #8ee6ff;
+  font-weight: 600;
+}
+@keyframes si-fadein {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* จอเตี้ย (มือถือแนวนอน): ย่อส่วนล่าง ซ่อนเคล็ดลับยาว */
+@media (max-height: 430px) {
+  .si-caption { bottom: auto; top: clamp(84px, 26vh, 112px); }
+  .si-tip { display: none; }
+  .si-sub { margin-top: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .si-slide.on,
+  .si-logo b,
+  .si-heroes img,
+  .si-rider,
+  .si-fill,
+  .si-sparkles i { animation: none; }
+}
