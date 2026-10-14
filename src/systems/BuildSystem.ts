@@ -151,6 +151,7 @@ export class BuildSystem {
     }
     const s = this.scene;
     if (!s.creative && !consume(s.buildNeeds(def), s.materials())) return;
+    if (s.freeBuilds.delete(def.id)) EventBus.emit('toast', `🎁 สร้าง${def.name}ฟรีแล้ว (สิทธิ์เริ่มต้น)`, '#a7f070');
     if (def.layer === 'terrain') {
       for (let y = 0; y < def.h; y++) {
         for (let x = 0; x < def.w; x++) {

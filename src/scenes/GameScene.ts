@@ -113,6 +113,8 @@ export class GameScene extends Phaser.Scene {
   introSeen = true;
   /** เลือกแปลนเริ่มต้น (ฐาน 1 + อาวุธ 1) แล้วหรือยัง — เกมใหม่ = false */
   starterPicked = true;
+  /** สิ่งก่อสร้างที่สร้างฟรีได้ 1 ครั้ง (ฐานที่มั่นเริ่มต้น) */
+  freeBuilds = new Set<string>();
   playerName = '';
 
   kills = 0;
@@ -196,6 +198,7 @@ export class GameScene extends Phaser.Scene {
     this.world = new World(this.room.seed, this.room.players, joined.slot, pid);
     this.introSeen = save?.introSeen ?? this.showcase;
     this.starterPicked = save ? save.starterPicked ?? true : this.showcase;
+    this.freeBuilds = new Set(save?.freeBuilds ?? []);
 
     const T = 16;
     const b = this.world.bounds;
@@ -921,6 +924,7 @@ export class GameScene extends Phaser.Scene {
 
   /** วัสดุของแปลนสิ่งก่อสร้าง (หักส่วนลดแล้ว — ยังไม่แตกชิ้นส่วน ใช้กับ planConsume/consume) */
   buildNeeds(def: BuildDef): [string, number][] {
+    if (this.freeBuilds.has(def.id)) return [];
     return def.cost.filter(([, n]) => n > 0).map(([i, n]) => [i, this.costOf(n)] as [string, number]);
   }
 
@@ -983,9 +987,17 @@ export class GameScene extends Phaser.Scene {
     this.learned.add(`b:${baseId}`);
     this.learned.add(`i:${weaponId}`);
     for (const k of [...(base.bonus ?? []), ...(weapon.bonus ?? [])]) this.learned.add(k);
-    this.pinned = `b:${baseId}`;
+    // ง่ายขึ้น: ได้อาวุธทันที (ถือไว้ในมือ + กระสุน) และสร้างฐานที่เลือกได้ฟรี 1 หลัง (ไม่ใช้วัตถุดิบ)
+    const inv = this.player.inventory;
+    inv.add(weaponId, 1);
+    const at = inv.slots.findIndex((s) => s?.id === weaponId);
+    if (at >= 0 && at < HOTBAR_SIZE) this.player.selected = at;
+    const ammo = ITEMS[weaponId]?.ranged?.ammo;
+    if (ammo) inv.add(ammo, 40);
+    this.freeBuilds.add(baseId);
+    this.pinned = null;
     this.starterPicked = true;
-    this.player.inventory.version++;
+    inv.version++;
     this.time.delayedCall(2600, () => this.guide.showControls());
     Sfx.play('achievement');
     this.autosave();
@@ -3507,7 +3519,7 @@ export class GameScene extends Phaser.Scene {
       mailbox: this.daily.mailbox,
       quest: { index: this.quests?.index ?? 0, progress: this.quests?.progress ?? 0 },
       kills: this.kills, counters: this.achievements.counters, visited: [...this.visited],
-      survived: this.disaster.survived, trades: this.market.trades, introSeen: this.introSeen, starterPicked: this.starterPicked, showcase: this.showcase,
+      survived: this.disaster.survived, trades: this.market.trades, introSeen: this.introSeen, starterPicked: this.starterPicked, freeBuilds: [...this.freeBuilds], showcase: this.showcase,
       pinned: this.pinned ?? undefined,
     };
   }

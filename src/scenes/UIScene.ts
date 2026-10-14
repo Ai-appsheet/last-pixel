@@ -32,8 +32,6 @@ import { Foldable, UIWindow } from '../ui/Window';
 import { button, COLORS, heading, panel, SlotView, StatBar, txt, type Button } from '../ui/widgets';
 import { STARTER_BASES, STARTER_WEAPONS, type StarterPick } from '../data/starter';
 import { BUILD } from '../data/buildables';
-import { RECIPES } from '../data/recipes';
-import { rawCostOfBuild, rawCostOfRecipe } from '../systems/CraftingSystem';
 import { SKIN, skinFor } from '../gfx/art/terrain';
 import type { GameScene } from './GameScene';
 
@@ -1892,13 +1890,12 @@ export class UIScene extends Phaser.Scene {
       const art = coverImage(this, 'intro_5', W, H);
       if (art) c.add(art.setAlpha(0.35));
       c.add(heading(this, W / 2, 16, '🗺 เลือกแปลนเริ่มต้น', 30).setOrigin(0.5, 0));
-      c.add(txt(this, W / 2, 56, 'เลือกฐานที่มั่น 1 แบบ และอาวุธ 1 แบบ — ได้แปลนทันที แล้วออกไปหาวัตถุดิบมาสร้าง\nแปลนอื่นๆ หาได้จากกล่องทอง/กล่องเพชร (ล้มบอส · คืนภัยพิบัติ · เกาะมหาสมบัติ)', 13, COLORS.text, { align: 'center', lineSpacing: 4 }).setOrigin(0.5, 0).setStroke('#0b0d1f', 3));
+      c.add(txt(this, W / 2, 56, 'เลือกฐานที่มั่น 1 แบบ และอาวุธ 1 แบบ — ⚔ ได้อาวุธถือในมือทันที · 🏠 สร้างฐานที่มั่นฟรี 1 หลัง (ไม่ใช้วัตถุดิบ)\nกด B → สิ่งก่อสร้าง → เลือกบ้านของคุณ → สร้างเลย แล้ววางบนพื้น', 13, COLORS.text, { align: 'center', lineSpacing: 4 }).setOrigin(0.5, 0).setStroke('#0b0d1f', 3));
       const pick: { base: string | null; weapon: string | null } = { base: null, weapon: null };
       const cw = 210;
       const ch = 150;
       const gap = 14;
       const x0 = (W - (cw * 4 + gap * 3)) / 2;
-      const costText = (list: [string, number][]) => list.map(([id, n]) => `${ITEMS[id]?.name ?? id} ${n}`).join(' · ');
       const frames: Record<'base' | 'weapon', { id: string; f: Phaser.GameObjects.Rectangle }[]> = { base: [], weapon: [] };
       const row = (kind: 'base' | 'weapon', y: number, label: string, list: StarterPick[]) => {
         c.add(txt(this, x0, y, label, 16, COLORS.gold).setStroke('#0b0d1f', 4));
@@ -1907,8 +1904,6 @@ export class UIScene extends Phaser.Scene {
           const cy = y + 24;
           const b = kind === 'base' ? BUILD[o.id] : undefined;
           const it = kind === 'weapon' ? ITEMS[o.id] : undefined;
-          const recipe = it ? RECIPES.find((r) => r.output.item === o.id) : undefined;
-          const raw = b ? rawCostOfBuild(b.cost) : recipe ? rawCostOfRecipe(recipe) : [];
           c.add(this.add.rectangle(x, cy, cw, ch, 0x1a1c2c, 0.92).setOrigin(0));
           const icon = this.add.image(x + cw / 2, cy + 40, b ? b.texture : it!.icon);
           icon.setScale(Math.min(64 / icon.width, 64 / icon.height, 4));
@@ -1920,7 +1915,7 @@ export class UIScene extends Phaser.Scene {
           });
           c.add(txt(this, x + 8, cy + 86, b?.name ?? it!.name, 15, COLORS.gold));
           c.add(txt(this, x + 8, cy + 106, o.pitch, 11, COLORS.text, { wordWrap: { width: cw - 14 } }));
-          c.add(txt(this, x + 8, cy + ch - 16, costText(raw), 10, COLORS.dim, { wordWrap: { width: cw - 14 } }).setOrigin(0, 0.5));
+          c.add(txt(this, x + 8, cy + ch - 16, kind === 'base' ? '🎁 สร้างฟรี 1 หลัง (ไม่ใช้วัตถุดิบ)' : '⚔ ได้ถือในมือทันที', 11, COLORS.good, { wordWrap: { width: cw - 14 } }).setOrigin(0, 0.5));
           const f = this.add.rectangle(x, cy, cw, ch).setOrigin(0).setStrokeStyle(2, 0x566c86, 1);
           frames[kind].push({ id: o.id, f });
           const hit = this.add.zone(x, cy, cw, ch).setOrigin(0).setInteractive({ useHandCursor: true });
@@ -1941,7 +1936,7 @@ export class UIScene extends Phaser.Scene {
         const wName = ITEMS[pick.weapon].name;
         this.gs.pickStarter(pick.base, pick.weapon);
         close();
-        this.banner(`ได้แปลน ${bName} + ${wName}!`, '📌 ปักหมุดฐานไว้แล้ว — ดูวัตถุดิบที่ต้องหาได้ที่มุมจอ · กด B เปิดสมุดแปลน', '#a7f070');
+        this.banner(`ได้ ${wName} + สร้าง${bName}ฟรี!`, `อาวุธอยู่ในมือแล้ว · กด B → สิ่งก่อสร้าง → ${bName} → สร้างเลย (ฟรี 1 หลัง)`, '#a7f070');
       }, true, 15);
       const rnd = button(this, W / 2 - 140, H - 34, 160, 42, '🎲 สุ่มให้', () => {
         pick.base = Phaser.Utils.Array.GetRandom(STARTER_BASES).id;

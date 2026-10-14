@@ -53,6 +53,8 @@ export interface RunSave {
   introSeen: boolean;
   /** เลือกแปลนเริ่มต้นแล้ว (เซฟเก่าไม่มี = ถือว่าเลือกแล้ว) */
   starterPicked?: boolean;
+  /** สร้างฟรีได้ 1 ครั้ง (ฐานเริ่มต้น) */
+  freeBuilds?: string[];
   showcase?: boolean;
   /** แปลนที่ปักหมุดไว้ (b:<id> / r:<recipeId>) */
   pinned?: string;
