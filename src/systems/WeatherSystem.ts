@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { Sfx } from '../core/AudioManager';
 import { EventBus } from '../core/EventBus';
 import type { GameScene } from '../scenes/GameScene';
+import { qualityKnobs } from '../core/Quality';
 
 export type Weather = 'clear' | 'rain' | 'storm';
 
@@ -21,6 +22,8 @@ export class WeatherSystem {
   intensity = 0;
   private timer = 120;
   private drops: Drop[] = [];
+  /** ภาพเม็ดฝน/หิมะที่หมดอายุ เก็บไว้ใช้ซ้ำ (ไม่สร้าง/ทำลายหลายร้อยชิ้นต่อวินาที — มือถือกระตุกเพราะ GC) */
+  private pool: Phaser.GameObjects.Image[] = [];
   private lightning = 8;
 
   constructor(private scene: GameScene) {}
@@ -66,18 +69,24 @@ export class WeatherSystem {
       kind = 'sand';
       want = 14;
     } else want = this.intensity * 160;
+    // คุณภาพกลาง/ต่ำ: เม็ดน้อยลง
+    want = Math.round(want * qualityKnobs().weather);
     while (this.drops.length < want) this.drops.push(this.spawn(kind, view));
+    const splashes = qualityKnobs().particles >= 0.6;
     this.drops = this.drops.filter((d) => {
       d.life -= dt;
       d.img.x += d.vx * dt;
       d.img.y += d.vy * dt;
       if (d.life <= 0 || this.drops.length > want + 10) {
-        if (kind === 'rain' && d.life <= 0 && Math.random() < 0.3) this.splash(d.img.x, d.img.y);
-        d.img.destroy();
+        if (kind === 'rain' && splashes && d.life <= 0 && Math.random() < 0.3) this.splash(d.img.x, d.img.y);
+        d.img.setVisible(false);
+        this.pool.push(d.img);
         return false;
       }
       return true;
     });
+    // ไม่มีฝนนานๆ → คืนหน่วยความจำ
+    if (!want && this.pool.length) this.pool.splice(0).forEach((i) => i.destroy());
 
     // ฟ้าผ่า
     if (this.state === 'storm' && biome !== 'desert' && biome !== 'snow') {
@@ -94,15 +103,16 @@ export class WeatherSystem {
     const s = this.scene;
     const x = view.x + Math.random() * (view.width + 60) - 30;
     const y = view.y + Math.random() * view.height * 0.9 - 20;
+    const img = (this.pool.pop() ?? s.add.image(0, 0, 'px').setDepth(1e6 + 2)).setPosition(x, y).setVisible(true);
     if (kind === 'snow') {
-      const img = s.add.image(x, y, 'px').setTint(0xf4f4f4).setScale(Math.random() < 0.5 ? 0.5 : 0.8).setDepth(1e6 + 2).setAlpha(0.9);
+      img.setTexture('px').setTint(0xf4f4f4).setScale(Math.random() < 0.5 ? 0.5 : 0.8).setAlpha(0.9);
       return { img, vx: Phaser.Math.Between(-8, 12), vy: Phaser.Math.Between(14, 26), life: Phaser.Math.FloatBetween(2, 5) };
     }
     if (kind === 'sand') {
-      const img = s.add.image(x, y, 'px').setTint(0xe3a95f).setScale(0.5).setDepth(1e6 + 2).setAlpha(0.7);
+      img.setTexture('px').setTint(0xe3a95f).setScale(0.5).setAlpha(0.7);
       return { img, vx: Phaser.Math.Between(90, 140), vy: Phaser.Math.Between(-4, 8), life: Phaser.Math.FloatBetween(0.8, 2) };
     }
-    const img = s.add.image(x, y, 'raindrop').setDepth(1e6 + 2).setAlpha(0.65);
+    img.setTexture('raindrop').clearTint().setScale(1).setAlpha(0.65);
     return { img, vx: 25, vy: Phaser.Math.Between(170, 220), life: Phaser.Math.FloatBetween(0.25, 0.7) };
   }
 

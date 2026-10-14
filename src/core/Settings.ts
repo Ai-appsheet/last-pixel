@@ -1,6 +1,6 @@
 /**
  * การตั้งค่าเกม (เก็บในเครื่อง) — เสียงอยู่ที่ Sfx.settings, โหมดควบคุมอยู่ที่ ControlMode
- * ที่นี่: มุมกล้อง/ซูมเริ่มต้น และตัวเลือกการแสดงผล
+ * ที่นี่: มุมกล้อง/ซูมเริ่มต้น ตัวเลือกการแสดงผล และคุณภาพภาพ
  */
 export interface GameSettings {
   /** มุมกล้อง 2.5D เริ่มต้น 0 (บนลงล่าง) .. 0.9 */
@@ -11,10 +11,14 @@ export interface GameSettings {
   infoCards: boolean;
   /** จอสั่นตอนโดนตี/ระเบิด */
   shake: boolean;
+  /** คุณภาพภาพ (ดู core/Quality.ts) */
+  quality: QualityPref;
 }
 
+export type QualityPref = 'auto' | 'high' | 'medium' | 'low';
+
 const KEY = 'lastpixel.game.settings.v1';
-const DEFAULTS: GameSettings = { tilt: 0, zoom: 3, infoCards: true, shake: true };
+const DEFAULTS: GameSettings = { tilt: 0, zoom: 3, infoCards: true, shake: true, quality: 'auto' };
 let cache: GameSettings | null = null;
 
 export function getSettings(): GameSettings {

@@ -473,6 +473,7 @@ export class HazardSystem {
     const box = s.capBox(hazardBox(this.level), 'hazard');
     s.spawnRewardChest(box);
     EventBus.emit('toast', `☀ รอดจาก${h.name}! +${coins} เหรียญ + ${ITEMS[box].name}`, '#a7f070');
+    Sfx.play('victory');
   }
 
   /** ล้างของชั่วคราวของภัย */

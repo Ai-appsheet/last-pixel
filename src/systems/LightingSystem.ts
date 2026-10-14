@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { ensureLight } from '../gfx/TextureFactory';
+import { qualityKnobs } from '../core/Quality';
 
 export interface LightSource {
   x: number;
@@ -42,7 +43,17 @@ export class LightingSystem {
     this.rt.setVisible(true).setPosition(ox, oy);
     this.rt.clear();
     this.rt.fill(bloodMoon ? 0x2a0710 : tint ?? 0x0b0d1f, darkness);
-    for (const l of lights) {
+    // เฉพาะแสงที่ส่องถึงจอ (ทั้งเกาะมีไฟหลายสิบดวง) · คุณภาพต่ำ/กลาง จำกัดจำนวน (ใกล้ผู้เล่น = ตัวแรกของ list ก่อน)
+    const x1 = ox + this.rt.width;
+    const y1 = oy + this.rt.height;
+    let seen = lights.filter((l) => l.x + l.radius > ox && l.x - l.radius < x1 && l.y + l.radius > oy && l.y - l.radius < y1);
+    const max = qualityKnobs().lights;
+    if (seen.length > max) {
+      const cx = view.centerX;
+      const cy = view.centerY;
+      seen = [seen[0], ...seen.slice(1).sort((a, b) => (a.x - cx) ** 2 + (a.y - cy) ** 2 - ((b.x - cx) ** 2 + (b.y - cy) ** 2)).slice(0, max - 1)];
+    }
+    for (const l of seen) {
       // กองไฟกระพริบเล็กน้อย
       const r = Math.round(l.radius + Math.sin(this.flicker * 9 + l.x) * (l.radius > 40 ? 2 : 0));
       const key = ensureLight(this.scene, r);

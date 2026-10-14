@@ -20,5 +20,15 @@ export default function GameCanvas() {
       game = null;
     };
   }, []);
-  return <div id="game" ref={ref} />;
+  return (
+    <div className="game-wrap">
+      <div id="game" ref={ref} />
+      {/* มือถือแนวตั้ง: บอกให้หมุนจอ (แสดงด้วย CSS media query ใน globals.css) */}
+      <div className="rotate-hint" aria-live="polite">
+        <div className="phone" />
+        <div>หมุนจอเป็นแนวนอน</div>
+        <small>Survivor Isles เล่นแนวนอนได้เต็มจอกว่า</small>
+      </div>
+    </div>
+  );
 }

@@ -5,12 +5,89 @@ body {
   height: 100%;
   background: #0e0f1a;
   overflow: hidden;
+  /* มือถือ: ไม่เลื่อน/เด้งหน้าเว็บ ไม่ไฮไลต์ตอนแตะ ไม่เลือกข้อความ */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
+body {
+  position: fixed;
+  inset: 0;
+}
+/* กรอบนอก: เว้นรอยบาก/ขอบโค้ง (safe-area) · 100dvh = ไม่โดนแถบเบราว์เซอร์มือถือบัง
+   (padding อยู่ที่กรอบนอก เพราะ Phaser วัดขนาดจาก #game ทั้งกล่องโดยไม่หัก padding) */
+.game-wrap {
+  position: absolute;
+  inset: 0;
+  height: 100dvh;
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+/* ปิดท่าทางของเบราว์เซอร์ (ซูม/เลื่อน/แตะสองครั้ง) — เกมจัดการนิ้วเอง (จอย บีบนิ้วซูม) */
 #game {
   width: 100%;
   height: 100%;
+  touch-action: none;
 }
 canvas {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+  touch-action: none;
+}
+/* ช่องกรอก (DOM) ในเกม: เลือก/พิมพ์ข้อความได้ · ≥16px กัน iOS ซูมเข้าเองตอนแตะ */
+#game input,
+#game textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: manipulation;
+}
+
+/* มือถือแนวตั้ง: บอกให้หมุนจอ (เกมออกแบบสำหรับแนวนอน) */
+.rotate-hint {
+  display: none;
+}
+@media (orientation: portrait) and (max-width: 600px) and (pointer: coarse) {
+  .rotate-hint {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    background: rgba(11, 13, 31, 0.94);
+    color: #ffcd75;
+    font-family: 'Chakra Petch', Kanit, Thonburi, Tahoma, sans-serif;
+    font-weight: 700;
+    font-size: 22px;
+    text-align: center;
+    padding: 24px;
+  }
+  .rotate-hint small {
+    color: #a9bccb;
+    font-size: 15px;
+    font-weight: 500;
+  }
+  .rotate-hint .phone {
+    width: 46px;
+    height: 78px;
+    border: 4px solid #ffcd75;
+    border-radius: 10px;
+    animation: rotate-phone 1.8s ease-in-out infinite;
+  }
+}
+@keyframes rotate-phone {
+  0%,
+  20% {
+    transform: rotate(0deg);
+  }
+  60%,
+  100% {
+    transform: rotate(90deg);
+  }
 }

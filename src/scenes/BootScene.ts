@@ -7,6 +7,7 @@ import { LOOT_GROUPS, type Rarity } from '../data/loot';
 import { FONT, PIXEL_FONT } from '../ui/widgets';
 import { TiltPipeline } from '../gfx/TiltPipeline';
 import { coverImage, queueArt } from '../ui/art';
+import { fadeTo } from '../ui/transition';
 
 /** ชุดแฟชั่น (ที่ไม่ใช่ชุดเกราะพื้นฐาน) → ไอเทมที่สุ่มได้จากกล่อง */
 const BASIC = new Set(['tunic', 'leather', 'fur', 'iron', 'gold', 'meteor', 'crab', 'none']);
@@ -53,7 +54,9 @@ export class BootScene extends Phaser.Scene {
     // หน้าโหลด: ภาพ key art
     coverImage(this, 'keyart', w, h);
     this.add.rectangle(0, h - 46, w, 46, 0x0b0d1f, 0.75).setOrigin(0);
-    const label = this.add.text(w / 2, h - 23, 'LOADING...', { fontFamily: 'monospace', fontSize: '18px', color: '#ffcd75' }).setOrigin(0.5);
+    const label = this.add.text(w / 2, h - 23, 'SURVIVOR ISLES · LOADING...', { fontFamily: 'monospace', fontSize: '18px', color: '#ffcd75' }).setOrigin(0.5);
+    // ข้อความกระพริบให้รู้ว่ายังโหลดอยู่ (หน้าโหลดไม่ดูค้าง)
+    this.tweens.add({ targets: label, alpha: 0.45, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     const r = this.renderer as Phaser.Renderer.WebGL.WebGLRenderer;
     if (r.pipelines && !r.pipelines.getPostPipeline('TiltPipeline')) r.pipelines.addPostPipeline('TiltPipeline', TiltPipeline);
     this.time.delayedCall(30, () => {
@@ -64,7 +67,7 @@ export class BootScene extends Phaser.Scene {
         : Promise.resolve();
       Promise.race([fonts, new Promise((r) => setTimeout(r, 3000))]).finally(() => {
         label.destroy();
-        this.scene.start('TitleScene');
+        fadeTo(this, 'TitleScene', undefined, 180);
       });
     });
   }

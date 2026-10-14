@@ -6,6 +6,8 @@ import { SaveManager } from '../core/SaveManager';
 import { SPECIAL_SLOT } from '../core/SpecialIsland';
 import { coverImage, queueArt } from '../ui/art';
 import { button, COLORS, heading, txt } from '../ui/widgets';
+import { fadeIn, fadeTo } from '../ui/transition';
+import { applyUiScale } from '../ui/layout';
 
 const W = 960;
 const H = 540;
@@ -30,6 +32,8 @@ export class RoomSelectScene extends Phaser.Scene {
     this.showcase = !!data.showcase;
     this.character = data.character ?? MetaSave.load().lastCharacter ?? 'mechanic';
     this.busy = false;
+    applyUiScale(this);
+    fadeIn(this);
     this.cameras.main.setBackgroundColor('#141626');
     const art = coverImage(this, 'intro_2', W, 540);
     if (art) {
@@ -39,7 +43,7 @@ export class RoomSelectScene extends Phaser.Scene {
     if (data.error) {
       heading(this, W / 2, 200, 'เข้าแผนที่ไม่ได้', 28).setOrigin(0.5);
       txt(this, W / 2, 250, data.error, 16, COLORS.bad).setOrigin(0.5);
-      button(this, W / 2, 330, 200, 44, '← กลับหน้าแรก', () => this.scene.start('TitleScene'));
+      button(this, W / 2, 330, 200, 44, '← กลับหน้าแรก', () => fadeTo(this, 'TitleScene'));
       return;
     }
     // แผนที่โลกเดียว: ข้ามการเลือกห้อง ไปสุ่มเกาะเลย
@@ -63,7 +67,7 @@ export class RoomSelectScene extends Phaser.Scene {
       return;
     }
     SaveManager.clear();
-    const start = () => this.scene.start('GameScene', { roomId, character: this.character, showcase: this.showcase });
+    const start = () => fadeTo(this, 'GameScene', { roomId, character: this.character, showcase: this.showcase }, 280);
 
     // วงล้อสุ่ม
     const c = this.add.container(0, 0).setDepth(50);

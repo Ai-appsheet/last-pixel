@@ -5,6 +5,8 @@ import { CHARACTERS, type CharacterDef } from '../data/characters';
 import { CLASS_LOOKS, buildHeroTexture, heroKey } from '../gfx/art/heroes';
 import { button, COLORS, FONT, heading, panel, txt } from '../ui/widgets';
 import { artGroup, coverCrop, coverImage, queueArt } from '../ui/art';
+import { fadeIn, fadeTo } from '../ui/transition';
+import { applyUiScale } from '../ui/layout';
 
 const W = 960;
 
@@ -40,6 +42,8 @@ export class CharacterSelectScene extends Phaser.Scene {
     this.presetName = data.name ?? '';
     this.play = !!data.play;
     this.cards = [];
+    applyUiScale(this);
+    fadeIn(this);
     this.cameras.main.setBackgroundColor('#141626');
     const bgArt = coverImage(this, 'keyart', W, 540);
     if (bgArt) {
@@ -93,7 +97,10 @@ export class CharacterSelectScene extends Phaser.Scene {
       }, true, 14);
       button(this, 830, 506, 220, 44, 'ถัดไป: สุ่มเกาะ ▶', () => this.next(el.value), true, 15);
     }
-    button(this, 100, 506, 150, 40, '← กลับ', () => this.scene.start('TitleScene'));
+    button(this, 100, 506, 150, 40, '← กลับ', () => {
+      this.nameInput?.destroy();
+      fadeTo(this, 'TitleScene');
+    });
   }
 
   private next(raw: string) {
@@ -106,7 +113,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     }
     MetaSave.setProfile(name, this.chosen.id);
     this.nameInput?.destroy();
-    this.scene.start('RoomSelectScene', { character: this.chosen.id });
+    fadeTo(this, 'RoomSelectScene', { character: this.chosen.id });
   }
 
   private select(c: CharacterDef, unlocked: boolean) {

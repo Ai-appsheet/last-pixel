@@ -10,6 +10,9 @@ import { TABS, type Block, type Entry, type SpriteRef } from './catalog/data';
 import { ScrollView, pixelFit, thaiWrap } from './catalog/ScrollView';
 import { BAND_TINT } from '../gfx/UpgradeLook';
 import { ensureLookKey, variantAnim } from '../gfx/UpgradeLook';
+import { applyUiScale } from '../ui/layout';
+import { fmtMoney } from '../ui/money';
+import { SaveManager } from '../core/SaveManager';
 
 const W = 960;
 const H = 540;
@@ -76,6 +79,7 @@ export class CatalogScene extends Phaser.Scene {
   private shownEntry: Entry | null = null;
 
   create(data?: { tab?: string }) {
+    applyUiScale(this);
     // scene ถูกใช้ซ้ำ → รีเซ็ตสถานะทุกครั้ง
     this.grid = null;
     this.cards = [];
@@ -189,6 +193,7 @@ export class CatalogScene extends Phaser.Scene {
     this.subtitle = txt(this, 20, 40, '', 12, COLORS.dim).setDepth(10);
     const back = fancyButton(this, W - 76, 30, { w: 128, h: 40, label: '← กลับ', theme: 'crimson', size: 16, onClick: () => this.goBack() });
     back.setDepth(20);
+    this.drawWallet();
     const p1 = fancyPanel(this, LIST.x, LIST.y, LIST.w, LIST.h, 'gold', 0.86).setDepth(2);
     const p2 = fancyPanel(this, DET.x, DET.y, DET.w, DET.h, 'gold', 0.86).setDepth(2);
     for (const p of [p1, p2]) this.tweens.add({ targets: p, alpha: { from: 0, to: 1 }, y: { from: p.y + 10, to: p.y }, duration: 320, ease: 'Cubic.easeOut' });
@@ -198,6 +203,29 @@ export class CatalogScene extends Phaser.Scene {
     sep.fillRect(DET.x + 14, DET.y + 172, (DET.w - 28) / 2, 2);
     sep.fillGradientStyle(0xffcd75, 0xffcd75, 0xffcd75, 0xffcd75, 0.8, 0, 0.8, 0);
     sep.fillRect(DET.x + 14 + (DET.w - 28) / 2, DET.y + 172, (DET.w - 28) / 2, 2);
+  }
+
+  /** เงินของเกาะปัจจุบัน (ดูราคาในร้านเทียบกับเงินที่มี) — รูปแบบเดียวกับแถบเงินในเกม */
+  private drawWallet() {
+    const w = SaveManager.load()?.wallet;
+    if (!w) return;
+    const c = this.add.container(0, 0).setDepth(20);
+    const coin = txt(this, 0, 30, fmtMoney(w.coins), 15, COLORS.gold).setOrigin(0, 0.5);
+    const gem = txt(this, 0, 30, fmtMoney(w.gems), 15, '#73eff7').setOrigin(0, 0.5);
+    const right = W - 150;
+    const width = 14 + 18 + coin.width + 18 + 18 + gem.width + 12;
+    const x0 = right - width;
+    const g = this.add.graphics();
+    g.fillStyle(0x0b0d1f, 0.78).fillRoundedRect(x0, 17, width, 26, 13);
+    g.lineStyle(2, 0xffcd75, 0.75).strokeRoundedRect(x0, 17, width, 26, 13);
+    let x = x0 + 14;
+    const ci = this.add.image(x + 6, 30, 'i_coin').setScale(1.3);
+    coin.setX(x + 17);
+    x += 18 + coin.width + 18;
+    g.lineStyle(1, 0x566c86, 0.8).lineBetween(x - 10, 22, x - 10, 38);
+    const gi = this.add.image(x + 6, 30, 'i_gem').setScale(1.3);
+    gem.setX(x + 17);
+    c.add([g, ci, coin, gi, gem]);
   }
 
   private goBack() {

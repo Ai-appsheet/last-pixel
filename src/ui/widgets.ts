@@ -23,8 +23,21 @@ export const COLORS = {
 
 type Style = Phaser.Types.GameObjects.Text.TextStyle;
 
+/** จอเล็ก (มือถือ): ซีนที่ขยายตัวหนังสือที่เล็กกว่า 14px ให้อ่านออก — ตั้งจาก ui/layout.ts applyUiScale()
+ *  (แยกต่อซีน: ตัวหนังสือในโลกเกม เช่น ป้ายชื่อคู่แข่ง ไม่โดนขยาย) */
+const boostScenes = new WeakSet<Phaser.Scene>();
+export function setTextBoost(scene: Phaser.Scene, on: boolean) {
+  if (on) boostScenes.add(scene);
+  else boostScenes.delete(scene);
+}
+/** ขนาดตัวหนังสือจริงหลังขยาย (9→11, 10→11.5, 11→12, 12→13, 13→13.5) */
+export function boosted(scene: Phaser.Scene, size: number) {
+  return size < 14 && boostScenes.has(scene) ? Math.round((size + (14 - size) * 0.4) * 2) / 2 : size;
+}
+
 /** ข้อความคมชัด มีเส้นขอบ + เงา แบบเกม */
-export function txt(scene: Phaser.Scene, x: number, y: number, text: string, size = 16, color = COLORS.text, extra: Style = {}) {
+export function txt(scene: Phaser.Scene, x: number, y: number, text: string, size0 = 16, color = COLORS.text, extra: Style = {}) {
+  const size = boosted(scene, size0);
   const t = scene.add.text(x, y, text, {
     fontFamily: FONT,
     fontSize: `${size}px`,
@@ -159,7 +172,18 @@ export class SlotView {
     return [this.bg, this.sel, this.bandFrame, this.icon, this.qty, this.durBg, this.dur, ...(this.label ? [this.label] : []), this.lvT];
   }
 
+  /** ค่าล่าสุดที่วาด — HUD เรียก set() ทุกเฟรม ถ้าไม่เปลี่ยนก็ไม่ต้องวาดใหม่ */
+  private last = '';
+
+  /** บังคับวาดใหม่ครั้งหน้า (หลังมีโค้ดอื่นซ่อน/แสดงชิ้นส่วนของช่องเอง) */
+  dirty() {
+    this.last = '#';
+  }
+
   set(slot: Slot | null, selected: boolean) {
+    const key = slot ? `${selected ? 1 : 0}|${slot.id}|${slot.qty}|${slot.dur ?? ''}|${slot.plus ?? ''}` : selected ? 's' : '-';
+    if (key === this.last) return;
+    this.last = key;
     this.sel.setVisible(selected);
     if (!slot) {
       this.icon.setVisible(false);

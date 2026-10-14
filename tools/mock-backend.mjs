@@ -6,6 +6,12 @@
  *   node tools/mock-backend.mjs            (พอร์ต 8787 · ตั้ง PORT=xxxx ได้)
  *   MOCK_DELAY_MS=800 node tools/mock-backend.mjs   (หน่วงเวลาตอบ จำลองความช้าของ Apps Script)
  *   แล้วรันเกมด้วย NEXT_PUBLIC_API_URL=http://localhost:8787 npm run dev
+ *
+ * MailApp จำลอง: ไม่ส่งจริง เก็บฉบับล่าสุดต่ออีเมลไว้ในหน่วยความจำ (รันเป็นเซิร์ฟเวอร์จะพิมพ์หัวเรื่อง+รหัสลง console)
+ * action สำหรับทดสอบ (มีเฉพาะใน mock นี้ — ไม่มีใน Code.gs):
+ *   __mail   { email }             → { mail: { to, subject, body, code } | null, sent: จำนวนที่ส่งทั้งหมด }
+ *   __clock  { advanceMs }          → เลื่อนเวลาของ Code.gs + CacheService ไปข้างหน้า (ทดสอบหมดอายุ/รอส่งใหม่)
+ *   __legacy { username, password } → สร้างบัญชีแบบเก่า (มีแต่ชื่อผู้ใช้ ไม่มีอีเมล) เหมือนก่อนมีระบบอีเมล
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -143,9 +149,11 @@ class Blob {
   }
 }
 
-function makeContext(ss) {
+function makeContext(ss, clock, mail) {
   const cache = new Map();
+  const now = () => Date.now() + clock.skew;
   const ctx = {
+    __now: now,
     console,
     Logger: { log: (...a) => console.log('[gs]', ...a) },
     SpreadsheetApp: { getActiveSpreadsheet: () => ss, flush: () => {} },
@@ -164,12 +172,23 @@ function makeContext(ss) {
       getScriptCache: () => ({
         get: (k) => {
           const e = cache.get(k);
-          if (!e || e.exp < Date.now()) return null;
+          if (!e || e.exp < now()) return null;
           return e.v;
         },
-        put: (k, v, ttl = 600) => void cache.set(k, { v: String(v), exp: Date.now() + ttl * 1000 }),
+        put: (k, v, ttl = 600) => void cache.set(k, { v: String(v), exp: now() + ttl * 1000 }),
         remove: (k) => void cache.delete(k),
       }),
+    },
+    MailApp: {
+      sendEmail: (opts, subject, body) => {
+        const m = typeof opts === 'object' ? { ...opts } : { to: opts, subject, body };
+        if (mail.quota < 1) throw new Error('Service invoked too many times for one day: email.');
+        mail.quota--;
+        mail.sent++;
+        mail.last.set(String(m.to).toLowerCase(), m);
+        if (mail.verbose) console.log(`[mail] ${m.to} · ${m.subject}`);
+      },
+      getRemainingDailyQuota: () => mail.quota,
     },
     // Node รันทีละ request อยู่แล้ว — lock จำลองเป็น no-op
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
@@ -179,27 +198,77 @@ function makeContext(ss) {
     },
   };
   vm.createContext(ctx);
+  // Date.now() ใน Code.gs ใช้นาฬิกาที่เลื่อนได้ (__clock)
+  vm.runInContext('Date.now = function () { return __now(); };', ctx);
   vm.runInContext(fs.readFileSync(CODE, 'utf8'), ctx, { filename: 'Code.gs' });
   return ctx;
 }
 
-/** สร้าง backend ใหม่ (ชีตว่าง + รัน setup) — ใช้ในเทสต์ได้โดยไม่ต้องเปิดพอร์ต */
-export function createBackend() {
+/**
+ * สร้าง backend ใหม่ (ชีตว่าง + รัน setup) — ใช้ในเทสต์ได้โดยไม่ต้องเปิดพอร์ต
+ * opts.prepare(ss) = เตรียมชีตก่อนรัน setup (เช่น ชีต Accounts แบบเก่า เพื่อทดสอบการเติมคอลัมน์)
+ */
+export function createBackend(opts = {}) {
   const ss = new Spreadsheet();
-  const gs = makeContext(ss);
-  const log = console.log;
-  console.log = () => {};
-  gs.setup();
-  console.log = log;
+  opts.prepare?.(ss);
+  const clock = { skew: 0 };
+  const mail = { last: new Map(), sent: 0, quota: opts.mailQuota ?? 100, verbose: !!opts.verbose };
+  const gs = makeContext(ss, clock, mail);
+  const logs = [];
+  /** รัน setup โดยเก็บ Logger.log ไว้ใน logs แทนการพิมพ์ */
+  const runSetup = () => {
+    const log = console.log;
+    console.log = (...a) => logs.push(a.join(' '));
+    try {
+      gs.setup();
+    } finally {
+      console.log = log;
+    }
+  };
+  runSetup();
+  const doPost = (body) => JSON.parse(gs.doPost({ postData: { contents: body, type: 'text/plain' } }).getContent());
+  /** action ทดสอบเฉพาะ mock (ขึ้นต้นด้วย __) — ไม่ผ่าน Code.gs */
+  const mockOnly = (req) => {
+    if (req.action === '__mail') {
+      const m = mail.last.get(String(req.email ?? '').trim().toLowerCase()) ?? null;
+      return { ok: true, sent: mail.sent, quota: mail.quota, mail: m && { ...m, code: /\b(\d{6})\b/.exec(m.body)?.[1] ?? null } };
+    }
+    if (req.action === '__clock') {
+      clock.skew += Number(req.advanceMs) || 0;
+      return { ok: true, skew: clock.skew };
+    }
+    if (req.action === '__legacy') {
+      const salt = crypto.randomBytes(16).toString('hex');
+      const id = 'acc_legacy' + crypto.randomBytes(4).toString('hex');
+      const t = Date.now() + clock.skew;
+      // แถว 9 คอลัมน์แบบเดิม (ก่อนมี email/verified/…)
+      gs.sheet_('Accounts').appendRow([`'${id}`, `'${req.username}`, `'${salt}`, `'${gs.hashPassword_(String(req.password), salt, gs.CFG.HASH_ITER)}`, t, t, '', '', false]);
+      return { ok: true, id };
+    }
+    return null;
+  };
   return {
     ss,
-    post: (body) => JSON.parse(gs.doPost({ postData: { contents: body, type: 'text/plain' } }).getContent()),
+    mail,
+    clock,
+    setupLog: logs,
+    post: (body) => {
+      let req = null;
+      try {
+        req = JSON.parse(body);
+      } catch {
+        /* ให้ Code.gs ตอบ bad_request เอง */
+      }
+      return (req && typeof req.action === 'string' && req.action.startsWith('__') && mockOnly(req)) || doPost(body);
+    },
     get: () => JSON.parse(gs.doGet({}).getContent()),
+    /** รัน setup ซ้ำ (เหมือนกด ▶ setup อีกครั้งหลังวางโค้ดใหม่) */
+    setup: runSetup,
   };
 }
 
-export function startServer(port = Number(process.env.PORT) || 8787, delay = Number(process.env.MOCK_DELAY_MS) || 0) {
-  const be = createBackend();
+export function startServer(port = Number(process.env.PORT) || 8787, delay = Number(process.env.MOCK_DELAY_MS) || 0, opts = {}) {
+  const be = createBackend(opts);
   const cors = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -229,7 +298,7 @@ export function startServer(port = Number(process.env.PORT) || 8787, delay = Num
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1])) {
-  const { port } = await startServer();
+  const { port } = await startServer(undefined, undefined, { verbose: true });
   console.log(`mock backend (Code.gs ในหน่วยความจำ) พร้อมที่ http://localhost:${port}`);
   console.log(`รันเกม: NEXT_PUBLIC_API_URL=http://localhost:${port} npm run dev`);
 }

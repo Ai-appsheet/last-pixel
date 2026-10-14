@@ -60,6 +60,8 @@ import { TILE, isWater } from '../world/tiles';
 import { SHAPE_NAMES, World, texFor, type NodeData } from '../world/WorldGenerator';
 import { buildShowcase } from '../world/Showcase';
 import { txt } from '../ui/widgets';
+import { fadeIn, fadeTo } from '../ui/transition';
+import { FpsWatch, qualityKnobs } from '../core/Quality';
 import { GRACE_DAYS, STARTER_BASES, STARTER_WEAPONS } from '../data/starter';
 import { GuideSystem } from '../systems/GuideSystem';
 import type { UIScene } from './UIScene';
@@ -172,6 +174,10 @@ export class GameScene extends Phaser.Scene {
   private structTick = 0;
   private autosaveTimer = 60;
   private offEvents: (() => void)[] = [];
+  /** โหมดคุณภาพ auto: เฝ้า FPS แล้วลดคุณภาพเองถ้ากระตุก */
+  private fpsWatch = new FpsWatch();
+  /** นับเฟรมสำหรับซ่อนของนอกจอ (ทุก 3 เฟรม) */
+  private cullTimer = 0;
   private pinch = 0;
 
   constructor() {
@@ -183,6 +189,9 @@ export class GameScene extends Phaser.Scene {
   // ======================================================================
   create(data: GameStartData) {
     this.resetState();
+    fadeIn(this, 380);
+    this.fpsWatch = new FpsWatch();
+    this.cullTimer = 0;
     const rooms = getRoomService();
     const save = data.restore ? SaveManager.load() : null;
     const roomId = save?.roomId ?? data.roomId;
@@ -308,6 +317,10 @@ export class GameScene extends Phaser.Scene {
       Sfx.startMusic('night');
     });
     this.listen('phase:dusk', (day: number) => this.disaster.onDusk(day));
+    // คุณภาพลดเป็น "ต่ำ" → ปิดมุม 2.5D (post-effect ทั้งจอ)
+    this.listen('quality', () => {
+      if (!qualityKnobs().tilt && this.tilt > 0) this.setTilt(0);
+    });
     this.events.once('shutdown', () => this.cleanup());
 
     if (save) this.applySave(save);
@@ -1048,11 +1061,17 @@ export class GameScene extends Phaser.Scene {
   setZoom(z: number) {
     this.zoom = Phaser.Math.Clamp(z, 1.25, 5);
     this.applyCamera();
+    this.cullTimer = 0;
   }
 
   setTilt(t: number) {
     const cam = this.cameras.main;
     const webgl = this.renderer.type === Phaser.WEBGL;
+    // คุณภาพต่ำ: ไม่มีมุม 2.5D (ประหยัด post-effect ทั้งจอ)
+    if (t > 0 && !qualityKnobs().tilt) {
+      EventBus.emit('toast', '🎥 คุณภาพภาพ "ต่ำ" ปิดมุม 2.5D ไว้ (เปลี่ยนได้ในตั้งค่า)', '#94b0c2');
+      t = 0;
+    }
     this.tilt = webgl ? Phaser.Math.Clamp(t, 0, 0.9) : 0;
     if (this.tilt > 0) {
       let p = cam.getPostPipeline('TiltPipeline') as TiltPipeline | TiltPipeline[] | undefined;
@@ -1220,6 +1239,35 @@ export class GameScene extends Phaser.Scene {
       if (!this.showcase) getRoomService().heartbeat({ level: p.level, power: p.power, alive: !p.dead });
     }
     if (p.hp <= 0) this.respawn();
+    this.fpsWatch.update(dt, this.game.loop.actualFps);
+    if (--this.cullTimer <= 0) {
+      this.cullTimer = 3;
+      this.cullOffscreen();
+    }
+  }
+
+  /**
+   * ไม่ส่งของที่อยู่นอกจอไปวาด (สิ่งก่อสร้าง ต้นไม้ มอน แถบ HP ป้ายชื่อ ฯลฯ — ทั้งเกาะมีหลายร้อยชิ้น เห็นจริงไม่กี่สิบ)
+   * ใช้ cameraFilter ของกล้องหลักแทน visible → ไม่ไปทับสถานะซ่อน/แสดงที่ระบบอื่นตั้งไว้
+   */
+  private cullOffscreen() {
+    const cam = this.cameras.main;
+    const v = cam.worldView;
+    const id = cam.id;
+    const m = 40;
+    const x0 = v.x - m;
+    const y0 = v.y - m;
+    const x1 = v.right + m;
+    const y1 = v.bottom + m;
+    for (const o of this.children.list) {
+      if (!(o instanceof Phaser.GameObjects.Sprite || o instanceof Phaser.GameObjects.Image || o instanceof Phaser.GameObjects.Shape || o instanceof Phaser.GameObjects.Text) || o.scrollFactorX !== 1) continue;
+      const w = o.displayWidth;
+      const h = o.displayHeight;
+      const l = o.x - w * o.originX;
+      const t = o.y - h * o.originY;
+      const out = l > x1 || l + w < x0 || t > y1 || t + h < y0;
+      o.cameraFilter = out ? o.cameraFilter | id : o.cameraFilter & ~id;
+    }
   }
 
   get currentBiome(): string {
@@ -1253,6 +1301,7 @@ export class GameScene extends Phaser.Scene {
     this.zoneTimer -= dt;
     if (this.zoneTimer > 0) return;
     this.zoneTimer = 0.4;
+    Sfx.setMusicScene({ boss: !!this.boss, raid: this.disaster.active, hazard: !!this.hazards?.current, dungeon: this.interiors.darkness > 0, market: this.playerSafe, adventure: this.adventure }); // เพลงตามสถานการณ์
     const p = this.player;
     const tx = Math.floor(p.x / 16);
     const ty = Math.floor(p.y / 16);
@@ -3648,7 +3697,7 @@ export class GameScene extends Phaser.Scene {
     this.autosave();
     SaveManager.flush();
     this.scene.stop('UIScene');
-    this.scene.start('TitleScene');
+    fadeTo(this, 'TitleScene', undefined, 240);
   }
 
   // ======================================================================

@@ -1,7 +1,26 @@
 /**
  * เสียงเอฟเฟกต์สังเคราะห์สด ๆ ด้วย WebAudio (สไตล์ 8-bit / jsfxr) — ไม่ต้องมีไฟล์เสียง
  * เรียก Sfx.play('hit') ได้จากทุกที่
+ * เพลงประกอบ: core/music/* (Sfx.startMusic / setMusicScene / setMusicPaused)
  */
+import { EventBus } from './EventBus';
+import { MusicEngine, type MusicName, type StingerName } from './music/MusicEngine';
+
+export type { MusicName };
+
+/** สถานะในเกมที่ใช้เลือกเพลง (GameScene ส่งมาทุก ~0.4 วิ) */
+export interface MusicScene {
+  /** หลอด HP บอสขึ้นอยู่ */
+  boss: boolean;
+  /** คืนภัยพิบัติกำลังบุก */
+  raid: boolean;
+  /** ภัยกลางวันกำลังเกิด */
+  hazard: boolean;
+  dungeon: boolean;
+  /** อยู่เกาะกลาง (ตลาด) */
+  market: boolean;
+  adventure: boolean;
+}
 
 type Wave = OscillatorType;
 
@@ -41,8 +60,16 @@ class AudioManagerImpl {
   private noiseBuf: AudioBuffer | null = null;
   private last = new Map<string, number>();
   private rainNode: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
-  private musicTimer: number | null = null;
-  settings: AudioSettings = { master: 0.7, sfx: 0.8, music: 0.35, muted: false };
+  private music: MusicEngine | null = null;
+  /** เพลงหลักตามช่วงเวลา (title/day/night) */
+  private baseMusic: MusicName | null = null;
+  /** เพลงตามสถานการณ์ (บอส/ต่อสู้/ดันเจี้ยน/ตลาด/ผจญภัย) ทับเพลงหลัก */
+  private sceneMusic: MusicName | null = null;
+  private pendingScene: MusicName | null | undefined = undefined;
+  private pendingSince = 0;
+  private gamePaused = false;
+  private pageHidden = false;
+  settings: AudioSettings = { master: 0.7, sfx: 0.8, music: 0.3, muted: false };
 
   constructor() {
     try {
@@ -51,12 +78,64 @@ class AudioManagerImpl {
     } catch {
       /* ใช้ค่าเริ่มต้น */
     }
+    if (typeof window === 'undefined') return;
+    // โหลดโมดูลซ้ำ (hot reload / เปิดเกมใหม่ในหน้าเดิม) → ปิดเสียงของตัวเก่าให้หมด ไม่ให้เพลงซ้อน/ค้าง
+    const w = window as unknown as { __lpAudio?: { shutdown?: () => void } };
+    try {
+      w.__lpAudio?.shutdown?.();
+    } catch {
+      /* ignore */
+    }
+    w.__lpAudio = this;
+    // สลับแท็บ/พับจอ/ออกจากหน้า = หยุดเสียงทั้งหมด · กลับมา (และไม่ได้ปิดเสียง) = เล่นต่อ
+    document.addEventListener('visibilitychange', () => this.syncRunning());
+    window.addEventListener('pagehide', () => {
+      this.pageHidden = true;
+      this.syncRunning();
+    });
+    window.addEventListener('pageshow', () => {
+      this.pageHidden = false;
+      this.syncRunning();
+    });
+    // ปุ่มลัด 0 = เปิด/ปิดเสียง (M ใช้เปิดแผนที่) — ไม่ทำงานตอนพิมพ์ในช่องกรอก
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== '0' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      this.unlock();
+      this.toggleMute();
+    });
+  }
+
+  get isMuted() {
+    return this.settings.muted;
+  }
+
+  /** เปิดเสียงอยู่ + หน้าเว็บมองเห็นอยู่ = ควรมีเสียง */
+  private get live() {
+    return !this.settings.muted && !this.pageHidden && !document.hidden;
+  }
+
+  /** ปิดเสียง/ซ่อนหน้า → ค่อย ๆ เงียบแล้ว suspend ทั้ง AudioContext (ไม่มีเสียงค้าง ไม่กิน CPU) · กลับมา → resume */
+  private syncRunning() {
+    const ctx = this.ctx;
+    if (!ctx || !this.out) return;
+    const live = this.live;
+    this.out.gain.cancelScheduledValues(ctx.currentTime);
+    this.out.gain.setTargetAtTime(live ? this.settings.master : 0, ctx.currentTime, 0.03);
+    if (live) {
+      if (ctx.state !== 'running') ctx.resume().catch(() => undefined);
+    } else {
+      setTimeout(() => {
+        if (!this.live && this.ctx === ctx && ctx.state === 'running') ctx.suspend().catch(() => undefined);
+      }, 150);
+    }
   }
 
   /** ต้องเรียกหลังผู้ใช้คลิก/กดปุ่มครั้งแรก (นโยบายเบราว์เซอร์) */
   unlock() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume();
+      if (this.ctx.state !== 'running' && this.live) this.ctx.resume().catch(() => undefined); // รวม 'interrupted' ของ iOS
       return;
     }
     const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -72,7 +151,11 @@ class AudioManagerImpl {
     this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const low = (navigator.maxTouchPoints > 0 && !!window.matchMedia?.('(pointer: coarse)').matches) || (navigator.hardwareConcurrency ?? 8) <= 4;
+    this.music = new MusicEngine(this.ctx, this.musicBus, this.sfxBus, this.noiseBuf, low);
+    this.music.setPaused(this.gamePaused);
     this.applySettings();
+    this.refreshMusic();
   }
 
   applySettings() {
@@ -83,15 +166,33 @@ class AudioManagerImpl {
     }
     if (!this.out || !this.sfxBus || !this.musicBus) return;
     const s = this.settings;
-    this.out.gain.value = s.muted ? 0 : s.master;
-    this.sfxBus.gain.value = s.sfx;
-    this.musicBus.gain.value = s.music;
+    const now = this.ctx!.currentTime;
+    this.sfxBus.gain.setTargetAtTime(s.sfx, now, 0.02);
+    this.musicBus.gain.setTargetAtTime(s.music, now, 0.02);
+    if (this.music) this.music.audible = !s.muted && s.master > 0 && s.music > 0;
+    this.syncRunning(); // เสียงรวม + ปิดเสียง (suspend ทั้งหมด)
+  }
+
+  /** เปิด/ปิดเสียงทั้งหมด (บันทึกถาวร) — แจ้ง EventBus 'audio:changed' (muted) ให้ปุ่ม 🔊/🔇 อัปเดต */
+  setMuted(m: boolean) {
+    this.settings.muted = m;
+    this.applySettings();
+    EventBus.emit('audio:changed', m);
   }
 
   toggleMute() {
-    this.settings.muted = !this.settings.muted;
-    this.applySettings();
+    this.setMuted(!this.settings.muted);
     return this.settings.muted;
+  }
+
+  /** ปิด AudioContext ถาวร (ออกจากหน้าเกม) */
+  shutdown() {
+    this.music?.close();
+    this.music = null;
+    this.rainNode = null;
+    this.ctx?.close().catch(() => undefined);
+    this.ctx = null;
+    this.out = this.sfxBus = this.musicBus = null;
   }
 
   private tone(o: ToneOpts, bus = this.sfxBus) {
@@ -156,9 +257,16 @@ class AudioManagerImpl {
     if (!ctx || !this.sfxBus || !this.noiseBuf) return;
     if (level <= 0) {
       if (this.rainNode) {
-        this.rainNode.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.5);
+        this.rainNode.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.12);
         const node = this.rainNode;
-        setTimeout(() => node.src.stop(), 2000);
+        setTimeout(() => {
+          try {
+            node.src.stop();
+            node.gain.disconnect();
+          } catch {
+            /* ปิดไปแล้ว */
+          }
+        }, 700);
         this.rainNode = null;
       }
       return;
@@ -177,27 +285,69 @@ class AudioManagerImpl {
       src.start();
       this.rainNode = { src, gain };
     }
-    this.rainNode.gain.gain.setTargetAtTime(level * 0.12, ctx.currentTime, 0.6);
+    this.rainNode.gain.gain.setTargetAtTime(this.gamePaused ? 0 : level * 0.12, ctx.currentTime, this.gamePaused ? 0.08 : 0.6);
   }
 
-  // ---------- ดนตรีบรรยากาศ (เพนทาโทนิก สุ่มโน้ตเบา ๆ) ----------
-  startMusic(mood: 'day' | 'night') {
-    this.stopMusic();
-    if (!this.ctx) return;
-    const scale = mood === 'day' ? [262, 294, 330, 392, 440, 523, 587] : [220, 247, 262, 330, 349, 440];
-    const step = () => {
-      if (!this.ctx) return;
-      const n = scale[Math.floor(Math.random() * scale.length)];
-      this.tone({ freq: n, dur: 1.6, type: 'triangle', vol: 0.05 }, this.musicBus);
-      if (Math.random() < 0.4) this.tone({ freq: n / 2, dur: 2.4, type: 'sine', vol: 0.05, delay: 0.1 }, this.musicBus);
-      this.musicTimer = window.setTimeout(step, mood === 'day' ? 900 + Math.random() * 900 : 1400 + Math.random() * 1400);
-    };
-    step();
+  // ---------- เพลงประกอบ ----------
+  /** เพลงหลัก: 'title' หน้าแรก · 'day'/'night' ในเกม (เรียกก่อนปลดล็อกเสียงได้ จะเริ่มเล่นตอนแตะครั้งแรก) */
+  startMusic(name: MusicName) {
+    this.baseMusic = name;
+    if (name === 'title') this.sceneMusic = null;
+    this.refreshMusic();
   }
 
+  /** หยุดเพลงทันที (จาง ≤0.3 วิ รวมหางเสียงก้อง) + เสียงฝน และล้างสถานะเพลงในเกม — เรียกตอนออกจากซีนเกม */
   stopMusic() {
-    if (this.musicTimer) clearTimeout(this.musicTimer);
-    this.musicTimer = null;
+    this.baseMusic = null;
+    this.sceneMusic = null;
+    this.pendingScene = undefined;
+    this.setMusicPaused(false);
+    this.music?.stop(0.25);
+    this.setRain(0);
+  }
+
+  /**
+   * เลือกเพลงตามสถานการณ์ — ลำดับ: บอส > ดันเจี้ยน > ตลาด > ต่อสู้ (ภัยคืน/ภัยกลางวัน) > เขตผจญภัย > เพลงหลัก
+   * เข้าฉากตึงเครียดเปลี่ยนทันที · ออกจากฉาก/เข้าเขตผจญภัยต้องคงอยู่ 3 วิก่อน (กันเพลงสลับไปมาตรงขอบเขต)
+   */
+  setMusicScene(f: MusicScene) {
+    const want: MusicName | null = f.boss ? 'boss' : f.dungeon ? 'dungeon' : f.market ? 'market' : f.raid || f.hazard ? 'battle' : f.adventure ? 'adventure' : null;
+    if (want === this.sceneMusic) {
+      this.pendingScene = undefined;
+      return;
+    }
+    const now = performance.now();
+    const urgent = want === 'boss' || want === 'battle' || want === 'dungeon' || want === 'market';
+    if (!urgent) {
+      if (this.pendingScene !== want) {
+        this.pendingScene = want;
+        this.pendingSince = now;
+        return;
+      }
+      if (now - this.pendingSince < 3000) return;
+    }
+    this.pendingScene = undefined;
+    this.sceneMusic = want;
+    this.refreshMusic();
+  }
+
+  /** เกมหยุด (เมนู Esc/ป๊อปอัป) → เพลงและเสียงฝนเงียบ (เอฟเฟกต์ปุ่มยังดัง) · เล่นต่อ → ค่อย ๆ กลับมา */
+  setMusicPaused(p: boolean) {
+    this.gamePaused = p;
+    this.music?.setPaused(p);
+    if (p && this.ctx && this.rainNode) this.rainNode.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.08);
+  }
+
+  private refreshMusic() {
+    if (!this.music) return;
+    const want = this.sceneMusic ?? this.baseMusic;
+    if (want) this.music.play(want);
+    else this.music.stop();
+  }
+
+  /** ท่อนสั้น (ใช้ผ่าน Sfx.play('levelUp' | 'victory' | 'death')) */
+  stinger(name: StingerName) {
+    this.music?.stinger(name);
   }
 
   // ให้ตาราง SFX เรียกใช้
@@ -258,8 +408,8 @@ const SFX = {
   },
   hurt: (a: AudioManagerImpl, r: number) => a.t({ freq: 320 * r, to: 110, dur: 0.22, type: 'sawtooth', vol: 0.15 }),
   death: (a: AudioManagerImpl) => {
-    a.t({ freq: 440, to: 55, dur: 1.1, type: 'sawtooth', vol: 0.18 });
-    a.t({ freq: 330, to: 40, dur: 1.2, type: 'square', vol: 0.08, delay: 0.15 });
+    a.t({ freq: 330, to: 110, dur: 0.5, type: 'sawtooth', vol: 0.12 });
+    a.stinger('death');
   },
   mobDie: (a: AudioManagerImpl, r: number) => {
     a.t({ freq: 260 * r, to: 70, dur: 0.25, type: 'square', vol: 0.12 });
@@ -279,7 +429,8 @@ const SFX = {
   dash: (a: AudioManagerImpl) => a.n({ dur: 0.18, vol: 0.18, filter: 'bandpass', freq: 600, to: 3000 }),
   click: (a: AudioManagerImpl) => a.t({ freq: 1200, dur: 0.04, type: 'square', vol: 0.06 }),
   error: (a: AudioManagerImpl) => a.t({ freq: 180, dur: 0.15, type: 'square', vol: 0.08 }),
-  levelUp: (a: AudioManagerImpl) => [523, 659, 784, 1047, 1319].forEach((f, i) => a.t({ freq: f, dur: 0.18, type: 'square', vol: 0.09, delay: i * 0.08 })),
+  levelUp: (a: AudioManagerImpl) => a.stinger('levelUp'),
+  victory: (a: AudioManagerImpl) => a.stinger('victory'),
   horn: (a: AudioManagerImpl) => {
     a.t({ freq: 110, dur: 1.6, type: 'sawtooth', vol: 0.15, vibrato: 2 });
     a.t({ freq: 165, dur: 1.6, type: 'sawtooth', vol: 0.08, vibrato: 2 });

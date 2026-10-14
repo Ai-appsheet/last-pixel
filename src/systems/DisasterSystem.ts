@@ -98,7 +98,7 @@ export class DisasterSystem {
     this.scene.spawnRewardChest(tier);
     EventBus.emit('disaster:survived');
     EventBus.emit('toast', byDawn ? `☀ รอดจาก${d.name}! ได้รับ${tier === 'box_legend' ? 'กล่องเพชร' : tier === 'box_gold' ? 'กล่องทอง' : tier === 'box_iron' ? 'กล่องเหล็ก' : 'กล่องไม้'}` : `ต้าน${d.name}สำเร็จ!`, '#ffcd75');
-    Sfx.play('levelUp');
+    Sfx.play('victory');
   }
 
   update(dt: number) {

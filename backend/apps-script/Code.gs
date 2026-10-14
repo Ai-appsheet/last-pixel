@@ -1,7 +1,8 @@
 /**
- * LAST PIXEL — backend บน Google Apps Script + Google Sheet
+ * Survivor Isles (ชื่อเดิม LAST PIXEL) — backend บน Google Apps Script + Google Sheet
  *
  * เก็บทุกอย่างในชีตเดียว: บัญชี session เซฟ ข้อมูลถาวร แผนที่โลก ตลาด อันดับ และ log
+ * บัญชีใช้อีเมล + รหัสผ่าน (ยืนยันอีเมลด้วยรหัส 6 หลักที่ส่งผ่าน MailApp) · บัญชีเก่าที่มีแต่ชื่อผู้ใช้ยังเข้าได้ แล้วผูกอีเมลทีหลัง
  * client (Next.js) ส่ง POST body เป็น JSON แบบ text/plain (ไม่มี CORS preflight) → { action, token?, ... }
  * ตอบกลับ { ok: true, ... } หรือ { ok: false, error: 'ข้อความไทย', code }
  *
@@ -14,9 +15,21 @@ var CFG = {
   TOKEN_DAYS: 30,
   /** รอบแฮชรหัสผ่าน (SHA-256 วนซ้ำ) — 2000 รอบใช้ ~0.2–0.5 วิบน Apps Script · เปลี่ยนได้ บัญชีเก่ายังใช้ได้ (เก็บจำนวนรอบไว้ในแฮช) */
   HASH_ITER: 2000,
-  /** ใส่รหัสผิดได้กี่ครั้งต่อชื่อผู้ใช้ใน 10 นาที */
+  /** ใส่รหัสผิดได้กี่ครั้งต่ออีเมล/ชื่อผู้ใช้ใน 10 นาที · รวมทั้งระบบ */
   MAX_FAILS: 5,
+  MAX_FAILS_ALL: 300,
   FAIL_WINDOW_SEC: 600,
+  /** ชื่อเกมในอีเมล */
+  GAME_NAME: 'Survivor Isles',
+  /** รหัสยืนยันทางอีเมล: อายุ (วิ) · ใส่ผิดได้ · ขอส่งใหม่ได้ทุกกี่วิ */
+  CODE_TTL_SEC: 900,
+  CODE_TRIES: 5,
+  RESEND_SEC: 60,
+  /** ส่งอีเมลได้กี่ฉบับ ต่ออีเมลต่อชั่วโมง · รวมทั้งระบบต่อ 10 นาที (MailApp บัญชีธรรมดาส่งได้ ~100 ฉบับ/วัน) */
+  MAIL_PER_EMAIL_HOUR: 6,
+  MAIL_ALL_10MIN: 40,
+  /** สมัครแล้วไม่ยืนยันอีเมลเกินกี่วัน → ชื่อ/อีเมลนั้นให้คนอื่นสมัครทับได้ */
+  PENDING_DAYS: 1,
   /** สมัครได้รวมกี่บัญชีต่อ 10 นาที (กันสแปม) */
   MAX_REGISTER: 40,
   /** ขนาด body สูงสุด (ตัวอักษร) */
@@ -34,7 +47,8 @@ var CFG = {
 };
 
 var HEADERS = {
-  Accounts: ['id', 'username', 'salt', 'hash', 'createdAt', 'lastLogin', 'playerName', 'character', 'banned'],
+  // 5 คอลัมน์ท้าย (email…verifyTries) เพิ่มทีหลัง — setup() เติมหัวตารางให้ชีตเดิมโดยไม่ยุ่งข้อมูล
+  Accounts: ['id', 'username', 'salt', 'hash', 'createdAt', 'lastLogin', 'playerName', 'character', 'banned', 'email', 'verified', 'verifyHash', 'verifyExp', 'verifyTries'],
   Sessions: ['token', 'accountId', 'expiresAt'],
   Saves: ['accountId', 'updatedAt', 'version', 'size', 'parts', 'data_1'],
   Meta: ['accountId', 'updatedAt', 'json'],
@@ -47,16 +61,20 @@ var HEADERS = {
 
 var USERNAME_RE = /^[a-zA-Z0-9_฀-๿]{3,16}$/;
 var ITEM_RE = /^[a-z0-9_]{1,48}$/;
+/** อีเมล (ตัวพิมพ์เล็กแล้ว) — ห้ามมี $ เพราะใช้คั่นใน verifyHash */
+var EMAIL_RE = /^[a-z0-9._%+'-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/;
 
 // ------------------------------------------------------------------ ติดตั้ง
 
-/** รันครั้งเดียวจากเมนู Apps Script (เลือกฟังก์ชัน setup → ▶ เรียกใช้) — สร้างชีตทั้งหมด + seed ของโลก */
+/**
+ * รันจากเมนู Apps Script (เลือกฟังก์ชัน setup → ▶ เรียกใช้) — สร้างชีตทั้งหมด + seed ของโลก
+ * รันซ้ำได้ปลอดภัย: ชีตเดิมจะถูกเติมหัวตารางที่ขาด (คอลัมน์ใหม่ต่อท้าย) ข้อมูลเดิมไม่หาย
+ */
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   Object.keys(HEADERS).forEach(function (name) {
     var sh = ss.getSheetByName(name) || ss.insertSheet(name);
-    var h = HEADERS[name];
-    sh.getRange(1, 1, 1, h.length).setValues([h]).setFontWeight('bold');
+    migrateHeaders_(sh, HEADERS[name]);
     sh.setFrozenRows(1);
   });
   if (!config_('worldSeed')) {
@@ -97,14 +115,20 @@ function doPost(e) {
   }
 }
 
-var PUBLIC_ACTIONS = { ping: 1, register: 1, login: 1 };
+var PUBLIC_ACTIONS = { ping: 1, register: 1, login: 1, verify: 1, resend: 1, forgot: 1, reset: 1 };
 
 var ACTIONS = {
   ping: function () {
     return ok_({ time: Date.now() });
   },
   register: register_,
+  verify: verify_,
+  resend: resend_,
   login: login_,
+  forgot: forgot_,
+  reset: reset_,
+  'email.attach': emailAttach_,
+  'email.confirm': emailConfirm_,
   logout: logout_,
   me: me_,
   'save.get': saveGet_,
@@ -137,62 +161,356 @@ function route_(req) {
 
 // ------------------------------------------------------------------ บัญชี
 
+/**
+ * สมัคร: อีเมล + รหัสผ่าน + ชื่อในเกม → สร้างบัญชีแบบ "ยังไม่ยืนยัน" แล้วส่งรหัส 6 หลักทางอีเมล
+ * ยังไม่ได้ token จนกว่าจะ verify (ตอบ { needVerify: true, email, sent, wait })
+ */
 function register_(req) {
-  var username = String(req.username || '').trim();
+  var email = normEmail_(req.email);
   var password = String(req.password || '');
-  if (!USERNAME_RE.test(username)) return fail_('ชื่อผู้ใช้ 3–16 ตัว (ไทย/อังกฤษ/ตัวเลข/_ ไม่มีเว้นวรรค)', 'invalid');
-  if (password.length < 6) return fail_('รหัสผ่านอย่างน้อย 6 ตัวอักษร', 'invalid');
-  if (password.length > 64) return fail_('รหัสผ่านยาวเกิน 64 ตัวอักษร', 'invalid');
+  var name = String(req.name || '').trim();
+  if (!validEmail_(email)) return fail_('รูปแบบอีเมลไม่ถูกต้อง', 'invalid');
+  var pe = passwordError_(password);
+  if (pe) return fail_(pe, 'invalid');
+  if (!USERNAME_RE.test(name)) return fail_('ชื่อในเกม 3–16 ตัว (ไทย/อังกฤษ/ตัวเลข/_ ไม่มีเว้นวรรค)', 'invalid');
   var cache = CacheService.getScriptCache();
   var regs = Number(cache.get('reg:count') || 0);
   if (regs >= CFG.MAX_REGISTER) return fail_('มีคนสมัครเยอะเกินไป ลองใหม่ในอีกสักครู่', 'rate');
   var salt = Utilities.getUuid().replace(/-/g, '');
-  // แฮชนอก lock (ใช้เวลา) แล้วค่อยเช็กชื่อซ้ำใน lock
+  // แฮชนอก lock (ใช้เวลา) แล้วค่อยเช็กซ้ำใน lock
   var hash = hashPassword_(password, salt, CFG.HASH_ITER);
-  return withLock_(function () {
+  var res = withLock_(function () {
     var sh = sheet_('Accounts');
-    var lower = username.toLowerCase();
-    var names = col_(sh, 2);
-    for (var i = 0; i < names.length; i++) if (String(names[i]).toLowerCase() === lower) return fail_('ชื่อผู้ใช้นี้มีคนใช้แล้ว', 'taken');
+    var rows = all_(sh);
     var now = Date.now();
+    var lname = name.toLowerCase();
+    // บัญชีที่สมัครค้างไว้ไม่ยืนยันเกิน PENDING_DAYS → ลบทิ้ง ให้ชื่อ/อีเมลนั้นสมัครใหม่ได้
+    for (var i = rows.length - 1; i >= 0; i--) {
+      var r = rows[i];
+      if (!String(r[9]) || isTrue_(r[10]) || Number(r[4]) > now - CFG.PENDING_DAYS * 86400000) continue;
+      if (String(r[9]).toLowerCase() !== email && String(r[1]).toLowerCase() !== lname) continue;
+      sh.deleteRow(i + 2);
+      rows.splice(i, 1);
+      log_(String(r[0]), 'register.expire', '');
+    }
+    for (var j = 0; j < rows.length; j++) {
+      if (String(rows[j][9]).toLowerCase() === email) return fail_('อีเมลนี้มีบัญชีแล้ว — เข้าสู่ระบบ หรือกด "ลืมรหัสผ่าน"', 'email_taken');
+      if (String(rows[j][1]).toLowerCase() === lname) return fail_('ชื่อในเกมนี้มีคนใช้แล้ว', 'taken');
+    }
     var id = 'acc_' + now.toString(36) + Utilities.getUuid().replace(/-/g, '').slice(0, 6);
-    sh.appendRow([t_(id), t_(username), t_(salt), t_(hash), now, now, '', '', false]);
+    sh.appendRow([t_(id), t_(name), t_(salt), t_(hash), now, now, t_(name), '', false, t_(email), false, '', '', 0]);
     cache.put('reg:count', String(regs + 1), CFG.FAIL_WINDOW_SEC);
-    log_(id, 'register', username);
-    return newSession_({ id: id, username: username, createdAt: now });
+    log_(id, 'register', name);
+    return ok_({ id: id });
+  });
+  if (!res.ok) return res;
+  var a = accountById_(res.id);
+  var gate = mailGate_(email, 'verify');
+  var sent = !gate && !!a && issueCode_(a, 'verify', email);
+  return ok_({
+    needVerify: true,
+    email: email,
+    sent: sent,
+    wait: sent ? CFG.RESEND_SEC : gate && gate.wait ? gate.wait : 0,
+    message: sent ? 'ส่งรหัสยืนยัน 6 หลักไปที่ ' + email + ' แล้ว' : gate ? gate.error : 'ส่งอีเมลไม่สำเร็จ — กด "ส่งรหัสอีกครั้ง" ภายหลัง',
   });
 }
 
+/**
+ * เข้าสู่ระบบด้วยอีเมล + รหัสผ่าน · บัญชีเก่า (ไม่มีอีเมล) ใช้ชื่อผู้ใช้เดิมได้ → ได้ account.needEmail = true ให้ไปผูกอีเมล
+ * ยังไม่ยืนยันอีเมล → ส่งรหัสใหม่ให้ (ถ้าพ้นเวลารอ) แล้วตอบ code 'unverified'
+ */
 function login_(req) {
-  var username = String(req.username || '').trim();
+  var ident = String(req.email || req.username || '').trim().toLowerCase();
   var password = String(req.password || '');
-  if (!username || !password) return fail_('กรอกชื่อผู้ใช้และรหัสผ่าน', 'invalid');
-  var lower = username.toLowerCase();
+  if (!ident || !password) return fail_('กรอกอีเมลและรหัสผ่าน', 'invalid');
+  var byEmail = ident.indexOf('@') >= 0;
   var cache = CacheService.getScriptCache();
-  var failKey = 'fail:' + lower;
+  var failKey = 'fail:' + ident;
   var fails = Number(cache.get(failKey) || 0);
+  var failsAll = Number(cache.get('fail:*') || 0);
   if (fails >= CFG.MAX_FAILS) return fail_('ใส่รหัสผิดหลายครั้งเกินไป — ลองใหม่ในอีก 10 นาที', 'rate');
-  var sh = sheet_('Accounts');
-  var rows = all_(sh);
+  if (failsAll >= CFG.MAX_FAILS_ALL) return fail_('ระบบกำลังถูกลองรหัสผ่านจำนวนมาก — ลองใหม่ในอีกสักครู่', 'rate');
+  var rows = all_(sheet_('Accounts'));
   var row = -1;
-  for (var i = 0; i < rows.length; i++) if (String(rows[i][1]).toLowerCase() === lower) row = i;
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][byEmail ? 9 : 1]).toLowerCase() === ident) row = i;
+  }
   // แฮชเสมอแม้ไม่มีบัญชี (เวลาตอบใกล้เคียงกัน)
-  var a = row >= 0 ? rows[row] : null;
-  var stored = a ? String(a[3]) : '';
+  var a = row >= 0 ? accFromRow_(rows[row], row) : null;
+  var stored = a ? a.hash : '';
   var iter = Number(stored.split('$')[1]) || CFG.HASH_ITER;
-  var hash = hashPassword_(password, a ? String(a[2]) : 'nosalt', iter);
+  var hash = hashPassword_(password, a ? a.salt : 'nosalt', iter);
   if (!a || !safeEqual_(hash, stored)) {
     cache.put(failKey, String(fails + 1), CFG.FAIL_WINDOW_SEC);
-    log_(a ? String(a[0]) : '', 'login.fail', username);
-    return fail_(a ? 'รหัสผ่านไม่ถูกต้อง' : 'ไม่พบชื่อผู้ใช้นี้ — สมัครสมาชิกก่อน', 'bad_login');
+    cache.put('fail:*', String(failsAll + 1), CFG.FAIL_WINDOW_SEC);
+    log_(a ? a.id : '', 'login.fail', byEmail ? '(email)' : ident);
+    // ไม่บอกว่าอีเมล/ชื่อนี้มีบัญชีหรือไม่
+    return fail_(byEmail ? 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' : 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', 'bad_login');
   }
-  if (isTrue_(a[8])) return fail_('บัญชีนี้ถูกระงับ', 'banned');
+  if (a.banned) return fail_('บัญชีนี้ถูกระงับ', 'banned');
   cache.remove(failKey);
-  sh.getRange(row + 2, 6, 1, 1).setValues([[Date.now()]]);
-  log_(String(a[0]), 'login', '');
+  if (!byEmail && a.email) return fail_('บัญชีนี้ผูกอีเมลแล้ว — เข้าสู่ระบบด้วยอีเมล ' + maskEmail_(a.email), 'use_email');
+  if (a.email && !a.verified) {
+    var gate = mailGate_(a.email, 'verify');
+    var sent = !gate && issueCode_(a, 'verify', a.email);
+    return fail_('ยังไม่ได้ยืนยันอีเมล — ใส่รหัส 6 หลักที่ส่งไปทางอีเมล', 'unverified', {
+      email: a.email, sent: sent, wait: sent ? CFG.RESEND_SEC : gate && gate.wait ? gate.wait : 0,
+    });
+  }
+  sheet_('Accounts').getRange(a.row, 6, 1, 1).setValues([[Date.now()]]);
+  log_(a.id, 'login', byEmail ? '' : 'username');
   return withLock_(function () {
-    return newSession_({ id: String(a[0]), username: String(a[1]), createdAt: Number(a[4]) });
+    return newSession_(publicAccount_(a));
   });
+}
+
+/** ยืนยันอีเมลหลังสมัคร: email + code → ได้ token เหมือน login */
+function verify_(req) {
+  var email = normEmail_(req.email);
+  if (!validEmail_(email)) return fail_('รูปแบบอีเมลไม่ถูกต้อง', 'invalid');
+  return withLock_(function () {
+    var a = accountByEmail_(email);
+    if (!a) return fail_('รหัสไม่ถูกต้องหรือหมดอายุ — ขอรหัสใหม่', 'bad_code');
+    if (a.verified) return fail_('ยืนยันอีเมลนี้แล้ว — เข้าสู่ระบบได้เลย', 'already');
+    if (a.banned) return fail_('บัญชีนี้ถูกระงับ', 'banned');
+    var bad = checkCode_(a, 'verify', req.code);
+    if (bad) return bad;
+    var now = Date.now();
+    var sh = sheet_('Accounts');
+    sh.getRange(a.row, 11, 1, 4).setValues([[true, '', '', 0]]);
+    sh.getRange(a.row, 6, 1, 1).setValues([[now]]);
+    log_(a.id, 'verify', '');
+    a.verified = true;
+    return newSession_(publicAccount_(a));
+  });
+}
+
+/** ขอรหัสยืนยันใหม่ (บัญชีที่ยังไม่ยืนยัน) — ตอบเหมือนกันทุกกรณี ไม่บอกว่ามีบัญชีหรือไม่ */
+function resend_(req) {
+  var email = normEmail_(req.email);
+  if (!validEmail_(email)) return fail_('รูปแบบอีเมลไม่ถูกต้อง', 'invalid');
+  var gate = mailGate_(email, 'verify');
+  if (gate) return gate;
+  var a = accountByEmail_(email);
+  var sent = !!a && !a.verified && !a.banned && issueCode_(a, 'verify', email);
+  if (a && !a.verified && !sent) return fail_('ส่งอีเมลไม่สำเร็จ ลองใหม่ภายหลัง', 'mail');
+  return ok_({ wait: CFG.RESEND_SEC, message: 'ถ้ามีบัญชีที่รอยืนยัน เราได้ส่งรหัสใหม่ไปแล้ว' });
+}
+
+/** ลืมรหัสผ่าน: ส่งรหัสทางอีเมล — ตอบข้อความเดียวกันเสมอ (ไม่บอกว่ามีบัญชีนี้หรือไม่) */
+function forgot_(req) {
+  var email = normEmail_(req.email);
+  if (!validEmail_(email)) return fail_('รูปแบบอีเมลไม่ถูกต้อง', 'invalid');
+  // จำกัดการส่งตามอีเมลเสมอ (มีบัญชีหรือไม่ก็ตาม) จึงไม่รั่วข้อมูล
+  var gate = mailGate_(email, 'reset');
+  if (gate) return gate;
+  var a = accountByEmail_(email);
+  if (a && !a.banned) issueCode_(a, 'reset', email);
+  log_(a ? a.id : '', 'forgot', '');
+  return ok_({ wait: CFG.RESEND_SEC, message: 'ถ้ามีบัญชีนี้ เราได้ส่งรหัสไปแล้ว' });
+}
+
+/** ตั้งรหัสผ่านใหม่ด้วยรหัสจากอีเมล → ยืนยันอีเมลไปด้วย + ล้าง session เดิมทั้งหมด + ได้ token ใหม่ */
+function reset_(req) {
+  var email = normEmail_(req.email);
+  var password = String(req.password || '');
+  if (!validEmail_(email)) return fail_('รูปแบบอีเมลไม่ถูกต้อง', 'invalid');
+  var pe = passwordError_(password);
+  if (pe) return fail_(pe, 'invalid');
+  var salt = Utilities.getUuid().replace(/-/g, '');
+  var hash = hashPassword_(password, salt, CFG.HASH_ITER);
+  return withLock_(function () {
+    var a = accountByEmail_(email);
+    var bad = a ? checkCode_(a, 'reset', req.code) : null;
+    if (!a || (bad && bad.code === 'no_code')) return fail_('รหัสไม่ถูกต้องหรือหมดอายุ — ขอรหัสใหม่', 'bad_code');
+    if (bad) return bad;
+    if (a.banned) return fail_('บัญชีนี้ถูกระงับ', 'banned');
+    var sh = sheet_('Accounts');
+    sh.getRange(a.row, 3, 1, 2).setValues([[t_(salt), t_(hash)]]);
+    sh.getRange(a.row, 11, 1, 4).setValues([[true, '', '', 0]]);
+    // token เก่าทุกเครื่องใช้ไม่ได้อีก (ลบทั้งในชีตและแคช token)
+    var cache = CacheService.getScriptCache();
+    var ss = sheet_('Sessions');
+    var srows = all_(ss);
+    for (var i = srows.length - 1; i >= 0; i--) {
+      if (String(srows[i][1]) !== a.id) continue;
+      cache.remove('tok:' + String(srows[i][0]));
+      ss.deleteRow(i + 2);
+    }
+    cache.remove('fail:' + email);
+    log_(a.id, 'reset', '');
+    a.verified = true;
+    return newSession_(publicAccount_(a));
+  });
+}
+
+/** บัญชีเก่า (ไม่มีอีเมล): ขอผูกอีเมล → ส่งรหัสไปที่อีเมลนั้น (ยังไม่บันทึกอีเมลจนกว่าจะ email.confirm) */
+function emailAttach_(req, acc) {
+  var email = normEmail_(req.email);
+  if (!validEmail_(email)) return fail_('รูปแบบอีเมลไม่ถูกต้อง', 'invalid');
+  var a = accountById_(acc.id);
+  if (!a) return fail_('ไม่พบบัญชี', 'auth');
+  if (a.email) return fail_('บัญชีนี้ผูกอีเมลแล้ว', 'has_email');
+  if (accountByEmail_(email)) return fail_('อีเมลนี้ถูกใช้กับบัญชีอื่นแล้ว', 'email_taken');
+  var gate = mailGate_(email, 'attach');
+  if (gate) return gate;
+  if (!issueCode_(a, 'attach', email)) return fail_('ส่งอีเมลไม่สำเร็จ ลองใหม่ภายหลัง', 'mail');
+  log_(a.id, 'email.attach', '');
+  return ok_({ email: email, wait: CFG.RESEND_SEC, message: 'ส่งรหัสยืนยัน 6 หลักไปที่ ' + email + ' แล้ว' });
+}
+
+/** ยืนยันรหัสผูกอีเมล → บันทึกอีเมล (ต่อไปเข้าระบบด้วยอีเมลเท่านั้น) */
+function emailConfirm_(req, acc) {
+  return withLock_(function () {
+    var a = accountById_(acc.id);
+    if (!a) return fail_('ไม่พบบัญชี', 'auth');
+    if (a.email) return fail_('บัญชีนี้ผูกอีเมลแล้ว', 'has_email');
+    var bad = checkCode_(a, 'attach', req.code);
+    if (bad) return bad;
+    var email = a.verifyHash.split('$')[1];
+    if (accountByEmail_(email)) return fail_('อีเมลนี้ถูกใช้กับบัญชีอื่นแล้ว', 'email_taken');
+    sheet_('Accounts').getRange(a.row, 10, 1, 5).setValues([[t_(email), true, '', '', 0]]);
+    log_(a.id, 'email.confirm', '');
+    a.email = email;
+    a.verified = true;
+    return ok_({ account: publicAccount_(a) });
+  });
+}
+
+// ---------- ตัวช่วยบัญชี/อีเมล
+
+function normEmail_(s) {
+  return String(s === undefined || s === null ? '' : s).trim().toLowerCase();
+}
+
+function validEmail_(e) {
+  return e.length <= 254 && EMAIL_RE.test(e);
+}
+
+/** รหัสผ่านใหม่: 8–64 ตัว มีตัวอักษรและตัวเลขอย่างน้อยอย่างละ 1 (บัญชีเก่ารหัสสั้นกว่านี้ยังเข้าได้) */
+function passwordError_(p) {
+  if (p.length < 8) return 'รหัสผ่านอย่างน้อย 8 ตัวอักษร';
+  if (p.length > 64) return 'รหัสผ่านยาวเกิน 64 ตัวอักษร';
+  if (!/[A-Za-zก-ฮ]/.test(p) || !/[0-9]/.test(p)) return 'รหัสผ่านต้องมีทั้งตัวอักษรและตัวเลข';
+  return null;
+}
+
+/** a***@gmail.com */
+function maskEmail_(e) {
+  var at = e.indexOf('@');
+  return at > 0 ? e.charAt(0) + '***' + e.slice(at) : e;
+}
+
+/** แถวของชีต Accounts → object (row = เลขแถวในชีต) */
+function accFromRow_(r, i) {
+  return {
+    row: i + 2, id: String(r[0]), username: String(r[1]), salt: String(r[2]), hash: String(r[3]), createdAt: Number(r[4]),
+    playerName: String(r[6] || ''), character: String(r[7] || ''), banned: isTrue_(r[8]),
+    email: String(r[9] || '').toLowerCase(), verified: isTrue_(r[10]), verifyHash: String(r[11] || ''), verifyExp: Number(r[12]) || 0, verifyTries: Number(r[13]) || 0,
+  };
+}
+
+function accountByEmail_(email) {
+  var rows = all_(sheet_('Accounts'));
+  for (var i = 0; i < rows.length; i++) if (String(rows[i][9]).toLowerCase() === email) return accFromRow_(rows[i], i);
+  return null;
+}
+
+/** ข้อมูลบัญชีที่ส่งให้ client (username = ชื่อในเกม/ชื่อผู้ใช้เดิม · needEmail = บัญชีเก่าที่ยังไม่ผูกอีเมล) */
+function publicAccount_(a) {
+  return { id: a.id, username: a.username, createdAt: a.createdAt, email: a.email, needEmail: !a.email };
+}
+
+/** รหัส 6 หลักจาก UUID สุ่ม (48 บิต) */
+function newCode_() {
+  var n = parseInt(Utilities.getUuid().replace(/-/g, '').slice(0, 12), 16) % 1000000;
+  return ('000000' + n).slice(-6);
+}
+
+/**
+ * ด่านก่อนส่งอีเมล: รอ RESEND_SEC ต่ออีเมลต่อประเภท (verify/reset/attach) · ≤ MAIL_PER_EMAIL_HOUR ต่ออีเมลต่อชั่วโมง · ≤ MAIL_ALL_10MIN ทั้งระบบ · โควตา MailApp
+ * ผ่าน → จองสิทธิ์ส่งแล้วคืน null · ไม่ผ่าน → fail_ (มี wait เป็นวินาทีถ้าต้องรอ)
+ */
+function mailGate_(email, purpose) {
+  var cache = CacheService.getScriptCache();
+  var now = Date.now();
+  var cdKey = 'mailcd:' + purpose + ':' + email;
+  var until = Number(cache.get(cdKey) || 0);
+  if (until > now) {
+    var wait = Math.ceil((until - now) / 1000);
+    return fail_('ส่งรหัสไปแล้ว — ขอใหม่ได้ในอีก ' + wait + ' วินาที', 'cooldown', { wait: wait });
+  }
+  var perHour = Number(cache.get('mailh:' + email) || 0);
+  if (perHour >= CFG.MAIL_PER_EMAIL_HOUR) return fail_('ขอรหัสบ่อยเกินไป — ลองใหม่ในอีก 1 ชั่วโมง', 'rate');
+  var all = Number(cache.get('mail:*') || 0);
+  if (all >= CFG.MAIL_ALL_10MIN) return fail_('มีคนขอรหัสเยอะเกินไป ลองใหม่ในอีกสักครู่', 'rate');
+  var quota = 1;
+  try {
+    quota = MailApp.getRemainingDailyQuota();
+  } catch (e) {
+    /* อ่านโควตาไม่ได้ → ลองส่งไปเลย */
+  }
+  if (quota < 1) return fail_('วันนี้ส่งอีเมลครบโควตาแล้ว — ลองใหม่พรุ่งนี้', 'mail_quota');
+  cache.put(cdKey, String(now + CFG.RESEND_SEC * 1000), CFG.RESEND_SEC);
+  cache.put('mailh:' + email, String(perHour + 1), 3600);
+  cache.put('mail:*', String(all + 1), 600);
+  return null;
+}
+
+/** สร้างรหัสใหม่ → เก็บแฮช (ไม่เก็บตัวรหัส) ลง verifyHash = '<purpose>$<email>$<sha256>' → ส่งอีเมล · คืน true ถ้าส่งได้ */
+function issueCode_(a, purpose, email) {
+  var code = newCode_();
+  var h = purpose + '$' + email + '$' + sha256_(purpose + ':' + a.id + ':' + code);
+  sheet_('Accounts').getRange(a.row, 12, 1, 3).setValues([[t_(h), Date.now() + CFG.CODE_TTL_SEC * 1000, 0]]);
+  a.verifyHash = h;
+  a.verifyTries = 0;
+  return sendCodeMail_(email, purpose, code, purpose === 'verify' ? a.username : a.playerName || a.username);
+}
+
+var MAIL_TEXT = {
+  verify: { subject: 'รหัสยืนยันอีเมล', line: 'ขอบคุณที่สมัครเล่น ใส่รหัสนี้ในเกมเพื่อยืนยันอีเมลและเปิดใช้บัญชี' },
+  reset: { subject: 'รหัสตั้งรหัสผ่านใหม่', line: 'มีคำขอตั้งรหัสผ่านใหม่สำหรับบัญชีของคุณ ใส่รหัสนี้ในเกมเพื่อตั้งรหัสผ่านใหม่\nถ้าไม่ได้ขอเอง ไม่ต้องทำอะไร รหัสผ่านเดิมยังใช้ได้' },
+  attach: { subject: 'รหัสยืนยันการผูกอีเมล', line: 'ใส่รหัสนี้ในเกมเพื่อผูกอีเมลนี้กับบัญชีของคุณ (ต่อไปเข้าสู่ระบบด้วยอีเมลนี้)' },
+};
+
+function sendCodeMail_(to, purpose, code, name) {
+  var m = MAIL_TEXT[purpose];
+  var body = [
+    'สวัสดี ' + (cleanName_(name) || 'ผู้รอดชีวิต'),
+    '',
+    m.line,
+    '',
+    'รหัส: ' + code,
+    '',
+    'รหัสใช้ได้ ' + Math.round(CFG.CODE_TTL_SEC / 60) + ' นาที ใส่ผิดได้ไม่เกิน ' + CFG.CODE_TRIES + ' ครั้ง',
+    'อย่าบอกรหัสนี้กับใคร ทีมงานจะไม่ขอรหัสนี้จากคุณ',
+    '',
+    '— ' + CFG.GAME_NAME,
+  ].join('\n');
+  try {
+    MailApp.sendEmail({ to: to, subject: CFG.GAME_NAME + ' — ' + m.subject + ' ' + code, body: body, name: CFG.GAME_NAME });
+    return true;
+  } catch (e) {
+    log_('', 'mail.fail', purpose + ': ' + String(e && e.message ? e.message : e).slice(0, 200));
+    return false;
+  }
+}
+
+/** ตรวจรหัสของ purpose นี้ — ถูก → null · ผิด → นับครั้ง (ครบ CODE_TRIES ต้องขอใหม่) */
+function checkCode_(a, purpose, code) {
+  var parts = a.verifyHash.split('$');
+  if (parts[0] !== purpose || !parts[2]) return fail_('ยังไม่มีรหัสที่รอยืนยัน — กดส่งรหัสใหม่', 'no_code');
+  if (a.verifyExp < Date.now()) return fail_('รหัสหมดอายุแล้ว — กดส่งรหัสใหม่', 'expired');
+  if (a.verifyTries >= CFG.CODE_TRIES) return fail_('ใส่รหัสผิดครบ ' + CFG.CODE_TRIES + ' ครั้งแล้ว — กดส่งรหัสใหม่', 'too_many');
+  code = String(code === undefined || code === null ? '' : code).replace(/\s/g, '');
+  if (!/^\d{6}$/.test(code)) return fail_('รหัสยืนยันเป็นตัวเลข 6 หลัก', 'invalid');
+  if (safeEqual_(sha256_(purpose + ':' + a.id + ':' + code), parts[2])) return null;
+  a.verifyTries++;
+  sheet_('Accounts').getRange(a.row, 14, 1, 1).setValues([[a.verifyTries]]);
+  var left = CFG.CODE_TRIES - a.verifyTries;
+  if (left <= 0) return fail_('ใส่รหัสผิดครบ ' + CFG.CODE_TRIES + ' ครั้งแล้ว — กดส่งรหัสใหม่', 'too_many');
+  return fail_('รหัสไม่ถูกต้อง (เหลืออีก ' + left + ' ครั้ง)', 'bad_code', { left: left });
 }
 
 /** สร้าง token ใหม่ (เก็บเฉพาะแฮชของ token ในชีต) + ล้าง session ที่หมดอายุ/เกินจำนวน */
@@ -247,11 +565,7 @@ function auth_(token) {
 
 function accountById_(id) {
   var rows = all_(sheet_('Accounts'));
-  for (var i = 0; i < rows.length; i++) {
-    if (String(rows[i][0]) !== id) continue;
-    var r = rows[i];
-    return { row: i + 2, id: id, username: String(r[1]), createdAt: Number(r[4]), playerName: String(r[6] || ''), character: String(r[7] || ''), banned: isTrue_(r[8]) };
-  }
+  for (var i = 0; i < rows.length; i++) if (String(rows[i][0]) === id) return accFromRow_(rows[i], i);
   return null;
 }
 
@@ -265,7 +579,11 @@ function logout_(req) {
 }
 
 function me_(req, acc) {
-  return ok_({ account: { id: acc.id, username: acc.username, createdAt: acc.createdAt, playerName: acc.playerName } });
+  // อ่านจากชีตใหม่ (แคช token อาจยังไม่รู้ว่าเพิ่งผูกอีเมล)
+  var a = accountById_(acc.id) || acc;
+  var out = a.row ? publicAccount_(a) : { id: acc.id, username: acc.username, createdAt: acc.createdAt };
+  out.playerName = a.playerName;
+  return ok_({ account: out });
 }
 
 // ------------------------------------------------------------------ เซฟ (แบ่งเป็นช่องละ ≤ 45,000 ตัวอักษร)
@@ -691,6 +1009,25 @@ function findRow_(sh, c, value) {
   var v = col_(sh, c);
   for (var i = 0; i < v.length; i++) if (String(v[i]) === value) return i + 2;
   return -1;
+}
+
+/** เติมหัวตารางที่ขาด (ช่องว่าง) ให้ครบตาม h — ไม่ทับหัวตารางที่มีชื่ออื่นอยู่แล้ว ไม่ยุ่งแถวข้อมูล */
+function migrateHeaders_(sh, h) {
+  var max = sh.getMaxColumns();
+  if (max < h.length) sh.insertColumnsAfter(max, h.length - max);
+  var cur = sh.getRange(1, 1, 1, h.length).getValues()[0];
+  var added = [];
+  for (var i = 0; i < h.length; i++) {
+    if (String(cur[i]) === h[i]) continue;
+    if (cur[i] !== '' && cur[i] !== null && cur[i] !== undefined) {
+      Logger.log('⚠ ชีต ' + sh.getName() + ' คอลัมน์ที่ ' + (i + 1) + ' หัวตารางเป็น "' + cur[i] + '" (ควรเป็น "' + h[i] + '") — ไม่แก้ให้ ตรวจด้วยมือ');
+      continue;
+    }
+    cur[i] = h[i];
+    added.push(h[i]);
+  }
+  sh.getRange(1, 1, 1, h.length).setValues([cur]).setFontWeight('bold');
+  if (added.length && sh.getLastRow() > 1) Logger.log('ชีต ' + sh.getName() + ': เพิ่มคอลัมน์ ' + added.join(', ') + ' (ข้อมูลเดิมอยู่ครบ)');
 }
 
 /** เพิ่มคอลัมน์ data_N ของชีต Saves ให้พอ (พร้อมหัวตาราง) */

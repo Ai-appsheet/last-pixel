@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { bandOf, type UpBand } from '../data/upgrade';
+import { qualityKnobs } from '../core/Quality';
 
 /**
  * หน้าตาใหม่ตามช่วงอัพเกรด — สร้าง texture `${key}@${band}` จาก texture เดิม (วาดด้วยโค้ดทั้งหมด = canvas) ตอนใช้ครั้งแรก
@@ -210,6 +211,8 @@ export const baseKeyOf = (key: string) => {
 
 /** แสงเรืองรอบ sprite (Lv10) — WebGL เท่านั้น · คืนตัวควบคุมไว้ลบทีหลัง */
 export function addLegendGlow(obj: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image): Phaser.FX.Glow | null {
+  // คุณภาพกลาง/ต่ำ: ไม่ใส่ (preFX = วาดซ้ำต่อชิ้น หนักบนมือถือ) — ภาพโฉม Lv10 ยังเปลี่ยนตามปกติ
+  if (!qualityKnobs().glow) return null;
   try {
     const fx = obj.preFX;
     if (!fx) return null;

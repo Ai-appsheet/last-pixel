@@ -5,6 +5,7 @@ import { ART_VARIANTS } from '../gfx/TextureFactory';
 import { TILE } from '../world/tiles';
 import type { GameScene } from '../scenes/GameScene';
 import { isWater } from '../world/tiles';
+import { qualityKnobs } from '../core/Quality';
 
 const ABOVE_DARK = 1e6 + 1;
 const SKY = 5e5;
@@ -47,6 +48,8 @@ export class AmbientSystem {
     const view = s.cameras.main.worldView;
     const dark = s.dayNight.darkness;
     const p = s.player;
+    // คุณภาพกลาง/ต่ำ: อนุภาคบรรยากาศน้อยลง (ช่วงห่างขึ้น / จำนวนสูงสุดน้อยลง)
+    const q = qualityKnobs().particles;
 
     // ---------- เงาเมฆ ----------
     for (const c of this.clouds) {
@@ -62,7 +65,7 @@ export class AmbientSystem {
     }
 
     // ---------- หิ่งห้อยตอนกลางคืน ----------
-    if (dark > 0.4 && this.fireflies.length < 18 && Math.random() < dt * 6) {
+    if (dark > 0.4 && this.fireflies.length < 18 * q && Math.random() < dt * 6) {
       const img = s.add.image(0, 0, 'firefly').setBlendMode(Phaser.BlendModes.ADD).setDepth(ABOVE_DARK).setAlpha(0);
       this.fireflies.push({
         img, life: Phaser.Math.FloatBetween(4, 9), phase: Math.random() * 10,
@@ -88,7 +91,7 @@ export class AmbientSystem {
     this.t.leaf -= dt;
     const ptile = s.tileAt(Math.floor(p.x / 16), Math.floor(p.y / 16));
     if (this.t.leaf <= 0 && dark < 0.5 && ptile === TILE.FOREST) {
-      this.t.leaf = Phaser.Math.FloatBetween(0.25, 0.6);
+      this.t.leaf = Phaser.Math.FloatBetween(0.25, 0.6) / q;
       const leaf = s.add.image(view.x + Math.random() * view.width, view.y - 4, Math.random() < 0.7 ? 'leaf_a' : 'leaf_b').setDepth(SKY);
       const dur = Phaser.Math.Between(3500, 5500);
       s.tweens.add({ targets: leaf, y: leaf.y + view.height * 0.8, x: leaf.x + 30, alpha: { from: 1, to: 0 }, duration: dur, onComplete: () => leaf.destroy() });
@@ -106,7 +109,7 @@ export class AmbientSystem {
     }
     this.t.ember -= dt;
     const emit = this.t.ember <= 0;
-    if (emit) this.t.ember = 0.12;
+    if (emit) this.t.ember = 0.12 / q;
     for (const f of fires) {
       let g = this.glows.get(f.key);
       if (!g) {
@@ -131,7 +134,7 @@ export class AmbientSystem {
     // ---------- ประกายบนผิวน้ำ ----------
     this.t.sparkle -= dt;
     if (this.t.sparkle <= 0) {
-      this.t.sparkle = 0.12;
+      this.t.sparkle = 0.12 / q;
       const x = view.x + Math.random() * view.width;
       const y = view.y + Math.random() * view.height;
       if (isWater(s.tileAt(Math.floor(x / 16), Math.floor(y / 16)))) {
@@ -143,7 +146,7 @@ export class AmbientSystem {
     // ---------- ฝุ่นตอนวิ่ง ----------
     this.t.dust -= dt;
     if (this.t.dust <= 0 && p.body.velocity.length() > p.char.stats.speed * 1.2) {
-      this.t.dust = 0.07;
+      this.t.dust = 0.07 / q;
       const sand = ptile === TILE.SAND;
       this.particle(p.x + Phaser.Math.Between(-3, 3), p.feetY, 'px', sand ? 0xc9a46a : 0x94b0c2, -6, 380, p.depth - 0.2, false, 0.4);
     }

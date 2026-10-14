@@ -29,7 +29,11 @@ import { itemArtKey, placeArtCover, queueItemArtIndex, withItemArt } from '../ui
 import { BlueprintWindow } from '../ui/BlueprintWindow';
 import { fitText } from '../ui/fancyButton';
 import { Foldable, UIWindow } from '../ui/Window';
-import { button, COLORS, heading, panel, SlotView, StatBar, txt, type Button } from '../ui/widgets';
+import { button, COLORS, heading, panel, setTextBoost, SlotView, StatBar, txt, type Button } from '../ui/widgets';
+import { anchorGroup, hudScale, isCompact, touchScale } from '../ui/layout';
+import { fmtFull, fmtMoney } from '../ui/money';
+import { fadeIn, popIn } from '../ui/transition';
+import { QUALITY_PREFS, qualityKnobs, qualityName, qualityPref, setQualityPref } from '../core/Quality';
 import { STARTER_BASES, STARTER_WEAPONS, type StarterPick } from '../data/starter';
 import { BUILD } from '../data/buildables';
 import { SKIN, skinFor } from '../gfx/art/terrain';
@@ -64,7 +68,6 @@ export class UIScene extends Phaser.Scene {
   private advBadge!: Phaser.GameObjects.Text;
   private miniTimer = 0;
   private hotbar: SlotView[] = [];
-  private hotbarRect!: Phaser.Geom.Rectangle;
   private skillBox!: Phaser.GameObjects.NineSlice;
   private skillCover!: Phaser.GameObjects.Rectangle;
   private skillText!: Phaser.GameObjects.Text;
@@ -87,8 +90,23 @@ export class UIScene extends Phaser.Scene {
   private statusText!: Phaser.GameObjects.Text;
   private hurtFlash!: Phaser.GameObjects.Rectangle;
   private lastHp = 0;
-  private toolbarRect!: Phaser.Geom.Rectangle;
+  private toolbarPanel!: Phaser.GameObjects.NineSlice;
+  private hotbarPanel!: Phaser.GameObjects.NineSlice;
   private touchLayer!: Phaser.GameObjects.Container;
+  /** จอเล็ก (มือถือ): HUD ขยาย k เท่า · ปุ่มสัมผัส/hotbar ขยาย kt เท่า (ดู ui/layout.ts) */
+  private compact = false;
+  private k = 1;
+  private kt = 1;
+  /** กลุ่ม HUD ที่ยึดมุมจอ */
+  private gLeft!: Phaser.GameObjects.Container;
+  private gRight!: Phaser.GameObjects.Container;
+  private gTop!: Phaser.GameObjects.Container;
+  private gHot!: Phaser.GameObjects.Container;
+  private statusFold!: Foldable;
+  private pinC!: Phaser.GameObjects.Container;
+  private skillCdT: Phaser.GameObjects.Text | null = null;
+  private skillLabel!: Phaser.GameObjects.Text;
+  private skillKey!: Phaser.GameObjects.Text;
   private modal: Phaser.GameObjects.Container | null = null;
 
   private wins: UIWindow[] = [];
@@ -129,6 +147,18 @@ export class UIScene extends Phaser.Scene {
     this.lastSelected = -1;
     this.bagKey = '';
     this.lastHp = this.gs.player.hp;
+    this.walletInit = false;
+    this.moneyTw = {};
+    this.skillCdT = null;
+    fadeIn(this, 320);
+    // จอเล็ก: HUD ขยายทั้งกลุ่ม (ไม่ต้องขยายตัวหนังสือซ้ำ) · หน้าต่างใช้ตัวหนังสือขยาย + ขยายหน้าต่างให้เต็มจอ
+    this.compact = isCompact(this);
+    this.k = hudScale(this);
+    this.kt = touchScale(this);
+    setTextBoost(this, false);
+    this.gLeft = anchorGroup(this, 0, 0, this.k, 2);
+    this.gRight = anchorGroup(this, W, 0, this.k, 2);
+    this.gTop = anchorGroup(this, W / 2, 0, this.k, 3);
 
     this.add.image(0, 0, 'vignette').setOrigin(0).setAlpha(0.7);
     this.hurtFlash = this.add.rectangle(0, 0, W, H, 0xb13e53, 0).setOrigin(0);
@@ -138,19 +168,29 @@ export class UIScene extends Phaser.Scene {
     this.buildBoss();
     this.buildHotbar();
     this.buildToolbar();
-    this.hintText = txt(this, W / 2, H - 98, '', 17, COLORS.gold).setOrigin(0.5);
-    this.heldName = txt(this, W / 2, H - 122, '', 16).setOrigin(0.5).setAlpha(0);
-    this.statusText = txt(this, W / 2, 62, '', 15, COLORS.gold).setOrigin(0.5, 0);
-    this.advBadge = txt(this, W - 12 - MINI - 16, 8, '⚔ เขตผจญภัย\nPvP · ตายถาวร', 11, '#ffffff', { align: 'center', lineSpacing: 1 })
-      .setOrigin(1, 0).setBackgroundColor('#b13e53dd').setPadding(6, 3, 6, 3).setDepth(6).setVisible(false);
+    this.buildWallet();
+    // ข้อความกลางล่าง: เหนือ hotbar (จอเล็ก hotbar ขยาย → ยกขึ้นตาม)
+    const hotTop = H - 80 * this.kt;
+    this.hintText = txt(this, W / 2, hotTop - 18, '', 17, COLORS.gold).setOrigin(0.5);
+    this.heldName = txt(this, W / 2, hotTop - 42, '', 16).setOrigin(0.5).setAlpha(0);
+    this.statusText = txt(this, W / 2, 92, '', 15, COLORS.gold).setOrigin(0.5, 0);
+    this.gTop.add(this.statusText);
+    this.advBadge = txt(this, 0, 0, '⚔ เขตผจญภัย\nPvP · ตายถาวร', 11, '#ffffff', { align: 'center', lineSpacing: 1 })
+      .setBackgroundColor('#b13e53dd').setPadding(6, 3, 6, 3).setVisible(false);
+    // คอม: ซ้ายของมินิแมป · จอเล็ก: ขวาของแถบเงิน (ใต้แถบเครื่องมือ — มุมขวาเต็มแล้ว)
+    if (this.compact) this.gTop.add(this.advBadge.setOrigin(0, 0).setPosition(W / 2 + 112, 60));
+    else this.gRight.add(this.advBadge.setOrigin(1, 0).setPosition(W - 12 - MINI - 16, 8));
     this.buildInspectCard();
-    this.autoChip = txt(this, W / 2 - 176, H - 72, '', 13, '#a7f070').setOrigin(0, 1).setBackgroundColor('#0b0d1fcc').setPadding(6, 3, 6, 3).setDepth(7).setVisible(false);
+    this.autoChip = txt(this, W / 2 - 176 * this.kt, hotTop - 4, '', 13, '#a7f070').setOrigin(0, 1).setBackgroundColor('#0b0d1fcc').setPadding(6, 3, 6, 3).setDepth(7).setVisible(false);
     this.padLegend = this.add.container(0, H - 70).setDepth(7);
     const lg = txt(this, W / 2, 0, '🎮 RT ตี/ยิง · Ⓐ ใช้/คุย · Ⓑ หลบ · Ⓧ กิน/สวม · Ⓨ สกิล · LT วิ่ง · LB/RB สลับของ · ↑↓ ซูม · Back กระเป๋า · Start เมนู', 11, COLORS.dim).setOrigin(0.5, 0.5);
     const lgBg = this.add.rectangle(W / 2, 0, lg.width + 20, 18, 0x0b0d1f, 0.6);
     this.padLegend.add([lgBg, lg]).setVisible(false);
     this.buildTouch();
 
+    // หน้าต่าง: จอเล็กขยายตัวหนังสือเล็ก + ขยายหน้าต่างให้เต็มจอ
+    setTextBoost(this, this.compact);
+    UIWindow.fit = this.compact;
     this.bagWin = this.makeBag();
     this.blueprint = new BlueprintWindow(this, this.gs, (t, c) => this.toast(t, c));
     this.register(this.blueprint.win, () => this.blueprint.refresh());
@@ -163,6 +203,14 @@ export class UIScene extends Phaser.Scene {
     this.mapWin = this.makeMap();
     this.pauseWin = this.makePause();
     this.autoWin = this.makeAuto();
+    UIWindow.fit = false;
+
+    // หมุนจอ/ย่อหน้าต่างจนขนาดจอข้ามเกณฑ์ "จอเล็ก" → สร้าง HUD ใหม่ (ไม่มีป๊อปอัปค้างอยู่เท่านั้น)
+    const onResize = () => {
+      if (isCompact(this) !== this.compact && !this.modal && !this.pauseWin.visible && this.sys.isActive()) this.scene.restart();
+    };
+    this.scale.on('resize', onResize);
+    this.events.once('shutdown', () => this.scale.off('resize', onResize));
 
     const kb = this.input.keyboard!;
     kb.on('keydown-TAB', () => this.toggleBag());
@@ -193,6 +241,7 @@ export class UIScene extends Phaser.Scene {
       this.events.once('shutdown', () => EventBus.off(ev, fn));
     };
     on('toast', (t: string, c?: string) => this.toast(t, c));
+    on('audio:changed', (muted: boolean) => this.muteIcon?.setText(muted ? '🔇' : '🔊'));
     on('pickup', (id: string, n: number) => this.pickup(id, n));
     on('banner', (name: string, desc: string, color: string) => this.banner(name, desc, color));
     on('achievement', (a: AchievementDef) => this.achievement(a));
@@ -220,13 +269,14 @@ export class UIScene extends Phaser.Scene {
   // ======================================================================
   isPointerOverUI(p: Phaser.Input.Pointer): boolean {
     // UIScene ยังโหลดภาพอยู่ (preload) — HUD ยังไม่ถูกสร้าง
-    if (!this.toolbarRect) return false;
+    if (!this.toolbarPanel) return false;
     if (this.modal) return true;
     if (this.pinBox?.visible && this.pinBox.getBounds().contains(p.x, p.y)) return true;
     if (this.wins.some((w) => w.contains(p.x, p.y))) return true;
-    if (this.toolbarRect.contains(p.x, p.y)) return true;
-    if (this.touchLayer.visible && (p.x < 290 && p.y > 200)) return true;
-    return this.hotbarRect.contains(p.x, p.y) || this.skillBox.getBounds().contains(p.x, p.y);
+    if (this.toolbarPanel.getBounds().contains(p.x, p.y)) return true;
+    if (this.walletC.getBounds().contains(p.x, p.y)) return true;
+    if (this.touchLayer.visible && (this.joyZone.getBounds().contains(p.x, p.y) || this.touchBtns.some((b) => b.getBounds().contains(p.x, p.y)))) return true;
+    return this.hotbarPanel.getBounds().contains(p.x, p.y) || (this.skillBox.visible && this.skillBox.getBounds().contains(p.x, p.y));
   }
 
   // ---------- การ์ดข้อมูล (จิ้ม/ชี้/เดินใกล้) ----------
@@ -264,10 +314,15 @@ export class UIScene extends Phaser.Scene {
         this.tweens.add({ targets: this.card, alpha: 1, duration: 140 });
       }
     }
-    // คอม: มุมขวาล่าง · มือถือ: กลางบน (ไม่ทับปุ่มสัมผัส)
+    // คอม: มุมขวาล่าง · มือถือ: กลางบน ใต้แถบเงิน (ไม่ทับปุ่มสัมผัส) · จอเล็กขยายการ์ดตาม HUD
     const h = this.cardBg.height;
-    if (touch) this.card.setPosition(W / 2 - 135, 62);
-    else this.card.setPosition(W - 282, this.pinBox.visible ? Math.max(H - 92 - h, this.pinBox.y + this.pinBox.height + 4) : H - 92 - h); // ไม่ทับแผงปักหมุด
+    const k = this.k;
+    this.card.setScale(k);
+    if (touch) this.card.setPosition(W / 2 - 135 * k, 118 * k);
+    else {
+      const pin = this.pinBox.visible ? this.pinBox.getBounds() : null;
+      this.card.setPosition(W - 282 * k, pin ? Math.max(H - (92 + h) * k, pin.bottom + 4) : H - (92 + h) * k); // ไม่ทับแผงปักหมุด
+    }
     this.card.setVisible(true);
   }
 
@@ -288,17 +343,20 @@ export class UIScene extends Phaser.Scene {
   // ======================================================================
   // HUD
   // ======================================================================
-  /** แผงสถานะแบบกะทัดรัด (มุมซ้ายบน) */
+  /** แผงสถานะแบบกะทัดรัด (มุมซ้ายบน) — เงินย้ายไปแถบเงินกลางบน (buildWallet) */
   private buildStatus() {
     const p = this.gs.player;
     const parts: Phaser.GameObjects.GameObject[] = [];
-    parts.push(panel(this, 6, 6, 188, 114));
+    parts.push(panel(this, 6, 6, 188, 100));
     this.portrait = this.add.sprite(24, 30, p.texKey, 0).setScale(1.5);
     parts.push(this.portrait);
     this.levelText = txt(this, 44, 28, '', 10, COLORS.gold);
     this.xpBg = this.add.rectangle(44, 43, 138, 4, 0x0b0d1f).setOrigin(0, 0.5);
     this.xpBar = this.add.rectangle(44, 43, 0, 4, 0xa77bdb).setOrigin(0, 0.5);
-    parts.push(txt(this, 44, 11, this.gs.playerName, 13), this.levelText, this.xpBg, this.xpBar);
+    // ชื่อ (ซ้าย) + พลัง (ขวา) แถวเดียวกัน
+    this.powerText = txt(this, 186, 12, '', 10, '#ef7d57').setOrigin(1, 0);
+    const name = fitText(txt(this, 44, 11, this.gs.playerName, 13), 84);
+    parts.push(name, this.powerText, this.levelText, this.xpBg, this.xpBar);
     const rows: [string, string, number][] = [
       ['hp', 'hud_heart', 0xb13e53], ['hunger', 'hud_food', p.char.passive.robot ? 0x73eff7 : 0xc28a50],
       ['thirst', 'hud_water', 0x41a6f6], ['stamina', 'hud_stamina', 0xffcd75],
@@ -313,12 +371,157 @@ export class UIScene extends Phaser.Scene {
       parts.push(...bar.objects, value);
       this.bars[key] = { bar, value };
     });
-    parts.push(this.add.image(16, 105, 'i_coin').setScale(0.9), this.add.image(84, 105, 'i_gem').setScale(0.9));
-    this.walletText = txt(this, 25, 105, '', 11, COLORS.gold).setOrigin(0, 0.5);
-    this.gemText = txt(this, 92, 105, '', 11, '#73eff7').setOrigin(0, 0.5);
-    this.powerText = txt(this, 186, 105, '', 10, '#ef7d57').setOrigin(1, 0.5);
-    parts.push(this.walletText, this.gemText, this.powerText);
-    new Foldable(this, 10, 122, parts, 'สถานะ');
+    this.statusFold = new Foldable(this, 10, 108, parts, 'สถานะ');
+    this.gLeft.add([...parts, this.statusFold.button]);
+  }
+
+  /** ขอบล่างของแผงสถานะบนจอ (ใช้วางแผงอื่นต่อลงมา) */
+  private get statusBottom() {
+    return (this.statusFold.folded ? 22 : 124) * this.k;
+  }
+
+  // ---------- 💰 แถบเงิน (เหรียญ + เพชร) กลางบน ใต้แถบเครื่องมือ ----------
+  private walletC!: Phaser.GameObjects.Container;
+  private walletBg!: Phaser.GameObjects.Graphics;
+  private coinIcon!: Phaser.GameObjects.Image;
+  private gemIcon!: Phaser.GameObjects.Image;
+  private walletInit = false;
+  /** ค่าที่แสดงอยู่ (นับขึ้น/ลงไล่ตามค่าจริง) */
+  private money = { coins: 0, gems: 0 };
+  private moneyTarget = { coins: 0, gems: 0 };
+  /** แตะแถบเงิน = ดูตัวเลขเต็มชั่วคราว */
+  private moneyExact = 0;
+  private moneyTw: Partial<Record<'coins' | 'gems', Phaser.Tweens.Tween>> = {};
+
+  private buildWallet() {
+    const c = this.add.container(W / 2, 74);
+    this.walletBg = this.add.graphics();
+    this.coinIcon = this.add.image(0, 0, 'i_coin').setScale(1.3);
+    this.walletText = txt(this, 0, 0, '0', 15, COLORS.gold).setOrigin(0, 0.5);
+    this.gemIcon = this.add.image(0, 0, 'i_gem').setScale(1.3);
+    this.gemText = txt(this, 0, 0, '0', 15, '#73eff7').setOrigin(0, 0.5);
+    c.add([this.walletBg, this.coinIcon, this.walletText, this.gemIcon, this.gemText]);
+    // hit area ใน local ของ container (ไม่ setSize → จุด 0,0 = กลางแถบ) — ปรับความกว้างใน renderMoney()
+    c.setInteractive({ hitArea: new Phaser.Geom.Rectangle(-100, -14, 200, 28), hitAreaCallback: Phaser.Geom.Rectangle.Contains, useHandCursor: true });
+    c.on('pointerdown', () => {
+      Sfx.play('click');
+      this.moneyExact = this.moneyExact > 0 ? 0 : 3500;
+      this.renderMoney();
+    });
+    this.walletC = c;
+    this.gTop.add(c);
+    const w = this.gs.wallet;
+    this.money = { coins: w.coins, gems: w.gems };
+    this.moneyTarget = { ...this.money };
+    this.renderMoney();
+  }
+
+  /** วาดตัวเลข + จัดความกว้างแถบตามความยาวตัวเลข */
+  private renderMoney() {
+    const exact = this.moneyExact > 0;
+    const f = (n: number) => (exact ? fmtFull(n) : fmtMoney(n));
+    this.walletText.setText(f(this.money.coins));
+    this.gemText.setText(f(this.money.gems));
+    const cw = this.walletText.width;
+    const gw = this.gemText.width;
+    const w = 14 + 18 + cw + 18 + 18 + gw + 12;
+    let x = -w / 2 + 14;
+    this.coinIcon.setPosition(x + 6, 0);
+    this.walletText.setPosition(x + 17, 0);
+    x += 18 + cw + 18;
+    this.gemIcon.setPosition(x + 6, 0);
+    this.gemText.setPosition(x + 17, 0);
+    const g = this.walletBg.clear();
+    g.fillStyle(0x0b0d1f, 0.78).fillRoundedRect(-w / 2, -13, w, 26, 13);
+    g.lineStyle(2, 0xffcd75, 0.75).strokeRoundedRect(-w / 2, -13, w, 26, 13);
+    g.lineStyle(1, 0x566c86, 0.8).lineBetween(x - 10, -8, x - 10, 8);
+    (this.walletC.input?.hitArea as Phaser.Geom.Rectangle | undefined)?.setTo(-w / 2, -14, w, 28);
+  }
+
+  /** เงินเปลี่ยน → นับตัวเลขไล่ + "+N"/"−N" ลอยขึ้น + แถบกระพริบสี */
+  private updateMoney(delta: number) {
+    const w = this.gs.wallet;
+    if (this.moneyExact > 0 && (this.moneyExact -= delta) <= 0) this.renderMoney();
+    if (!this.walletInit) {
+      this.walletInit = true;
+      this.money = { coins: w.coins, gems: w.gems };
+      this.moneyTarget = { ...this.money };
+      this.renderMoney();
+      return;
+    }
+    for (const kind of ['coins', 'gems'] as const) {
+      const now = w[kind];
+      const d = now - this.moneyTarget[kind];
+      if (!d) continue;
+      this.moneyTarget[kind] = now;
+      const text = kind === 'coins' ? this.walletText : this.gemText;
+      const icon = kind === 'coins' ? this.coinIcon : this.gemIcon;
+      // ตัวเลขนับไล่ (0.25–0.7 วิ ตามขนาดที่เปลี่ยน)
+      const from = this.money[kind];
+      const counter = { v: from };
+      // เปลี่ยนซ้อนกันเร็วๆ → หยุดตัวนับเก่า (กันตัวเก่าจบทีหลังแล้วเขียนค่าเก่าทับ)
+      this.moneyTw[kind]?.stop();
+      this.moneyTw[kind] = this.tweens.add({
+        targets: counter, v: now, duration: Phaser.Math.Clamp(250 + Math.log10(Math.abs(d) + 1) * 110, 250, 700), ease: 'Cubic.easeOut',
+        onUpdate: () => {
+          this.money[kind] = Math.round(counter.v);
+          this.renderMoney();
+        },
+        onComplete: () => {
+          this.money[kind] = now;
+          this.renderMoney();
+        },
+      });
+      // เด้ง + กระพริบสี
+      const gain = d > 0;
+      this.tweens.killTweensOf(icon);
+      icon.setScale(1.3);
+      this.tweens.add({ targets: icon, scale: 1.75, duration: 110, yoyo: true, ease: 'Quad.easeOut' });
+      text.setColor(gain ? '#ffffff' : '#ef7d57');
+      this.time.delayedCall(260, () => text.active && text.setColor(kind === 'coins' ? COLORS.gold : '#73eff7'));
+      // ตัวเลข +N / −N ลอยขึ้นจากใต้แถบ
+      const sign = gain ? '+' : '−';
+      const fl = txt(this, icon.x + 10, 18, `${sign}${fmtMoney(Math.abs(d))}`, 14, gain ? (kind === 'coins' ? '#fff2b0' : '#a0fff0') : '#ef7d57').setOrigin(0.5, 0);
+      this.walletC.add(fl);
+      this.tweens.add({ targets: fl, y: gain ? 4 : 30, alpha: { from: 1, to: 0 }, duration: 1100, ease: 'Cubic.easeOut', onComplete: () => fl.destroy() });
+      if (gain && Math.abs(d) >= 50) {
+        // ได้เยอะ: ประกายวิ้งรอบไอคอน
+        const sp = this.add.image(icon.x, 0, 'sparkle').setScale(0).setBlendMode(Phaser.BlendModes.ADD);
+        this.walletC.add(sp);
+        this.tweens.add({ targets: sp, scale: 2.5, angle: 90, alpha: 0, duration: 420, onComplete: () => sp.destroy() });
+      }
+    }
+  }
+
+  /**
+   * ชิปเงินบนแถบหัวหน้าต่างร้าน/ตลาด/อัพเกรด (ขวา ก่อนปุ่มพับ) — ตัวเลขเต็ม อัปเดตทุก 150 ms ตอนหน้าต่างเปิด
+   * คืนฟังก์ชันอัปเดตให้เรียกใน refresher ของหน้าต่าง
+   */
+  private headerWallet(win: UIWindow) {
+    const c = this.add.container(0, 0);
+    const g = this.add.graphics();
+    const ci = this.add.image(0, 17, 'i_coin').setScale(1.15);
+    const ct = txt(this, 0, 17, '', 13, COLORS.gold).setOrigin(0, 0.5);
+    const gi = this.add.image(0, 17, 'i_gem').setScale(1.15);
+    const gt = txt(this, 0, 17, '', 13, '#73eff7').setOrigin(0, 0.5);
+    c.add([g, ci, ct, gi, gt]);
+    win.root.add(c);
+    let last = '';
+    return () => {
+      const w = this.gs.wallet;
+      const key = `${w.coins}|${w.gems}`;
+      if (key === last) return;
+      last = key;
+      ct.setText(fmtFull(w.coins));
+      gt.setText(fmtFull(w.gems));
+      const width = 12 + 16 + ct.width + 14 + 16 + gt.width + 10;
+      const x0 = win.w - 78 - width;
+      ci.setX(x0 + 17);
+      ct.setX(x0 + 26);
+      gi.setX(x0 + 12 + 16 + ct.width + 14 + 5);
+      gt.setX(gi.x + 9);
+      g.clear().fillStyle(0x0b0d1f, 0.7).fillRoundedRect(x0, 7, width, 21, 10).lineStyle(1, 0xffcd75, 0.6).strokeRoundedRect(x0, 7, width, 21, 10);
+    };
   }
 
   private buildMinimap() {
@@ -338,7 +541,8 @@ export class UIScene extends Phaser.Scene {
     expand.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.mapWin.toggle());
     this.specialChip = txt(this, x0 + 2, y0 + MINI - 2, '', 9, COLORS.gold).setOrigin(0, 1).setBackgroundColor('#0b0d1fcc').setPadding(3, 1, 3, 1);
     parts.push(this.miniImg, this.miniGfx, this.dayText, this.clockText, this.placeText, expand, this.specialChip);
-    new Foldable(this, x0 - 4, y0 + MINI + 38, parts, 'แผนที่ย่อ');
+    const fold = new Foldable(this, x0 - 4, y0 + MINI + 38, parts, 'แผนที่ย่อ');
+    this.gRight.add([...parts, fold.button]);
   }
 
   /** มินิแมปวาดรอบตัวผู้เล่น (1 px = 1 tile, รัศมี 70 tile) */
@@ -392,19 +596,23 @@ export class UIScene extends Phaser.Scene {
     this.questBox = panel(this, x - 104, 168, MINI + 20 + 104, 58, 'ui_panel_dark');
     this.questTitle = txt(this, x - 92, 176, '', 11, COLORS.gold);
     this.questText = txt(this, x - 92, 193, '', 10, COLORS.text, { wordWrap: { width: MINI + 96 } });
-    new Foldable(this, x - 100, 228, [this.questBox, this.questTitle, this.questText], 'เป้าหมาย');
+    const fold = new Foldable(this, x - 100, 228, [this.questBox, this.questTitle, this.questText], 'เป้าหมาย');
+    this.gRight.add([this.questBox, this.questTitle, this.questText, fold.button]);
     // 📌 แปลนที่ปักหมุด: ของดิบที่ยังขาด (นับรวมหีบ/โกดัง) — แตะเพื่อเปิดสมุดแปลนหน้านั้น
-    this.pinBox = panel(this, x - 104, 246, MINI + 20 + 104, 40, 'ui_panel_dark').setInteractive({ useHandCursor: true }).setVisible(false);
-    this.pinTitle = txt(this, x - 92, 253, '', 11, '#73eff7').setVisible(false);
-    this.pinText = txt(this, x - 92, 270, '', 10, COLORS.text, { lineSpacing: 2 }).setVisible(false);
+    this.pinBox = panel(this, 0, 0, MINI + 20 + 104, 40, 'ui_panel_dark').setInteractive({ useHandCursor: true });
+    this.pinTitle = txt(this, 12, 7, '', 11, '#73eff7');
+    this.pinText = txt(this, 12, 24, '', 10, COLORS.text, { lineSpacing: 2 });
     this.pinBox.on('pointerdown', () => this.blueprint.showPinned());
+    this.pinC = this.add.container(0, 0, [this.pinBox, this.pinTitle, this.pinText]).setScale(this.k).setDepth(2).setVisible(false);
   }
 
   /** อัปเดตแผงปักหมุด (ทุก 0.4 วิ) — มือถือย้ายไปฝั่งซ้ายใต้แผงสถานะ (ไม่ทับปุ่มสัมผัส) */
   private updatePin(touch: boolean) {
     const info = this.gs.pinInfo();
     const show = !!info && !this.modal;
-    [this.pinBox, this.pinTitle, this.pinText].forEach((o) => o.setVisible(show));
+    this.pinC.setVisible(show);
+    // pinBox.visible ใช้เช็กใน isPointerOverUI / การ์ดข้อมูล
+    this.pinBox.setVisible(show);
     if (!show) return;
     const rows = [...info!.rows].sort((a, b) => Number(a.have >= a.need) - Number(b.have >= b.need));
     const maxRows = touch ? 3 : 5;
@@ -413,18 +621,19 @@ export class UIScene extends Phaser.Scene {
     this.pinTitle.setText(`📌 ${info!.name}${info!.ready ? ' — ✔ พร้อมสร้าง (B)' : ''}`).setColor(info!.ready ? COLORS.good : '#73eff7');
     this.pinText.setText(lines.join('\n'));
     const w = MINI + 20 + 104;
-    const x = touch ? 6 : W - 12 - MINI - 10 - 104;
-    const y = touch ? 140 : 246;
-    this.pinBox.setPosition(x, y).setSize(w, 26 + this.pinText.height + 6);
-    this.pinTitle.setPosition(x + 12, y + 7);
-    this.pinText.setPosition(x + 12, y + 24);
+    this.pinBox.setSize(w, 26 + this.pinText.height + 6);
     fitText(this.pinTitle, w - 20);
+    // คอม: ใต้แผงเป้าหมาย (ขวา) · มือถือ: ซ้ายใต้แผงสถานะ
+    const k = this.k;
+    if (touch) this.pinC.setPosition(6 * k, this.statusBottom + 4);
+    else this.pinC.setPosition(W - (12 + MINI + 10 + 104) * k, 246 * k);
   }
 
   private buildBoss() {
-    this.bossName = txt(this, W / 2, 84, '', 15, '#ef7d57').setOrigin(0.5, 0);
-    this.bossBar = new StatBar(this, W / 2 - 180, 114, 360, 16, 0xb13e53);
+    this.bossName = txt(this, W / 2, 112, '', 15, '#ef7d57').setOrigin(0.5, 0);
+    this.bossBar = new StatBar(this, W / 2 - 180, 140, 360, 16, 0xb13e53);
     this.bossGroup = [this.bossName, ...this.bossBar.objects];
+    this.gTop.add(this.bossGroup);
     this.setVis(this.bossGroup, false);
   }
 
@@ -436,24 +645,32 @@ export class UIScene extends Phaser.Scene {
     const total = HOTBAR_SIZE * SLOT + (HOTBAR_SIZE - 1) * GAP;
     const x0 = (W - total) / 2 + SLOT / 2;
     const y = H - SLOT / 2 - 14;
-    panel(this, (W - total) / 2 - 10, y - SLOT / 2 - 10, total + 20, SLOT + 20, 'ui_panel_dark');
+    // จอเล็ก: ขยาย kt เท่า ยึดกลางล่าง (เลื่อนซ้ายนิดหน่อย เว้นที่ให้ปุ่มสัมผัสขวา)
+    const ax = this.compact ? W / 2 - 26 : W / 2;
+    this.gHot = this.add.container(ax - (W / 2) * this.kt, H * (1 - this.kt)).setScale(this.kt).setDepth(2);
+    this.hotbarPanel = panel(this, (W - total) / 2 - 10, y - SLOT / 2 - 10, total + 20, SLOT + 20, 'ui_panel_dark');
+    this.gHot.add(this.hotbarPanel);
     for (let i = 0; i < HOTBAR_SIZE; i++) {
       const v = new SlotView(this, x0 + i * (SLOT + GAP), y, SLOT, String(i + 1));
       v.bg.setInteractive().on('pointerdown', () => (this.gs.player.selected = i));
+      this.gHot.add(v.objects);
       this.hotbar.push(v);
     }
-    this.hotbarRect = new Phaser.Geom.Rectangle((W - total) / 2 - 10, y - SLOT / 2 - 10, total + 20, SLOT + 20);
+    // ช่องสกิล (คอม/จอย) — มือถือใช้ปุ่ม "สกิล" บนจอแทน (แสดงคูลดาวน์บนปุ่ม)
     const sx = (W + total) / 2 + 24 + SLOT / 2;
     this.skillBox = this.add.nineslice(sx, y, 'ui_btn_hover', undefined, SLOT + 4, SLOT + 4, 8, 8, 8, 8);
-    txt(this, sx, y - 4, this.gs.player.char.skill.name, 10).setOrigin(0.5);
-    txt(this, sx - SLOT / 2 + 4, y - SLOT / 2 + 2, 'Q', 11, COLORS.dim);
+    this.skillLabel = txt(this, sx, y - 4, this.gs.player.char.skill.name, 10).setOrigin(0.5);
+    this.skillKey = txt(this, sx - SLOT / 2 + 4, y - SLOT / 2 + 2, 'Q', 11, COLORS.dim);
     this.skillCover = this.add.rectangle(sx - SLOT / 2, y + SLOT / 2, SLOT, SLOT, 0x000000, 0.6).setOrigin(0, 1);
     this.skillText = txt(this, sx, y + 10, '', 14).setOrigin(0.5);
+    this.gHot.add([this.skillBox, this.skillLabel, this.skillKey, this.skillCover, this.skillText]);
   }
 
-  /** แถบปุ่มด้านบน (ใช้ได้ทั้งคอมและมือถือ) */
+  private muteIcon: Phaser.GameObjects.Text | null = null;
+
+  /** แถบปุ่มด้านบน (ใช้ได้ทั้งคอมและมือถือ) — จอเล็ก: ปุ่มใหญ่ขึ้น ตัด 2.5D/ซูม (บีบนิ้วซูม · ตั้งค่าในเมนู ⚙) */
   private buildToolbar() {
-    const items: [string, string, () => void][] = [
+    const all: [string, string, () => void][] = [
       ['🎒', 'กระเป๋า Tab', () => this.toggleBag()],
       ['📐', 'แปลน B', () => this.blueprint.toggle('build')],
       ['⬆', 'อัพเกรด U', () => this.gs.build.toggleUpgrade()],
@@ -464,22 +681,33 @@ export class UIScene extends Phaser.Scene {
       ['🎥', '2.5D V', () => this.gs.setTilt(this.gs.tilt > 0 ? 0 : 0.6)],
       ['➕', 'ซูมเข้า', () => this.gs.setZoom(this.gs.zoom * 1.2)],
       ['➖', 'ซูมออก', () => this.gs.setZoom(this.gs.zoom / 1.2)],
+      // 🔊/🔇 ปิดเสียงทั้งหมด (ปุ่ม 0 / N ก็ได้) — ไอคอนเปลี่ยนตาม 'audio:changed'
+      [Sfx.isMuted ? '🔇' : '🔊', 'เสียง 0/N', () => this.toggleSound()],
       ['⚙', 'เมนู Esc', () => this.pauseWin.toggle()],
     ];
-    const bw = 42;
-    const x0 = W / 2 - (items.length * bw) / 2;
-    panel(this, x0 - 8, 4, items.length * bw + 16, 52, 'ui_panel_dark');
+    const items = this.compact ? all.filter(([i]) => !['🎥', '➕', '➖'].includes(i)) : all;
+    const bw = this.compact ? 41 : 42;
+    const bh = this.compact ? 40 : 36;
+    const ph = bh + 16;
+    // จอเล็ก: เลื่อนขวานิดหน่อย ไม่ชนแผงสถานะที่ขยายแล้ว
+    const x0 = W / 2 - (items.length * bw) / 2 + (this.compact ? 6 : 0);
+    this.toolbarPanel = panel(this, x0 - 8, 4, items.length * bw + 16, ph, 'ui_panel_dark');
+    this.gTop.add(this.toolbarPanel);
     items.forEach(([icon, tip, fn], i) => {
       const x = x0 + i * bw + bw / 2;
-      const b = this.add.nineslice(x, 26, 'ui_slot', undefined, bw - 4, 36, 6, 6, 6, 6).setInteractive({ useHandCursor: true });
-      txt(this, x, 25, icon, 17).setOrigin(0.5);
-      const tipT = txt(this, x, 48, tip, 10, COLORS.dim).setOrigin(0.5, 0).setVisible(false).setDepth(30);
+      const cy = 4 + ph / 2;
+      const b = this.add.nineslice(x, cy, 'ui_slot', undefined, bw - 4, bh, 6, 6, 6, 6).setInteractive({ useHandCursor: true });
+      const ic = txt(this, x, cy - 1, icon, this.compact ? 19 : 17).setOrigin(0.5);
+      if (tip.startsWith('เสียง')) this.muteIcon = ic;
+      const tipT = txt(this, x, 4 + ph - 4, tip, 10, COLORS.dim).setOrigin(0.5, 0).setVisible(false).setDepth(30);
       b.on('pointerover', () => tipT.setVisible(true)).on('pointerout', () => tipT.setVisible(false)).on('pointerdown', () => {
         Sfx.unlock();
+        // กดแล้วยุบนิดหน่อย (รู้สึกว่ากดติด)
+        this.tweens.add({ targets: [b, ic], scale: 0.9, duration: 60, yoyo: true });
         fn();
       });
+      this.gTop.add([b, ic, tipT]);
     });
-    this.toolbarRect = new Phaser.Geom.Rectangle(x0 - 8, 4, items.length * bw + 16, 52);
   }
 
   private updateHUD(delta: number) {
@@ -501,9 +729,8 @@ export class UIScene extends Phaser.Scene {
     this.bars.hunger.bar.setAlpha(p.hunger < 20 && blink ? 0.3 : 1);
     this.bars.thirst.bar.setAlpha(p.thirst < 20 && blink ? 0.3 : 1);
     this.bars.hp.bar.setAlpha(p.hp < p.maxHp * 0.25 && blink ? 0.3 : 1);
-    this.walletText.setText(g.wallet.coins.toLocaleString());
-    this.gemText.setText(String(g.wallet.gems));
-    this.powerText.setText(`พลัง ${g.player.power.toLocaleString()}`);
+    this.updateMoney(delta);
+    this.powerText.setText(`⚔ ${g.player.power.toLocaleString()}`);
     const last = g.player.level <= 1;
     this.levelText.setText(`Lv.${g.player.level} · XP ${g.player.xp}/${g.player.xpNeed}${last ? ' ⚠' : ''}`).setColor(last ? COLORS.bad : COLORS.gold);
     this.xpBar.width = 138 * Math.min(1, g.player.xp / g.player.xpNeed);
@@ -527,7 +754,8 @@ export class UIScene extends Phaser.Scene {
     this.placeText.setScale(Math.min(1, (MINI + 12) / Math.max(1, this.placeText.width)));
     this.miniTimer -= delta;
     if (this.miniTimer <= 0) {
-      this.miniTimer = 400;
+      // คุณภาพต่ำ = วาดมินิแมปห่างขึ้น (ลูปทุกช่อง 96×96)
+      this.miniTimer = qualityKnobs().minimapMs;
       this.drawMinimap();
     }
     const mg = this.miniGfx.clear().fillStyle(0xff3355, 1).fillRect(W - 12 - MINI / 2 - 2, 14 + MINI / 2 - 2, 4, 4);
@@ -564,6 +792,9 @@ export class UIScene extends Phaser.Scene {
     this.skillText.setText(p.skillCd > 0 ? String(Math.ceil(p.skillCd)) : '');
     const touch = g.controls.touchMode;
     const pad = g.controls.padMode;
+    // มือถือ: ซ่อนช่องสกิลข้าง hotbar (มีปุ่ม "สกิล" บนจอ แสดงคูลดาวน์แทน)
+    this.setVis([this.skillBox, this.skillLabel, this.skillKey, this.skillCover, this.skillText], !touch);
+    this.skillCdT?.setText(p.skillCd > 0 ? `${Math.ceil(p.skillCd)}` : '');
     this.hintText.setText(g.hint ? `${pad ? 'Ⓐ' : touch ? '[ใช้]' : '[E]'} ${g.hint}` : '');
     this.padLegend.setVisible(pad && !this.modal);
     this.touchLayer.setVisible(touch && !this.modal);
@@ -608,13 +839,17 @@ export class UIScene extends Phaser.Scene {
     const t = txt(this, W / 2, 0, text, 16, color).setOrigin(0.5, 0).setDepth(40);
     this.toasts.push(t);
     if (this.toasts.length > 4) this.toasts.shift()?.destroy();
-    this.toasts.forEach((x, i) => x.setY(140 + i * 24));
+    // ใต้แถบเงิน/ข้อความสถานะ (จอเล็ก HUD ขยาย → เลื่อนลงตาม)
+    const y0 = 168 * this.k;
+    this.toasts.forEach((x, i) => x.setY(y0 + i * 24));
+    t.setAlpha(0);
+    this.tweens.add({ targets: t, alpha: 1, duration: 140 });
     this.tweens.add({
       targets: t, alpha: 0, delay: 2800, duration: 500,
       onComplete: () => {
         this.toasts = this.toasts.filter((x) => x !== t);
         t.destroy();
-        this.toasts.forEach((x, i) => x.setY(140 + i * 24));
+        this.toasts.forEach((x, i) => x.setY(y0 + i * 24));
       },
     });
   }
@@ -624,7 +859,9 @@ export class UIScene extends Phaser.Scene {
     const t = txt(this, 16, 0, `+${n.toLocaleString()} ${def.name}`, 15, RARITY[def.rarity ?? 'common'].color);
     this.feed.push(t);
     if (this.feed.length > 5) this.feed.shift()?.destroy();
-    this.feed.forEach((f, i) => f.setY(H - 190 - (this.feed.length - 1 - i) * 20));
+    // มือถือ: เหนือจอยสติก · คอม: ซ้ายล่าง
+    const fy = this.gs.controls.touchMode ? H - 236 * this.kt : H - 190;
+    this.feed.forEach((f, i) => f.setY(fy - (this.feed.length - 1 - i) * 20));
     this.tweens.add({ targets: t, alpha: 0, delay: 1800, duration: 400, onComplete: () => {
       this.feed = this.feed.filter((x) => x !== t);
       t.destroy();
@@ -632,8 +869,10 @@ export class UIScene extends Phaser.Scene {
   }
 
   private banner(name: string, desc: string, color: string) {
-    const t = heading(this, W / 2, H / 2 - 120, name, 38).setOrigin(0.5).setAlpha(0).setDepth(9);
-    const d = txt(this, W / 2, H / 2 - 80, desc, 16, color).setOrigin(0.5).setAlpha(0).setDepth(9);
+    // จอเล็ก: ต่ำลงนิดหน่อย ไม่ทับข้อความสถานะใต้แถบเงิน
+    const by = this.compact ? H / 2 - 92 : H / 2 - 120;
+    const t = heading(this, W / 2, by, name, 38).setOrigin(0.5).setAlpha(0).setDepth(9);
+    const d = txt(this, W / 2, by + 40, desc, 16, color).setOrigin(0.5).setAlpha(0).setDepth(9);
     this.tweens.add({ targets: [t, d], alpha: 1, duration: 400, yoyo: true, hold: 2000, onComplete: () => (t.destroy(), d.destroy()) });
   }
 
@@ -783,6 +1022,7 @@ export class UIScene extends Phaser.Scene {
       bag.forEach((v, i) => {
         const on = i < size;
         v.objects.forEach((o) => (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(on));
+        v.dirty();
         if (on) v.set(inv.slots[HOTBAR_SIZE + i], HOTBAR_SIZE + i === this.bagPicked);
       });
       hot.forEach((v, i) => v.set(inv.slots[i], i === this.bagPicked));
@@ -1086,7 +1326,9 @@ export class UIScene extends Phaser.Scene {
       this.toast(`ยกเลิกขาย ${ITEMS[l.item].name}`, COLORS.dim);
     });
     w.add([mineTitle, mineList]);
+    const wallet = this.headerWallet(w);
     return this.register(w, () => {
+      wallet();
       const list = rooms.listings(this.gs.room.id).filter((l) => l.seller !== localPlayerId()).sort((a, b) => (a.stall === this.tradeStall ? -1 : 0) - (b.stall === this.tradeStall ? -1 : 0));
       const pages = Math.max(1, Math.ceil(list.length / 8));
       this.tradePage = Math.min(this.tradePage, pages - 1);
@@ -1210,9 +1452,9 @@ export class UIScene extends Phaser.Scene {
       Sfx.play('levelUp');
     }, true, 13);
     w.add([...gemBuy.objects, ...gemSell.objects, ...goldBuy.objects, ...boxBuy.objects]);
-    const wallet = txt(this, 0, 396, '', 14, COLORS.gold);
-    w.add(wallet);
+    const wallet = this.headerWallet(w);
     return this.register(w, () => {
+      wallet();
       const m = this.gs.market;
       let bi = 0;
       let si = 0;
@@ -1225,7 +1467,6 @@ export class UIScene extends Phaser.Scene {
         r.name.setText(`${o.hot ? '★ ' : ''}${ITEMS[o.item].name} ×${o.qty}${have}`).setColor(o.hot ? COLORS.gold : COLORS.text);
         r.btn.setLabel(`${r.side === 'buy' ? 'ซื้อ' : 'ขาย'} ${o.price}`);
       }
-      wallet.setText(`💰 ${this.gs.wallet.coins.toLocaleString()} เหรียญ   💎 ${this.gs.wallet.gems} เพชร`);
     });
   }
 
@@ -1285,7 +1526,9 @@ export class UIScene extends Phaser.Scene {
     }, true, 15);
     w.add([big, bigArt, bigFrame, title, info, result, ...go.objects]);
     w.add(txt(this, 0, 372, 'อัพเกรดสำเร็จ 100% · ค่าสถานะ +15%/เลเวล (Lv10 = ×2.35) · ความทนทาน +10%/เลเวล · อัพแล้วซ่อมเต็ม\nLv2–3 อัพได้ทุกที่ · Lv4+ ต้องมีทั่งตีเหล็กบนเกาะ · Lv4–6/7–9/10 ต้องมีแปลนอัพเกรดของหมวดนั้น (กล่องทอง/เพชร)', 11, COLORS.dim, { lineSpacing: 3, wordWrap: { width: 600 } }));
+    const wallet = this.headerWallet(w);
     return this.register(w, () => {
+      wallet();
       const g = this.gs;
       const p = g.player;
       idx = [];
@@ -1412,8 +1655,19 @@ export class UIScene extends Phaser.Scene {
     const w = new UIWindow(this, 40, 20, 880, 500, 'แผนที่โลก (M)');
     const viewW = 600;
     const viewH = 430;
-    const maskG = this.make.graphics({}).fillRect(56, 62, viewW, viewH);
+    const maskG = this.make.graphics({}, false).fillRect(0, 0, viewW, viewH);
     const mask = maskG.createGeometryMask();
+    // mask อยู่พิกัดจอ → ตามหน้าต่างทุกเฟรม (ลากย้าย/ขยายบนจอเล็กได้)
+    const syncMask = () => {
+      if (!w.visible) return;
+      const k = w.scale;
+      maskG.setScale(k).setPosition(w.root.x + w.body.x * k, w.root.y + w.body.y * k);
+    };
+    this.events.on('update', syncMask);
+    this.events.once('shutdown', () => {
+      this.events.off('update', syncMask);
+      maskG.destroy();
+    });
     this.mapImg = this.add.image(viewW / 2, viewH / 2, 'px').setMask(mask);
     this.mapGfx = this.add.graphics().setMask(mask);
     const holder = this.add.container(0, 0);
@@ -1628,7 +1882,7 @@ export class UIScene extends Phaser.Scene {
 
   // ---------- เมนูหยุด / ตั้งค่า ----------
   private makePause() {
-    const w = new UIWindow(this, W / 2 - 230, 60, 460, 430, 'เมนู · ⏸ เกมหยุดชั่วคราว');
+    const w = new UIWindow(this, W / 2 - 230, 44, 460, 458, 'เมนู · ⏸ เกมหยุดชั่วคราว');
     const resume = button(this, 214, 20, 260, 38, 'เล่นต่อ', () => w.close(), true, 15);
     const sound = button(this, 214, 66, 260, 38, '', () => this.toggleSound(), true, 15);
     const vol = txt(this, 214, 112, '', 14).setOrigin(0.5);
@@ -1647,7 +1901,15 @@ export class UIScene extends Phaser.Scene {
     }, true, 13);
     const intro = button(this, 120, 284, 220, 32, 'ดูเนื้อเรื่องเปิดอีกครั้ง', () => this.showIntro(0), true, 12);
     const quit = button(this, 340, 284, 190, 32, 'บันทึกและออก', () => this.gs.saveAndQuit(), true, 13);
-    const help = txt(this, 0, 312, 'WASD เดิน · Shift วิ่ง · Space หลบ · คลิก ตี/ยิง/วาง · E ใช้/คุย/ขึ้นเรือ\nF กิน/สวม/เปิดกล่อง · Q สกิล · B สร้าง · X รื้อ · Tab กระเป๋า · J คู่มือ\nM แผนที่ · O ตู้เสื้อผ้า · V มุม 2.5D · ล้อเมาส์/+/− ซูม · N เสียง', 11, COLORS.dim, { lineSpacing: 3 });
+    // คุณภาพภาพ (วนค่า) + เต็มจอ
+    const qual = button(this, 120, 324, 220, 32, '', () => {
+      const i = QUALITY_PREFS.findIndex((q) => q.id === qualityPref());
+      setQualityPref(QUALITY_PREFS[(i + 1) % QUALITY_PREFS.length].id);
+      this.toast(`คุณภาพภาพ: ${QUALITY_PREFS.find((q) => q.id === qualityPref())!.label} (${qualityName()})`, COLORS.gold);
+    }, true, 13);
+    const full = button(this, 340, 324, 190, 32, '', () => this.scale.toggleFullscreen(), true, 13);
+    w.add([...qual.objects, ...full.objects]);
+    const help = txt(this, 0, 350, 'WASD เดิน · Shift วิ่ง · Space หลบ · คลิก ตี/ยิง/วาง · E ใช้/คุย/ขึ้นเรือ\nF กิน/สวม/เปิดกล่อง · Q สกิล · B สร้าง · X รื้อ · Tab กระเป๋า · J คู่มือ\nM แผนที่ · O ตู้เสื้อผ้า · V มุม 2.5D · ล้อเมาส์/+/− ซูม · 0/N เปิด-ปิดเสียง', 11, COLORS.dim, { lineSpacing: 3 });
     w.add([...resume.objects, ...sound.objects, vol, ...vm.objects, ...vp.objects, tilt, ...tm.objects, ...tp.objects, zoom, ...zm.objects, ...zp.objects, ...intro.objects, ...quit.objects, ...ctrl.objects, help]);
     return this.register(w, () => {
       ctrl.setLabel(`การควบคุม: ${controlLabel()}  (กดเพื่อเปลี่ยน)`);
@@ -1655,6 +1917,8 @@ export class UIScene extends Phaser.Scene {
       vol.setText(`ระดับเสียง ${Math.round(Sfx.settings.master * 100)}%`);
       tilt.setText(`มุมกล้อง 2.5D: ${this.gs.tilt > 0 ? Math.round(this.gs.tilt * 100) + '%' : 'ปิด (บนลงล่าง)'}`);
       zoom.setText(`ซูม ${this.gs.zoom.toFixed(1)}×`);
+      qual.setLabel(`🖥 คุณภาพ: ${QUALITY_PREFS.find((q) => q.id === qualityPref())!.label}${qualityPref() === 'auto' ? ` (${qualityName()})` : ''}`);
+      full.setLabel(this.scale.isFullscreen ? '⛶ ออกจากเต็มจอ' : '⛶ เต็มจอ');
     });
   }
 
@@ -1679,6 +1943,8 @@ export class UIScene extends Phaser.Scene {
     build(c, close);
     this.modal = c;
     this.registry.set('uiOpen', true);
+    // จางเข้านุ่มๆ (ซีนที่ทำเอฟเฟกต์เข้าเองตั้ง alpha ไว้แล้ว — ไม่ทับ)
+    if (c.alpha === 1) popIn(this, c, 160);
   }
 
   private showBox(tier: BoxTier, loot: { item: string; qty: number; rarity: Rarity }[]) {
@@ -1857,7 +2123,8 @@ export class UIScene extends Phaser.Scene {
     const w = 300;
     const h = 30 + lines.length * 19 + 10;
     const x = 12;
-    const y = 150;
+    // ใต้แผงสถานะ (จอเล็กแผงสถานะขยาย → เลื่อนลงตาม)
+    const y = Math.max(150, this.statusBottom + 6);
     const c = this.add.container(x, y).setDepth(40);
     const bg = this.add.graphics();
     bg.fillStyle(0x0b0d1f, 0.86).fillRoundedRect(0, 0, w, h, 8);
@@ -1992,18 +2259,34 @@ export class UIScene extends Phaser.Scene {
   // ======================================================================
   // จอสัมผัส
   // ======================================================================
+  private joyZone!: Phaser.GameObjects.Zone;
+  private touchBtns: Phaser.GameObjects.Arc[] = [];
+
+  /**
+   * ปุ่มสัมผัส: จอยซ้าย (ลอย — แตะตรงไหนในโซนซ้ายล่าง จอยไปเกิดตรงนั้น) + กลุ่มปุ่มขวาล่างรอบปุ่มโจมตี
+   * จอเล็ก: ทั้งสองกลุ่มขยาย kt เท่า ยึดมุมล่าง (ปุ่มเล็กสุด ≥ 44 css px บนมือถือ)
+   */
   private buildTouch() {
     this.touchLayer = this.add.container(0, 0).setDepth(5).setVisible(false);
+    this.touchBtns = [];
     this.input.addPointer(2);
     const ctl = this.gs.controls;
-    const jx = 120;
-    const jy = H - 130;
-    const base = this.add.circle(jx, jy, 64, 0x0b0d1f, 0.35).setStrokeStyle(3, 0xf4f4f4, 0.35);
+    const kt = this.kt;
+    // ---- จอยซ้าย (พิกัด local ของกลุ่มที่ยึดมุมซ้ายล่าง) ----
+    const joy = this.add.container(0, H * (1 - kt)).setScale(kt);
+    const jx0 = 116;
+    const jy0 = H - 122;
+    let jx = jx0;
+    let jy = jy0;
+    const base = this.add.circle(jx, jy, 62, 0x0b0d1f, 0.35).setStrokeStyle(3, 0xf4f4f4, 0.35);
     const knob = this.add.circle(jx, jy, 28, 0xf4f4f4, 0.4);
-    const zone = this.add.zone(0, 220, 280, H - 290).setOrigin(0).setInteractive();
+    const zone = this.add.zone(0, 216, 300, H - 216).setOrigin(0).setInteractive();
+    this.joyZone = zone;
     let pid = -1;
+    const local = (p: Phaser.Input.Pointer) => ({ x: (p.x - joy.x) / kt, y: (p.y - joy.y) / kt });
     const moveKnob = (p: Phaser.Input.Pointer) => {
-      const v = new Phaser.Math.Vector2(p.x - jx, p.y - jy);
+      const l = local(p);
+      const v = new Phaser.Math.Vector2(l.x - jx, l.y - jy);
       const len = Math.min(56, v.length());
       v.normalize().scale(len);
       knob.setPosition(jx + v.x, jy + v.y);
@@ -2015,40 +2298,62 @@ export class UIScene extends Phaser.Scene {
       Sfx.unlock();
       ctl.touchMode = true;
       pid = p.id;
+      // จอยลอย: ย้ายฐานไปที่นิ้วแตะ (ไม่ชิดขอบจนดันไม่สุด)
+      const l = local(p);
+      jx = Phaser.Math.Clamp(l.x, 66, 300 - 30);
+      jy = Phaser.Math.Clamp(l.y, 216 + 40, H - 66);
+      base.setPosition(jx, jy).setAlpha(1);
       moveKnob(p);
     });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => p.id === pid && moveKnob(p));
-    this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
+    const release = (p: Phaser.Input.Pointer) => {
       if (p.id !== pid) return;
       pid = -1;
+      jx = jx0;
+      jy = jy0;
+      base.setPosition(jx, jy);
       knob.setPosition(jx, jy);
       ctl.touch.move.set(0, 0);
       ctl.touch.held.delete('sprint');
-    });
-    this.touchLayer.add([base, knob, zone]);
-    const btn = (x: number, y: number, r: number, label: string, color: number, act: () => void, hold?: string) => {
+    };
+    this.input.on('pointerup', release);
+    this.input.on('pointerupoutside', release);
+    joy.add([zone, base, knob]);
+
+    // ---- ปุ่มขวา (พิกัดเทียบมุมขวาล่าง: dx, dy ติดลบ) ----
+    const btns = this.add.container(W * (1 - kt), H * (1 - kt)).setScale(kt);
+    const btn = (dx: number, dy: number, r: number, label: string, color: number, act: () => void, hold?: string) => {
+      const x = W + dx;
+      const y = H + dy;
       const c = this.add.circle(x, y, r, color, 0.55).setStrokeStyle(3, 0xf4f4f4, 0.5).setInteractive();
-      const t = txt(this, x, y, label, r > 36 ? 16 : 11).setOrigin(0.5);
+      const t = txt(this, x, y, label, r > 36 ? 16 : 12).setOrigin(0.5);
       c.on('pointerdown', () => {
         Sfx.unlock();
         ctl.touchMode = true;
-        c.setScale(0.9);
+        c.setScale(0.9).setFillStyle(color, 0.8);
         if (hold) ctl.touch.held.add(hold);
         act();
       });
       const up = () => {
-        c.setScale(1);
+        c.setScale(1).setFillStyle(color, 0.55);
         if (hold) ctl.touch.held.delete(hold);
       };
       c.on('pointerup', up).on('pointerout', up);
-      this.touchLayer.add([c, t]);
+      btns.add([c, t]);
+      this.touchBtns.push(c);
+      return t;
     };
-    btn(W - 84, H - 128, 46, 'โจมตี/วาง', 0xb13e53, () => ctl.touch.pressed.add('attack'), 'attack');
-    btn(W - 186, H - 92, 32, 'ใช้', 0x38b764, () => ctl.touch.pressed.add('interact'));
-    btn(W - 176, H - 186, 28, 'หลบ', 0x3b5dc9, () => ctl.touch.pressed.add('dodge'));
-    btn(W - 72, H - 214, 28, 'สกิล', 0xffcd75, () => ctl.touch.pressed.add('skill'));
-    btn(W - 262, H - 140, 26, 'กิน/เปิด', 0xc28a50, () => ctl.touch.pressed.add('use'));
-    btn(W - 270, H - 222, 26, 'ออโต้', 0x38b764, () => this.autoWin.toggle());
+    // ปุ่มโจมตีใหญ่ที่มุม · ใช้/หลบ ติดนิ้วโป้ง · สกิล/กิน/ออโต้ วงนอก (ไม่สูงเกินแผงเป้าหมายทางขวาบน)
+    btn(-84, -92, 48, 'โจมตี/วาง', 0xb13e53, () => ctl.touch.pressed.add('attack'), 'attack');
+    btn(-188, -54, 32, 'ใช้', 0x38b764, () => ctl.touch.pressed.add('interact'));
+    btn(-180, -148, 29, 'หลบ', 0x3b5dc9, () => ctl.touch.pressed.add('dodge'));
+    const sk = btn(-76, -182, 27, 'สกิล', 0xffcd75, () => ctl.touch.pressed.add('skill'));
+    btn(-272, -118, 27, 'กิน/เปิด', 0xc28a50, () => ctl.touch.pressed.add('use'));
+    btn(-282, -188, 24, 'ออโต้', 0x38b764, () => this.autoWin.toggle());
+    // คูลดาวน์สกิลบนปุ่ม
+    this.skillCdT = txt(this, sk.x, sk.y + 17, '', 13, '#ffffff').setOrigin(0.5);
+    btns.add(this.skillCdT);
+    this.touchLayer.add([joy, btns]);
   }
 
   update(_time: number, delta: number) {
@@ -2065,6 +2370,7 @@ export class UIScene extends Phaser.Scene {
     const pause = this.pauseWin.visible || !!this.modal;
     if (pause !== this.gamePaused) {
       this.gamePaused = pause;
+      Sfx.setMusicPaused(pause); // หยุดเกม = เพลงหรี่
       if (pause) this.scene.pause('GameScene');
       else if (this.scene.isPaused('GameScene')) this.scene.resume('GameScene');
     }

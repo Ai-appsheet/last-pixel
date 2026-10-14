@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { titleIslandProfile } from '../gfx/art/ui';
 import { Sfx } from '../core/AudioManager';
+import { EventBus } from '../core/EventBus';
 import { MetaSave, todayKey } from '../core/MetaSave';
 import { SaveManager } from '../core/SaveManager';
 import { ACHIEVEMENTS } from '../data/achievements';
@@ -9,18 +10,24 @@ import { CONTROL_MODES, getControlMode, setControlMode } from '../core/ControlMo
 import { getSettings, setSettings } from '../core/Settings';
 import { CLASS_LOOKS, buildHeroTexture, heroKey } from '../gfx/art/heroes';
 import { COLORS, FONT, heading, PIXEL_FONT, txt } from '../ui/widgets';
-import { getAccounts } from '../core/AccountService';
+import { getAccounts, type AuthResult, type SendResult } from '../core/AccountService';
 import { apiEnabled, netStatus, onNetStatus } from '../core/backend/Api';
 import { Sync, fetchLeaderboard } from '../core/backend/Sync';
 import { WORLD_ROOM, getRoomService, localPlayerId } from '../core/RoomService';
 import { ART, coverCrop, coverImage, queueArt } from '../ui/art';
 import { queueItemArtIndex } from '../ui/itemArt';
 import { fancyButton, fancyPanel, fitText, iconTexture } from '../ui/fancyButton';
+import { fadeIn, fadeTo, popIn } from '../ui/transition';
+import { applyUiScale } from '../ui/layout';
+import { fmtMoney } from '../ui/money';
+import { QUALITY_PREFS, qualityName, qualityPref, setQualityPref } from '../core/Quality';
 
 const W = 960;
 const H = 540;
-/** ขนาดพิกเซลของโลโก้ */
-const LOGO_PX = 6;
+/** ขนาดพิกเซลของโลโก้ (ชื่อ 14 ตัวอักษร → 4 พอดีระหว่างแผงสถิติกับปุ่มบัญชี) */
+const LOGO_PX = 4;
+/** จอเล็ก: ขยายคอลัมน์เมนูซ้าย */
+const MENU_K = 1.18;
 /** ตำแหน่งเกาะหลัก (มุมซ้ายบนของ texture title_island 960×288) */
 const IX = 190;
 const IY = 322;
@@ -67,7 +74,12 @@ export class TitleScene extends Phaser.Scene {
   /** ขอบล่างของกล่องเมนู (เข้าระบบแล้ว) — 0 = หน้าฟอร์มเข้าสู่ระบบ */
   private menuBottom = 0;
 
+  /** จอเล็ก (มือถือ) — ซ่อนของตกแต่งเล็กๆ ที่อ่านไม่ออก */
+  private compact = false;
+
   create() {
+    this.compact = applyUiScale(this);
+    fadeIn(this);
     this.menuBottom = 0;
     queueArt(this, ART, true);
     queueItemArtIndex(this, true);
@@ -102,6 +114,7 @@ export class TitleScene extends Phaser.Scene {
     };
     if (this.load.isLoading()) this.load.once('complete', extras);
     else extras();
+    Sfx.startMusic('title'); // เล่นจริงหลังแตะครั้งแรก (ปลดล็อกเสียง)
     this.input.once('pointerdown', () => Sfx.unlock());
   }
 
@@ -499,9 +512,11 @@ export class TitleScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- โลโก้
 
-  /** สร้างโลโก้ "LAST PIXEL" เป็นพิกเซลจริง: ไล่สีทอง→ส้ม→แดง + ขอบหนาสองชั้น + มิติ + เฟรมแสงวิ้ง */
+  /** สร้างโลโก้ "SURVIVOR ISLES" เป็นพิกเซลจริง: SURVIVOR ไล่สีทอง→ส้ม→แดง · ISLES ไล่สีฟ้าทะเล + ขอบหนาสองชั้น + มิติ + เฟรมแสงวิ้ง */
   private buildLogoTexture(): { face: [number, number][]; w: number; h: number } {
-    const TEXT = 'LAST PIXEL';
+    const TEXT = 'SURVIVOR ISLES';
+    /** คำแรก (ทอง) จบที่คอลัมน์ไหน — หลังจากนั้นเป็นคำที่สอง (ฟ้า) */
+    const FIRST = 'SURVIVOR';
     // วาดฟอนต์ใหญ่ ×8 แล้วสุ่มจุดกึ่งกลางช่อง → ได้ mask 1 พิกเซลต่อ 1 จุดฟอนต์ (คมทุกเครื่อง)
     const S = 8;
     const cv = document.createElement('canvas');
@@ -512,6 +527,7 @@ export class TitleScene extends Phaser.Scene {
     c2.textBaseline = 'top';
     c2.fillStyle = '#ffffff';
     c2.fillText(TEXT, 16, 16);
+    const splitPx = 16 + c2.measureText(`${FIRST} `).width;
     const data = c2.getImageData(0, 0, cv.width, cv.height).data;
     let minX = cv.width;
     let minY = cv.height;
@@ -550,7 +566,12 @@ export class TitleScene extends Phaser.Scene {
       return false;
     };
     const ramp = ['#fff2b0', '#ffe08a', '#ffcd75', '#f7a65f', '#ef7d57', '#d65a50', '#b13e53'];
-    const faceColor = (y: number) => ramp[Math.min(ramp.length - 1, Math.floor(((y - PAD) / Math.max(1, gh)) * ramp.length))];
+    const sea = ['#e4fbff', '#b8f6ff', '#73eff7', '#41c6f6', '#41a6f6', '#3b7dd9', '#3b5dc9'];
+    const split = maxX < 0 ? gw : Math.round((splitPx - minX) / S) + PAD;
+    const faceColor = (x: number, y: number) => {
+      const r = x >= split ? sea : ramp;
+      return r[Math.min(r.length - 1, Math.floor(((y - PAD) / Math.max(1, gh)) * r.length))];
+    };
     const lighten = (hex: string, t: number) => {
       const n = parseInt(hex.slice(1), 16);
       const m = (v: number) => Math.round(v + (255 - v) * t);
@@ -569,12 +590,12 @@ export class TitleScene extends Phaser.Scene {
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           if (face(x, y)) {
-            let c = faceColor(y);
+            let c = faceColor(x, y);
             if (!face(x, y - 1) && y > PAD) c = lighten(c, 0.5); // ขอบบนสว่าง (bevel)
             else if (!face(x - 1, y)) c = lighten(c, 0.18);
             if (y === PAD && x % 5 === 1) c = '#ffffff';
             dot(x, y, c);
-          } else if (ext(x, y)) dot(x, y, '#7a2440'); // มิติ
+          } else if (ext(x, y)) dot(x, y, x >= split ? '#1d3466' : '#7a2440'); // มิติ
           else if (near(x, y, 1)) dot(x, y, '#1a1c2c'); // ขอบใน
           else if (near(x, y, 2)) dot(x, y, '#5d275d'); // ขอบนอก
         }
@@ -607,8 +628,9 @@ export class TitleScene extends Phaser.Scene {
 
   private drawLogo() {
     const { face, w, h } = this.buildLogoTexture();
-    const cx = W / 2;
-    const cy = 58;
+    // จอเล็ก: คอลัมน์เมนูซ้ายขยาย → เลื่อนโลโก้ไปทางขวานิดหน่อยไม่ให้ทับ
+    const cx = this.compact ? W / 2 + 24 : W / 2;
+    const cy = 64;
     const logo = this.add.container(cx, cy);
     const glow = this.softGlow(0, 4, 0xef7d57, (w * LOGO_PX) / 100, (h * LOGO_PX) / 70, 0.45);
     const img = this.add.image(0, 0, 'tt_logo').setScale(LOGO_PX);
@@ -669,9 +691,12 @@ export class TitleScene extends Phaser.Scene {
 
   private drawMenu() {
     const acc = getAccounts().current();
-    if (!acc) return this.drawAuth();
+    // ยังไม่เข้าระบบ / บัญชีเก่ายังไม่ผูกอีเมล → ฟอร์มบัญชี
+    if (!acc || (acc.needEmail && !this.attachSkipped)) return this.drawAuth();
     const meta = MetaSave.load();
     const save = SaveManager.load();
+    /** ของที่มีอยู่ก่อนวาดเมนู — ที่เพิ่มหลังจากนี้คือคอลัมน์ซ้าย (ไว้ขยายบนจอเล็ก) */
+    const before = new Set(this.children.list);
     const x = 36;
     const y = 142;
     const pw = 300;
@@ -704,11 +729,11 @@ export class TitleScene extends Phaser.Scene {
     }
     fancyButton(this, bx, next(40), {
       w: bw, h: 40, label: 'คลังอุปกรณ์ & ร้านค้า', icon: 'book', theme: 'teal', size: 16,
-      onClick: () => this.scene.start('CatalogScene'),
+      onClick: () => fadeTo(this, 'CatalogScene'),
     });
     fancyButton(this, bx, next(40), {
       w: bw, h: 40, label: 'ดูตัวละครทั้งหมด', icon: 'shield', theme: 'sky', size: 16,
-      onClick: () => this.scene.start('CharacterSelectScene', {}),
+      onClick: () => fadeTo(this, 'CharacterSelectScene', {}),
     });
     const sy = next(34);
     fancyButton(this, bx - 68, sy, { w: 128, h: 34, label: 'ความสำเร็จ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showAchievements() });
@@ -716,10 +741,16 @@ export class TitleScene extends Phaser.Scene {
     // การตั้งค่าทั้งหมด (ควบคุม/เสียง/กล้อง/การแสดงผล) รวมอยู่ในปุ่มนี้
     fancyButton(this, bx, next(34), { w: bw, h: 34, label: 'ตั้งค่า  (ควบคุม · เสียง · กล้อง)', icon: 'pad', theme: 'steel', size: 14, onClick: () => this.showSettings() });
 
-    this.drawStats(meta);
-    fancyButton(this, 114, 120, { w: 200, h: 30, label: 'อันดับ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showLeaderboard() });
+    this.drawStats(meta, save?.wallet);
+    fancyButton(this, 114, 123, { w: 200, h: 28, label: 'อันดับ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showLeaderboard() });
     this.menuMsg = txt(this, bx, y + rows + 40, this.pendingMsg ?? '', 12, COLORS.bad, { align: 'center', wordWrap: { width: pw } }).setOrigin(0.5, 0).setStroke('#0b0d1f', 4);
     this.pendingMsg = null;
+    // มือถือ: ขยายคอลัมน์ซ้าย (สถิติ + อันดับ + เมนู) ×1.18 ยึดมุมซ้ายบน — ปุ่มใหญ่พอให้นิ้วกด (กล่องไฮไลต์ด่านด้านล่างซ่อนไว้)
+    if (this.compact) {
+      const col = this.children.list.filter((o) => !before.has(o));
+      this.add.container(0, 0, col).setScale(MENU_K);
+      this.menuBottom = Math.round(this.menuBottom * MENU_K);
+    }
     // บัญชี (มุมขวาบน) + ออกจากระบบ
     fancyButton(this, W - 104, 32, {
       w: 188, h: 42, label: acc.username, sub: 'แตะเพื่อออกจากระบบ', icon: 'shield', theme: 'steel', size: 14,
@@ -736,7 +767,12 @@ export class TitleScene extends Phaser.Scene {
         this.scene.restart();
       },
     });
-    txt(this, W - 12, H - 6, 'v0.4 · PC & Mobile · 2.5D', 11, '#8a95a8').setOrigin(1, 1);
+    // ปุ่มเปิด/ปิดเสียง (ใต้ชิปบัญชี) · ปุ่มลัด 0 ใช้ได้ทุกหน้า
+    const muteBtn = fancyButton(this, W - 36, 78, { w: 52, h: 38, label: Sfx.isMuted ? '🔇' : '🔊', theme: 'steel', size: 18, onClick: () => Sfx.toggleMute() });
+    const onAudio = (m: boolean) => muteBtn.setLabel(m ? '🔇' : '🔊');
+    EventBus.on('audio:changed', onAudio);
+    this.events.once('shutdown', () => EventBus.off('audio:changed', onAudio));
+    txt(this, W - 12, H - 6, 'Survivor Isles v0.5 · PC & Mobile · 2.5D', 11, '#8a95a8').setOrigin(1, 1);
   }
 
   // ---------------------------------------------------------------- ไฮไลต์บนหน้าปก
@@ -756,6 +792,8 @@ export class TitleScene extends Phaser.Scene {
       { art: 'conquest', tag: 'เป้าหมาย', title: 'พิชิตเกาะร้าง', sub: 'ล้มบอสดันเจี้ยนครบ 3 ด่าน', color: '#a7f070' },
     ].filter((s) => this.textures.exists(`art_${s.art}`));
     if (!slides.length) return;
+    // จอเล็ก + เข้าระบบแล้ว: เมนูขยายจนเต็มคอลัมน์ ไม่มีที่ให้กล่องไฮไลต์
+    if (this.compact && this.menuBottom > 0) return;
     // เข้าระบบแล้ว: ใต้กล่องเมนูทางซ้าย · ยังไม่เข้า (ฟอร์มสูง): มุมขวาล่าง
     const under = this.menuBottom > 0;
     const cw = under ? 288 : 292;
@@ -829,29 +867,38 @@ export class TitleScene extends Phaser.Scene {
       const hit = this.add.zone(x, y, s, s).setOrigin(0).setInteractive({ useHandCursor: true }).setDepth(6);
       hit.on('pointerover', () => bg.setStrokeStyle(3, 0xffffff, 1));
       hit.on('pointerout', () => bg.setStrokeStyle(2, 0xffcd75, 0.8));
-      hit.on('pointerdown', () => this.scene.start('CharacterSelectScene', {}));
+      hit.on('pointerdown', () => fadeTo(this, 'CharacterSelectScene', {}));
       bg.setAlpha(0);
       face.setAlpha(0);
       this.tweens.add({ targets: [bg, face], alpha: 1, duration: 300, delay: 400 + k * 80 });
     });
   }
 
-  /** แผงสถิติมุมซ้ายบน: พลังสูงสุด / รอดนานสุด / โบนัสล็อกอิน */
-  private drawStats(meta: ReturnType<typeof MetaSave.load>) {
+  /** แผงสถิติมุมซ้ายบน: พลังสูงสุด / รอดนานสุด / เงินในเกาะ (เหรียญ·เพชร) / โบนัสล็อกอิน */
+  private drawStats(meta: ReturnType<typeof MetaSave.load>, wallet?: { coins: number; gems: number }) {
     const x = 14;
     const y = 12;
     const w = 200;
-    fancyPanel(this, x, y, w, 86, 'steel', 0.86);
+    fancyPanel(this, x, y, w, 98, 'steel', 0.86);
     const row = (ry: number, icon: 'sword' | 'moon', label: string, value: string, color: string) => {
       this.add.image(x + 22, ry, iconTexture(this, icon)).setScale(2);
       txt(this, x + 36, ry, label, 12, COLORS.dim).setOrigin(0, 0.5);
-      fitText(txt(this, x + w - 14, ry, value, 16, color).setOrigin(1, 0.5), 80);
+      fitText(txt(this, x + w - 14, ry, value, 15, color).setOrigin(1, 0.5), 80);
     };
-    row(y + 22, 'sword', 'พลังสูงสุด', (meta.bestPower ?? 0).toLocaleString(), COLORS.gold);
-    row(y + 44, 'moon', 'รอดนานสุด', `${meta.bestDays} วัน`, COLORS.good);
+    row(y + 19, 'sword', 'พลังสูงสุด', (meta.bestPower ?? 0).toLocaleString(), COLORS.gold);
+    row(y + 38, 'moon', 'รอดนานสุด', `${meta.bestDays} วัน`, COLORS.good);
+    // เงินของเกาะปัจจุบัน (ยังไม่มีเกาะ = ขีด) — รูปแบบเดียวกับ HUD ในเกม
+    const my = y + 58;
+    const pill = this.add.graphics();
+    pill.fillStyle(0x0b0d1f, 0.55).fillRoundedRect(x + 10, my - 10, w - 20, 20, 10);
+    pill.lineStyle(1, 0xffcd75, 0.45).strokeRoundedRect(x + 10, my - 10, w - 20, 20, 10);
+    this.add.image(x + 24, my, 'i_coin').setScale(1.1);
+    fitText(txt(this, x + 34, my, wallet ? fmtMoney(wallet.coins) : '—', 14, COLORS.gold).setOrigin(0, 0.5), 74);
+    this.add.image(x + 118, my, 'i_gem').setScale(1.1);
+    fitText(txt(this, x + 128, my, wallet ? fmtMoney(wallet.gems) : '—', 14, '#73eff7').setOrigin(0, 0.5), 56);
     const claimed = meta.lastLogin === todayKey();
     const login = txt(
-      this, x + 14, y + 67,
+      this, x + 14, y + 81,
       claimed ? `🔥 ล็อกอินติดต่อกัน ${meta.loginStreak} วัน` : '🎁 โบนัสล็อกอินรออยู่ที่ตู้จดหมาย',
       11, claimed ? COLORS.good : '#fff2b0',
     ).setOrigin(0, 0.5);
@@ -861,7 +908,7 @@ export class TitleScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- หน้าต่างย่อย
 
-  private modal(title: string, build: (c: Phaser.GameObjects.Container) => void) {
+  private modal(title: string, build: (c: Phaser.GameObjects.Container) => void, animate = true) {
     this.overlay?.destroy();
     const c = this.add.container(0, 0).setDepth(100);
     const dim = this.add.rectangle(0, 0, W, H, 0x0b0d1f, 0.85).setOrigin(0).setInteractive();
@@ -870,11 +917,12 @@ export class TitleScene extends Phaser.Scene {
     c.add(fancyButton(this, W / 2, H - 60, {
       w: 180, h: 40, label: 'ปิด', icon: 'close', theme: 'crimson', size: 16,
       onClick: () => {
-        c.destroy();
         this.overlay = null;
+        this.tweens.add({ targets: c, alpha: 0, duration: 120, onComplete: () => c.destroy() });
       },
     }));
     this.overlay = c;
+    if (animate) popIn(this, c);
   }
 
   /** ข้อความสถานะใต้เมนู (กำลังเชื่อมต่อ / error) */
@@ -910,8 +958,8 @@ export class TitleScene extends Phaser.Scene {
       }
     }
     const save = SaveManager.load();
-    if (save) this.scene.start('GameScene', { roomId: save.roomId, character: save.character, restore: true });
-    else this.scene.start('CharacterSelectScene', { play: true, name: getAccounts().current()?.username });
+    if (save) fadeTo(this, 'GameScene', { roomId: save.roomId, character: save.character, restore: true }, 260);
+    else fadeTo(this, 'CharacterSelectScene', { play: true, name: getAccounts().current()?.username });
   }
 
   /** ไฟสถานะการเชื่อมต่อ (มุมซ้ายล่าง เหนือเลขเวอร์ชัน) */
@@ -959,106 +1007,303 @@ export class TitleScene extends Phaser.Scene {
     });
   }
 
-  /** ยังไม่เข้าระบบ: ฟอร์มเข้าสู่ระบบ / สมัครสมาชิก */
-  private authMode: 'login' | 'register' = 'login';
+  /** ยังไม่เข้าระบบ: ฟอร์มบัญชี (เข้าสู่ระบบ ↔ สมัคร ↔ ใส่รหัสยืนยัน ↔ ลืมรหัสผ่าน) + ผูกอีเมลของบัญชีเก่า */
+  private authMode: AuthMode = 'login';
+  /** อีเมลของขั้นตอนที่ทำอยู่ (ส่งต่อระหว่างหน้า เช่น สมัคร → ใส่รหัส) */
+  private authEmail = '';
+  private authRemember = true;
+  /** ข้อความที่จะโชว์บนหน้าถัดไป */
+  private authNotice: { text: string; bad?: boolean } | null = null;
+  /** ขอรหัสใหม่ได้เมื่อ (ms) */
+  private resendAt = 0;
+  /** บัญชีเก่ากด "ไว้ทีหลัง" แล้ว (ไม่ถามผูกอีเมลอีกจนกว่าจะเปิดหน้าใหม่) */
+  private attachSkipped = false;
+  /** ของในฟอร์ม — ลบทิ้งตอนเปลี่ยนหน้าโดยไม่ต้อง restart ซีน */
+  private authObjs: Phaser.GameObjects.GameObject[] = [];
+  private authTimer: Phaser.Time.TimerEvent | null = null;
 
   private drawAuth() {
+    this.authObjs.forEach((o) => o.destroy());
+    this.authObjs = [];
+    this.authTimer?.remove();
+    this.authTimer = null;
+    const svc = getAccounts();
+    // เข้าระบบอยู่แล้ว = บัญชีเก่าที่ยังไม่ผูกอีเมล → มีแค่หน้าผูกอีเมล
+    const signed = !!svc.current();
+    const attachStep = this.authMode === 'attach' || this.authMode === 'attachCode';
+    if (signed !== attachStep) this.authMode = signed ? 'attach' : 'login';
+    const mode = this.authMode;
+    const keep = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
+      this.authObjs.push(o);
+      return o;
+    };
+    // กล่องอยู่คอลัมน์ซ้าย (x 36–336) ใต้โลโก้ (y ≥ 156) · สูงสุด 290 → ขอบล่าง ≤ 446 ไม่ทับไฟสถานะ/แถบตัวละคร
     const x = 36;
     const y = 156;
     const pw = 300;
     const bx = x + pw / 2;
-    const reg = this.authMode === 'register';
-    fancyPanel(this, x, y, pw, reg ? 330 : 300, 'gold');
-    fancyButton(this, bx - 68, y + 30, { w: 128, h: 34, label: 'เข้าสู่ระบบ', theme: reg ? 'steel' : 'gold', size: 14, onClick: () => this.switchAuth('login') });
-    fancyButton(this, bx + 68, y + 30, { w: 128, h: 34, label: 'สมัครสมาชิก', theme: reg ? 'gold' : 'steel', size: 14, onClick: () => this.switchAuth('register') });
+    const iw = 236;
+    const ph = { login: 282, register: 290, verify: 282, forgot: 266, reset: 290, attach: 290, attachCode: 282 }[mode];
+    keep(fancyPanel(this, x, y, pw, ph, 'gold'));
+    const msg = keep(txt(this, bx, y + ph - 38, '', 12, COLORS.bad, { align: 'center', wordWrap: { width: 260 } }).setOrigin(0.5, 0));
+    const say = (t: string, color: string = COLORS.bad) => msg.setText(t).setColor(color);
+    if (this.authNotice) {
+      say(this.authNotice.text, this.authNotice.bad ? COLORS.bad : COLORS.good);
+      this.authNotice = null;
+    }
 
-    const input = (yy: number, placeholder: string, type: string) => {
+    const inputs: HTMLInputElement[] = [];
+    let submit = () => {};
+    let busy = false;
+    /** รอเซิร์ฟเวอร์: ล็อกช่องกรอก + "กำลังเชื่อมต่อ…" (กันกดซ้ำ) */
+    const run = async (fn: () => Promise<void>) => {
+      if (busy) return;
+      busy = true;
+      inputs.forEach((e) => (e.disabled = true));
+      say(apiEnabled() ? 'กำลังเชื่อมต่อ…' : 'กำลังตรวจสอบ…', COLORS.dim);
+      try {
+        await fn();
+      } finally {
+        busy = false;
+        if (this.sys.isActive()) inputs.forEach((e) => (e.disabled = false));
+      }
+    };
+    const label = (yy: number, t: string) => keep(txt(this, x + 32, yy, t, 12, COLORS.dim));
+    const title = (t: string) => keep(txt(this, bx, y + 30, t, 16, COLORS.gold).setOrigin(0.5));
+    const info = (yy: number, t: string, color: string = COLORS.dim, size = 12) =>
+      keep(txt(this, bx, yy, t, size, color, { align: 'center', wordWrap: { width: 260 } }).setOrigin(0.5, 0));
+    /** ช่องกรอก (DOM) — ตัวอักษร ≥ 16px กันมือถือซูมหน้าเอง */
+    const input = (cx: number, cy: number, o: { type?: string; ph: string; auto: string; max: number; w?: number; code?: boolean; value?: string }) => {
       const el = document.createElement('input');
-      el.type = type;
-      el.placeholder = placeholder;
-      el.maxLength = type === 'password' ? 64 : 16;
-      el.autocomplete = type === 'password' ? (reg ? 'new-password' : 'current-password') : 'username';
+      el.type = o.type ?? 'text';
+      el.placeholder = o.ph;
+      el.maxLength = o.max;
+      el.value = o.value ?? '';
+      el.name = o.auto;
+      el.spellcheck = false;
+      el.setAttribute('autocomplete', o.auto);
+      el.setAttribute('autocapitalize', 'off');
+      el.setAttribute('autocorrect', 'off');
+      if (o.code) {
+        el.setAttribute('inputmode', 'numeric');
+        el.setAttribute('pattern', '[0-9]*');
+        el.addEventListener('input', () => (el.value = el.value.replace(/\D/g, '').slice(0, 6)));
+      }
       Object.assign(el.style, {
-        width: '236px', height: '34px', fontSize: '16px', fontFamily: FONT, padding: '0 10px', borderRadius: '6px',
+        width: `${o.w ?? iw}px`, height: o.code ? '40px' : '34px', fontSize: o.code ? '22px' : '16px', letterSpacing: o.code ? '6px' : 'normal',
+        textAlign: o.code ? 'center' : 'left', fontFamily: FONT, padding: '0 10px', borderRadius: '6px',
         border: '3px solid #8a5a35', background: '#1a1c2c', color: '#f4f4f4', outline: 'none', boxSizing: 'border-box',
       });
-      this.add.dom(bx, yy, el);
+      el.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
+      keep(this.add.dom(cx, cy, el));
+      inputs.push(el);
       return el;
     };
-    txt(this, x + 32, y + 58, 'ชื่อผู้ใช้', 12, COLORS.dim);
-    const user = input(y + 88, 'ชื่อผู้ใช้', 'text');
-    txt(this, x + 32, y + 110, 'รหัสผ่าน', 12, COLORS.dim);
-    const pass = input(y + 140, 'รหัสผ่าน (6 ตัวขึ้นไป)', 'password');
-    let pass2: HTMLInputElement | null = null;
-    let rememberBox: HTMLInputElement | null = null;
-    let by = y + 196;
-    if (reg) {
-      txt(this, x + 32, y + 162, 'ยืนยันรหัสผ่าน', 12, COLORS.dim);
-      pass2 = input(y + 192, 'พิมพ์รหัสผ่านอีกครั้ง', 'password');
-      by = y + 244;
-    } else {
-      const wrap = document.createElement('label');
-      Object.assign(wrap.style, { color: '#d6e4ee', fontFamily: FONT, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' });
-      rememberBox = document.createElement('input');
-      rememberBox.type = 'checkbox';
-      rememberBox.checked = true;
-      wrap.append(rememberBox, 'จำฉันไว้ในเครื่องนี้');
-      this.add.dom(bx, y + 172, wrap);
-      by = y + 218;
-    }
-    const err = txt(this, bx, by + 34, '', 12, COLORS.bad, { align: 'center', wordWrap: { width: 260 } }).setOrigin(0.5, 0);
-    let busy = false;
-    const submit = async () => {
-      if (busy) return;
-      if (reg && pass.value !== pass2!.value) {
-        err.setText('รหัสผ่านทั้งสองช่องไม่ตรงกัน');
-        Sfx.play('error');
-        return;
-      }
-      busy = true;
-      const fields = [user, pass, pass2, rememberBox].filter((e): e is HTMLInputElement => !!e);
-      fields.forEach((e) => (e.disabled = true));
-      err.setText(apiEnabled() ? 'กำลังเชื่อมต่อ…' : 'กำลังตรวจสอบ…').setColor(COLORS.dim);
-      const acc = getAccounts();
-      const r = reg ? await acc.register(user.value, pass.value) : await acc.login(user.value, pass.value, rememberBox?.checked ?? true);
-      // ออนไลน์: โหลดเซฟ/ข้อมูลถาวรจากเซิร์ฟเวอร์ลงเครื่องก่อนเข้าเกม
-      if (!('error' in r) && apiEnabled()) {
-        if (this.sys.isActive()) err.setText('กำลังโหลดเซฟ…');
-        await Sync.afterLogin();
-      }
-      busy = false;
-      if (!this.sys.isActive()) return;
-      fields.forEach((e) => (e.disabled = false));
-      if ('error' in r) {
-        err.setText(r.error).setColor(COLORS.bad);
-        Sfx.play('error');
-        return;
-      }
-      Sfx.play('levelUp');
-      if (apiEnabled()) err.setText('กำลังเข้าเกาะ…').setColor(COLORS.dim);
-      void this.enterIsland();
+    /** รหัสผ่าน + ยืนยัน วางคู่กันในแถวเดียว */
+    const passPair = (cy: number) => [
+      input(bx - 61, cy, { type: 'password', ph: 'รหัสผ่าน', auto: 'new-password', max: 64, w: 114 }),
+      input(bx + 61, cy, { type: 'password', ph: 'ยืนยันรหัส', auto: 'new-password', max: 64, w: 114 }),
+    ];
+    const mainBtn = (cy: number, text: string, fn: () => Promise<void>) => {
+      submit = () => void run(fn);
+      keep(fancyButton(this, bx, cy, { w: iw, h: 44, label: text, icon: 'play', theme: 'emerald', size: 17, pulse: true, onClick: submit }));
     };
-    fancyButton(this, bx, by, { w: 236, h: 44, label: reg ? 'สมัครและเริ่มเล่น' : 'เข้าสู่ระบบ', icon: 'play', theme: 'emerald', size: 17, pulse: true, onClick: () => void submit() });
-    for (const el of [user, pass, pass2]) el?.addEventListener('keydown', (e) => e.key === 'Enter' && void submit());
-    this.time.delayedCall(100, () => user.focus());
-    txt(this, 12, H - 8, 'v0.4 · PC & Mobile · 2.5D', 11, '#8a95a8').setOrigin(0, 1);
+    const smallBtn = (cx: number, cy: number, w: number, text: string, onClick: () => void) =>
+      keep(fancyButton(this, cx, cy, { w, h: 32, label: text, theme: 'steel', size: 13, onClick: () => !busy && onClick() }));
+    /** ปุ่มส่งรหัสอีกครั้ง (นับถอยหลังจนพ้นเวลารอ) */
+    const resendBtn = (cx: number, cy: number, w: number, send: () => Promise<void>) => {
+      const b = smallBtn(cx, cy, w, 'ส่งรหัสอีกครั้ง', () => Date.now() >= this.resendAt && void run(send));
+      const tick = () => {
+        const s = Math.ceil((this.resendAt - Date.now()) / 1000);
+        if (b.active) b.setLabel(s > 0 ? `ส่งรหัสอีกครั้ง (${s})` : 'ส่งรหัสอีกครั้ง');
+      };
+      tick();
+      this.authTimer = this.time.addEvent({ delay: 500, loop: true, callback: tick });
+    };
+    /** ผลการขอส่งรหัส → ตั้งเวลารอ + ข้อความ */
+    const sent = (r: SendResult | AuthResult) => {
+      if (r.kind === 'error') {
+        if (r.wait) this.resendAt = Date.now() + r.wait * 1000;
+        say(r.error);
+        Sfx.play('error');
+        return false;
+      }
+      if (r.kind === 'sent' || r.kind === 'code') {
+        this.resendAt = Date.now() + r.wait * 1000;
+        say(r.message, COLORS.good);
+      }
+      return true;
+    };
+    const mismatch = (a: HTMLInputElement, b: HTMLInputElement) => {
+      if (a.value === b.value) return false;
+      say('รหัสผ่านทั้งสองช่องไม่ตรงกัน');
+      Sfx.play('error');
+      return true;
+    };
+
+    if (mode === 'login' || mode === 'register') {
+      const reg = mode === 'register';
+      keep(fancyButton(this, bx - 68, y + 30, { w: 128, h: 34, label: 'เข้าสู่ระบบ', theme: reg ? 'steel' : 'gold', size: 14, onClick: () => !busy && this.switchAuth('login') }));
+      keep(fancyButton(this, bx + 68, y + 30, { w: 128, h: 34, label: 'สมัครสมาชิก', theme: reg ? 'gold' : 'steel', size: 14, onClick: () => !busy && this.switchAuth('register') }));
+      label(y + 54, 'อีเมล');
+      const email = input(bx, y + 82, { type: 'email', ph: reg ? 'you@example.com' : 'อีเมล (บัญชีเก่าใส่ชื่อผู้ใช้ได้)', auto: reg ? 'email' : 'username', max: 254, value: this.authEmail });
+      if (reg) {
+        label(y + 104, 'ชื่อในเกม (คนอื่นเห็นชื่อนี้)');
+        const name = input(bx, y + 132, { ph: '3–16 ตัว ไทย/อังกฤษ/ตัวเลข/_', auto: 'nickname', max: 16 });
+        label(y + 154, 'รหัสผ่าน (8 ตัวขึ้นไป มีตัวอักษร + ตัวเลข)');
+        const [pass, pass2] = passPair(y + 182);
+        mainBtn(y + 226, 'สมัครสมาชิก', async () => {
+          if (mismatch(pass, pass2)) return;
+          this.authEmail = email.value.trim();
+          this.authRemember = true;
+          await this.authResult(await svc.register(email.value, pass.value, name.value, true), say);
+        });
+      } else {
+        label(y + 104, 'รหัสผ่าน');
+        const pass = input(bx, y + 132, { type: 'password', ph: 'รหัสผ่าน', auto: 'current-password', max: 64 });
+        const wrap = document.createElement('label');
+        Object.assign(wrap.style, { color: '#d6e4ee', fontFamily: FONT, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' });
+        const remember = document.createElement('input');
+        remember.type = 'checkbox';
+        remember.checked = this.authRemember;
+        wrap.append(remember, 'จำฉันไว้');
+        keep(this.add.dom(x + 30, y + 166, wrap).setOrigin(0, 0.5));
+        inputs.push(remember);
+        if (svc.emailCodes) {
+          const forgot = keep(txt(this, x + pw - 30, y + 166, 'ลืมรหัสผ่าน?', 13, '#73eff7').setOrigin(1, 0.5).setStroke('#0b0d1f', 3));
+          forgot.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+            if (busy) return;
+            Sfx.play('click');
+            if (email.value.includes('@')) this.authEmail = email.value.trim();
+            this.switchAuth('forgot');
+          });
+        }
+        mainBtn(y + 206, 'เข้าสู่ระบบ', async () => {
+          this.authRemember = remember.checked;
+          if (email.value.includes('@')) this.authEmail = email.value.trim();
+          await this.authResult(await svc.login(email.value, pass.value, remember.checked), say);
+        });
+      }
+    } else if (mode === 'verify' || mode === 'attachCode') {
+      const attach = mode === 'attachCode';
+      title(attach ? 'ยืนยันการผูกอีเมล' : 'ยืนยันอีเมล');
+      info(y + 50, 'ใส่รหัสยืนยัน 6 หลักที่ส่งไปทางอีเมล');
+      fitText(info(y + 68, this.authEmail, COLORS.text, 13), 260);
+      const code = input(bx, y + 112, { ph: '••••••', auto: 'one-time-code', max: 6, w: 180, code: true });
+      mainBtn(y + 160, 'ยืนยัน', async () => {
+        const r = attach ? await svc.confirmEmail(code.value) : await svc.verify(this.authEmail, code.value, this.authRemember);
+        await this.authResult(r, say);
+      });
+      resendBtn(bx - 56, y + 206, 150, async () => void sent(attach ? await svc.attachEmail(this.authEmail) : await svc.resend(this.authEmail)));
+      smallBtn(bx + 79, y + 206, 104, attach ? 'เปลี่ยนอีเมล' : 'กลับ', () => this.switchAuth(attach ? 'attach' : 'login'));
+    } else if (mode === 'forgot') {
+      title('ลืมรหัสผ่าน');
+      info(y + 50, 'กรอกอีเมลของบัญชี เราจะส่งรหัส 6 หลักไปให้ตั้งรหัสผ่านใหม่');
+      label(y + 88, 'อีเมล');
+      const email = input(bx, y + 116, { type: 'email', ph: 'you@example.com', auto: 'email', max: 254, value: this.authEmail });
+      mainBtn(y + 162, 'ส่งรหัส', async () => {
+        const r = await svc.forgot(email.value);
+        if (!this.sys.isActive()) return;
+        // เพิ่งขอไป (ยังไม่พ้นเวลารอ) → รหัสเดิมยังใช้ได้ ไปหน้าใส่รหัสเลย
+        if (r.kind === 'error' && r.code !== 'cooldown') return void sent(r);
+        this.authEmail = email.value.trim();
+        if (r.wait) this.resendAt = Date.now() + r.wait * 1000;
+        this.authNotice = r.kind === 'sent' ? { text: `${r.message} — ตรวจกล่องจดหมาย (และสแปม)` } : { text: r.error, bad: true };
+        this.switchAuth('reset');
+      });
+      smallBtn(bx, y + 206, 160, '← กลับไปเข้าสู่ระบบ', () => this.switchAuth('login'));
+    } else if (mode === 'reset') {
+      title('ตั้งรหัสผ่านใหม่');
+      fitText(info(y + 46, `รหัสส่งไปที่ ${this.authEmail}`), 260);
+      label(y + 64, 'รหัสยืนยัน 6 หลัก');
+      const code = input(bx, y + 90, { ph: '••••••', auto: 'one-time-code', max: 6, w: 180, code: true });
+      label(y + 116, 'รหัสผ่านใหม่ (8 ตัวขึ้นไป มีตัวอักษร + ตัวเลข)');
+      const [pass, pass2] = passPair(y + 142);
+      mainBtn(y + 186, 'ตั้งรหัสผ่านใหม่', async () => {
+        if (mismatch(pass, pass2)) return;
+        await this.authResult(await svc.reset(this.authEmail, code.value, pass.value, this.authRemember), say);
+      });
+      resendBtn(bx - 56, y + 228, 150, async () => void sent(await svc.forgot(this.authEmail)));
+      smallBtn(bx + 79, y + 228, 104, 'กลับ', () => this.switchAuth('login'));
+    } else {
+      // attach: บัญชีเก่า (เข้าด้วยชื่อผู้ใช้) → ผูกอีเมล
+      title('ผูกอีเมลกับบัญชี');
+      info(y + 48, `บัญชี "${svc.current()?.username ?? ''}" ยังไม่มีอีเมล — ผูกไว้เพื่อเข้าสู่ระบบด้วยอีเมลและกู้รหัสผ่านได้`);
+      label(y + 104, 'อีเมล');
+      const email = input(bx, y + 132, { type: 'email', ph: 'you@example.com', auto: 'email', max: 254, value: this.authEmail });
+      mainBtn(y + 178, 'ส่งรหัสยืนยัน', async () => {
+        const r = await svc.attachEmail(email.value);
+        if (!this.sys.isActive()) return;
+        // เพิ่งขอไปแล้ว → ไปหน้าใส่รหัส (รหัสเดิมยังใช้ได้)
+        if (r.kind === 'error' && r.code === 'cooldown') {
+          this.authEmail = email.value.trim().toLowerCase();
+          if (r.wait) this.resendAt = Date.now() + r.wait * 1000;
+          this.authNotice = { text: r.error, bad: true };
+          return this.switchAuth('attachCode');
+        }
+        await this.authResult(r, say);
+      });
+      smallBtn(bx, y + 222, 140, 'ไว้ทีหลัง →', () => {
+        this.attachSkipped = true;
+        say(apiEnabled() ? 'กำลังเข้าเกาะ…' : '', COLORS.dim);
+        void this.enterIsland();
+      });
+    }
+    // โฟกัสช่องแรกที่ยังว่าง
+    this.time.delayedCall(100, () => (inputs.find((e) => e.type !== 'checkbox' && !e.value) ?? inputs[0])?.focus());
+    keep(txt(this, 12, H - 8, 'Survivor Isles v0.5 · PC & Mobile · 2.5D', 11, '#8a95a8').setOrigin(0, 1));
   }
 
-  private switchAuth(m: 'login' | 'register') {
+  /** ผลจาก AccountService → หน้าใส่รหัส / เข้าเกม / โชว์ข้อผิดพลาด */
+  private async authResult(r: AuthResult, say: (t: string, color?: string) => unknown) {
+    if (!this.sys.isActive()) return;
+    if (r.kind === 'error') {
+      if (r.wait) this.resendAt = Date.now() + r.wait * 1000;
+      say(r.error);
+      Sfx.play('error');
+      return;
+    }
+    if (r.kind === 'code') {
+      this.authEmail = r.email;
+      this.resendAt = Date.now() + r.wait * 1000;
+      this.authNotice = { text: r.message, bad: r.bad };
+      this.switchAuth(this.authMode === 'attach' ? 'attachCode' : 'verify');
+      return;
+    }
+    const attached = this.authMode === 'attachCode' || this.authMode === 'attach';
+    // ออนไลน์: โหลดเซฟ/ข้อมูลถาวรจากเซิร์ฟเวอร์ลงเครื่องก่อนเข้าเกม (ผูกอีเมล = เข้าระบบอยู่แล้ว โหลดไปแล้ว)
+    if (apiEnabled() && !attached) {
+      say('กำลังโหลดเซฟ…', COLORS.dim);
+      await Sync.afterLogin();
+      if (!this.sys.isActive()) return;
+    }
+    Sfx.play('levelUp');
+    if (!attached) this.attachSkipped = false;
+    if (r.account.needEmail && !this.attachSkipped) {
+      this.authNotice = { text: 'เข้าสู่ระบบแล้ว — ผูกอีเมลก่อน (หรือกด "ไว้ทีหลัง")' };
+      this.authEmail = '';
+      this.switchAuth('attach');
+      return;
+    }
+    say(attached ? 'ผูกอีเมลเรียบร้อย — กำลังเข้าเกาะ…' : apiEnabled() ? 'กำลังเข้าเกาะ…' : '', COLORS.good);
+    void this.enterIsland();
+  }
+
+  private switchAuth(m: AuthMode) {
     if (this.authMode === m) return;
     this.authMode = m;
-    this.scene.restart();
+    this.drawAuth();
   }
 
   /** หน้าต่างตั้งค่า: รวมทุกการตั้งค่าไว้ที่เดียว (เปลี่ยนแล้วบันทึกทันที) */
-  private showSettings() {
+  private showSettings(animate = true) {
     this.modal('⚙ ตั้งค่า', (c) => {
       const a = Sfx.settings;
       const g = getSettings();
       let LX = 100;
       let CX = 330;
       let y = 100;
-      const redraw = () => this.showSettings();
+      const redraw = () => this.showSettings(false);
       const label = (t: string, sub?: string) => {
         c.add(txt(this, LX, sub ? y - 7 : y, t, 15, COLORS.text).setOrigin(0, 0.5));
         if (sub) c.add(txt(this, LX, y + 11, sub, 10, COLORS.dim).setOrigin(0, 0.5));
@@ -1119,7 +1364,16 @@ export class TitleScene extends Phaser.Scene {
         () => setSettings({ zoom: Math.min(5, Math.round((g.zoom + 0.25) * 100) / 100) }), 'ล้อเมาส์ / บีบนิ้ว ในเกม');
       toggle('การ์ดข้อมูล', g.infoCards, () => setSettings({ infoCards: !g.infoCards }), 'ชี้/จิ้ม/เดินใกล้ของ');
       toggle('จอสั่น', g.shake, () => setSettings({ shake: !g.shake }), 'โดนตี / ระเบิด / คริ');
-    });
+      // คุณภาพภาพ: อัตโนมัติ = มือถือเริ่ม "กลาง" และลดเองถ้า FPS ตก
+      label('คุณภาพภาพ', qualityPref() === 'auto' ? `ตอนนี้: ${qualityName()} · ลดเองถ้ากระตุก` : 'ต่ำ = ลื่นสุด (ปิด 2.5D)');
+      QUALITY_PREFS.forEach((q, i) => {
+        const on = qualityPref() === q.id;
+        c.add(fancyButton(this, CX - 60 + i * 52 - (i === 0 ? 8 : 0), y, {
+          w: i === 0 ? 64 : 48, h: 32, label: q.label, theme: on ? 'gold' : 'steel', size: 12,
+          onClick: () => (setQualityPref(q.id), redraw()),
+        }));
+      });
+    }, animate);
   }
 
   private showAchievements() {
@@ -1188,3 +1442,6 @@ export class TitleScene extends Phaser.Scene {
     }
   }
 }
+
+/** หน้าของฟอร์มบัญชีบนหน้าแรก (attach/attachCode = บัญชีเก่าผูกอีเมลหลังเข้าระบบ) */
+type AuthMode = 'login' | 'register' | 'verify' | 'forgot' | 'reset' | 'attach' | 'attachCode';

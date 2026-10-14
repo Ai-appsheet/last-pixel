@@ -447,7 +447,8 @@ export class BlueprintWindow {
     const input = scene.input;
     const move = (p: Phaser.Input.Pointer) => {
       if (!this.press || !p.isDown) return;
-      const dy = p.y - this.press.y;
+      // ระยะลากบนจอ → หน่วยในหน้าต่าง (หน้าต่างอาจขยายบนจอเล็ก)
+      const dy = (p.y - this.press.y) / this.win.scale;
       if (Math.abs(dy) > 6) this.dragged = true;
       if (this.dragged) this.setScroll(this.press.scroll - dy);
     };
@@ -462,7 +463,8 @@ export class BlueprintWindow {
     };
     const sync = () => {
       if (!this.win.visible) return;
-      this.maskG.setPosition(this.win.root.x + this.win.body.x, this.win.root.y + this.win.body.y + GRID_TOP);
+      const k = this.win.scale;
+      this.maskG.setScale(k).setPosition(this.win.root.x + this.win.body.x * k, this.win.root.y + (this.win.body.y + GRID_TOP) * k);
     };
     input.on('pointermove', move);
     input.on('pointerup', up);
@@ -653,9 +655,10 @@ export class BlueprintWindow {
   }
 
   private inGrid(p: Phaser.Input.Pointer) {
-    const x = this.win.root.x + this.win.body.x;
-    const y = this.win.root.y + this.win.body.y + GRID_TOP;
-    return p.x >= x && p.x <= x + GRID_W && p.y >= y && p.y <= y + GRID_H;
+    const k = this.win.scale;
+    const x = this.win.root.x + this.win.body.x * k;
+    const y = this.win.root.y + (this.win.body.y + GRID_TOP) * k;
+    return p.x >= x && p.x <= x + GRID_W * k && p.y >= y && p.y <= y + GRID_H * k;
   }
 
   private pressGrid(p: Phaser.Input.Pointer, card: number) {
