@@ -1,19 +1,19 @@
 // ภาพตัวอย่างรายไอเทม (อาวุธเทพ ยานพาหนะ อาคาร) → public/art/items/<id>.jpg + index.json
 // ใช้: node tools/gen-items.mjs [id...]   (ไม่ใส่ = ทำเฉพาะที่ยังไม่มี)
 // โค้ดเรียก API/บันทึกไฟล์อยู่ใน gen-lib.mjs · ไอเทมที่เหลือทั้งหมดอยู่ใน gen-items-all.mjs
-// อาวุธ: WEAPON = วางลอยเหนือแท่นหิน แสงเรือง พื้นหลังมืด · อาคาร: BUILDING = มุมสามส่วนสี่บนเกาะร้าง
-import { BUILDING, WEAPON, runJobs } from './gen-lib.mjs';
+// สไตล์ chibi pixel art 16-bit · อาวุธ: WEAPON = ลอยเหนือแท่นหิน ประกายดาว · อาคาร: BUILDING = ตึกน่ารัก isometric บนเกาะเล็ก
+import { BUILDING, TILE_FRAME, WEAPON, runJobs } from './gen-lib.mjs';
 
-// ยาน: มุมสามส่วนสี่ อยู่ในสภาพแวดล้อมของมัน
-const VEHICLE = (what, where) => `A survival game vehicle showcase: ${what}, three-quarter view, centered and large, ${where}, tropical island setting, sunny afternoon`;
-const SEA = 'on clear turquoise sea water near a sandy tropical beach';
-const LAND = 'on a sandy dirt path through a tropical jungle clearing';
-const SKY = 'flying in the sky above a tropical island and the sea, fluffy clouds';
+// ยาน: กรอบเดียวกับอาคาร (เกาะกลมเล็ก พื้นหลังไล่สีฟ้า) — เปลี่ยนแค่พื้นของเกาะตามชนิดยาน
+const VEHICLE = (what, where) => `Cute chibi-proportioned pixel art game vehicle: ${what}, ${TILE_FRAME.replace('standing on a small round grass island tile', where)}`;
+const SEA = 'floating on a small round turquoise water island tile with a sandy edge';
+const LAND = 'standing on a small round grass island tile';
+const SKY = 'flying just above a small round grass island tile';
 const JOBS = [
   ['thunder_blade', WEAPON('a long silver-blue sword crackling with lightning bolts')],
   ['inferno_axe', WEAPON('a huge double-headed battle axe made of black iron engulfed in roaring flames')],
-  ['vampire_scythe', WEAPON('a dark grim reaper scythe with a blood-red curved blade and bone handle, red mist')],
-  ['thor_hammer', WEAPON('a massive rune-engraved war hammer with a short leather handle, blue lightning around it')],
+  ['vampire_scythe', WEAPON('a scythe weapon alone: a long bone handle with a huge curved blood-red blade at the top, red mist, only the weapon, no person, no reaper')],
+  ['thor_hammer', WEAPON('a war hammer weapon: a big rectangular steel hammer head engraved with runes on a short leather-wrapped handle, blue lightning around it')],
   ['storm_bow', WEAPON('an elegant longbow made of storm clouds and silver, with three glowing water arrows')],
   ['cosmic_staff', WEAPON('a magic staff topped with a swirling galaxy orb and golden rings, fireballs orbiting')],
   ['glacier_greatsword', WEAPON('a gigantic two-handed greatsword made of glacier ice crystal, frost mist and snowflakes')],
@@ -23,14 +23,14 @@ const JOBS = [
   ['void_staff', WEAPON('a black obsidian staff with a small swirling black hole at its tip pulling in purple light')],
   ['dragon_cannon', WEAPON('an ornate bronze hand cannon shaped like a roaring dragon head, fire breath erupting')],
   ['raft', VEHICLE('a simple wooden log raft tied with ropes, with a small paddle', SEA)],
-  ['canoe', VEHICLE('a slim wooden canoe with a paddle', SEA)],
-  ['fishing_boat', VEHICLE('a small wooden fishing boat with a fishing net and buckets of fish', SEA)],
+  ['canoe', VEHICLE('a slim empty wooden canoe with a paddle, nobody aboard', SEA)],
+  ['fishing_boat', VEHICLE('a small empty wooden fishing boat with a fishing net and buckets of fish, nobody aboard', SEA)],
   ['sailboat', VEHICLE('a wooden sailboat with a big white sail', SEA)],
   ['cargo_ship', VEHICLE('a large wooden cargo ship loaded with crates and barrels', SEA)],
   ['jetski', VEHICLE('a red and white jet ski splashing water', SEA)],
-  ['motorboat', VEHICLE('a white motorboat with an outboard engine', SEA)],
+  ['motorboat', VEHICLE('an empty white motorboat with an outboard engine, nobody aboard', SEA)],
   ['speedboat', VEHICLE('a sleek yellow racing speedboat leaving a long wake', SEA)],
-  ['warship', VEHICLE('an armored wooden warship with iron plates and twin deck cannons', SEA)],
+  ['warship', VEHICLE('an empty armored wooden warship with iron plates and two deck cannons, no crew', SEA)],
   ['submarine', VEHICLE('a small yellow submarine half submerged with a periscope', SEA)],
   ['cart', VEHICLE('a wooden hand cart loaded with logs and stones', LAND)],
   ['bicycle', VEHICLE('a rugged old bicycle with a basket', LAND)],
@@ -54,7 +54,7 @@ const JOBS = [
     ['wood_house_2f', 'a two-story timber frame wooden house with balcony'],
     ['brick_house', 'a solid red brick house with a chimney and iron lantern'],
     ['tree_house', 'a wooden tree house built in the branches of a giant tree with a rope ladder'],
-    ['stilt_house', 'a wooden stilt house standing over shallow turquoise water with a fish trap below'],
+    ['stilt_house', 'a wooden hut raised on tall wooden stilts over a small pool of turquoise water'],
     ['barn', 'a big red farm barn surrounded by vegetable fields'],
     ['forge_house', 'a blacksmith forge house with a glowing furnace, anvil and chimney smoke'],
     ['manor', 'a luxurious two-story manor with white roman columns and a garden'],
@@ -67,10 +67,10 @@ const JOBS = [
     ['sawmill', 'a water powered wooden sawmill cutting logs into planks'],
     ['greenhouse', 'a glass greenhouse full of green plants and vegetables'],
     ['turret_cannon', 'a heavy iron defense cannon turret on a stone base firing'],
-    ['ballista', 'a giant wooden ballista siege crossbow on a stone platform'],
+    ['ballista', 'a large wooden siege crossbow turret: a wide horizontal bow with a taut string and a long spear-like arrow loaded, mounted on a wooden tripod stand'],
     ['flame_turret', 'a metal flamethrower defense turret spewing fire'],
     ['tesla_tower', 'a tall tesla coil tower crackling with blue electric arcs'],
-    ['mortar', 'a bronze mortar cannon firing a shell high into the sky'],
+    ['mortar', 'a short wide-barreled bronze artillery mortar cannon tilted upward on a wooden base, a stack of cannonballs beside it'],
   ].map(([id, what]) => [id, BUILDING(what)]),
 ];
 await runJobs(JOBS);

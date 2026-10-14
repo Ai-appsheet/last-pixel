@@ -2,36 +2,34 @@
 // → public/art/items/<id>.jpg + index.json  (อาวุธเทพ/ยาน/อาคารใหญ่ชุดแรกอยู่ใน gen-items.mjs)
 // ใช้: node tools/gen-items-all.mjs [id...]          ไม่ใส่ id = ทำเฉพาะที่ยังไม่มีภาพ · ใส่ id = ทำใหม่ทับ
 //      node tools/gen-items-all.mjs --part=1/2       แบ่งงานรัน 2 process พร้อมกัน (API ตอบ 502 ถ้าถี่เกิน — อย่าเกิน 2)
-import { BUILDING, WEAPON, runJobs } from './gen-lib.mjs';
+import { BUILDING, ITEM_FRAME, STYLE_MOB, TILE_FRAME, WEAPON, runJobs } from './gen-lib.mjs';
 
-// ---------- เทมเพลต (ทั้งชุดใช้โครงเดียวกัน ภาพจะได้ดูเป็นครอบครัวเดียว) ----------
+// ---------- เทมเพลต: ทุกภาพในกลุ่มเดียวกันใช้กรอบเดียวกัน (ชิ้นเดียวกลางภาพ พื้นหลังไล่สีเรียบ) · สไตล์ chibi pixel art 16-bit · prompt สั้น ----------
 const GLOW = { common: 'warm white', uncommon: 'green', rare: 'blue', epic: 'purple', legendary: 'golden' };
 const fancy = (r) => r === 'rare' || r === 'epic' || r === 'legendary';
-/** ไอเทมทั่วไป: ธรรมดา = บนโต๊ะไม้เก่า · หายาก+ = บนแท่นหินแกะสลัก มีแสงสีตามระดับ */
+/** (a) ไอเทมทั่วไป: กรอบ ITEM_FRAME · หายาก+ = มีออร่าสีตามระดับ + ประกายเล็กน้อย */
 const ITEM = (what, r = 'common') =>
-  `Game item showcase: ${what}, centered and large, ${fancy(r) ? `resting on a carved stone pedestal with a soft glow of ${GLOW[r]} light` : 'resting on a weathered wooden table'}, warm cozy background softly blurred`;
-/** ชุดเกราะ/เครื่องประดับ: บนหุ่นไม้หรือเบาะกำมะหยี่ */
-const STAND = 'a wooden armor stand';
-const CUSHION = 'a red velvet cushion';
-const MANNEQUIN = 'a wooden armor mannequin torso stand';
-const GEAR = (what, r = 'common', on = CUSHION) =>
-  `Game item showcase: ${what}, centered and large, displayed on ${on}${fancy(r) ? ` atop a carved stone pedestal with a soft glow of ${GLOW[r]} light` : ' on a weathered wooden table'}, warm cozy background softly blurred`;
-/** อาวุธ: ความแรงของออร่าตามระดับ (ธรรมดา = แขวนบนชั้นไม้ ไม่มีออร่า · เทพ = เทมเพลต WEAPON เดิม) */
+  `Cute pixel art game item: ${what}, ${ITEM_FRAME}, shiny highlights${fancy(r) ? `, glowing ${GLOW[r]} aura and a small sparkle` : ''}`;
+/** ชุดเกราะ/เครื่องประดับ: กรอบเดียวกับไอเทม (ไม่มีหุ่น/เบาะ — พารามิเตอร์ที่ 3 คงไว้เพื่อให้รายการเดิมไม่ต้องแก้) */
+const STAND = '';
+const CUSHION = '';
+const MANNEQUIN = '';
+const GEAR = (what, r = 'common', _on = CUSHION) =>
+  `Cute pixel art game equipment: ${what}, ${ITEM_FRAME}${fancy(r) ? `, glowing ${GLOW[r]} aura and a small sparkle` : ''}`;
+/** อาวุธ: กรอบเดียวกับไอเทม (วางทแยง) · ประกายเฉพาะหายากขึ้นไป · เทพ = เทมเพลต WEAPON */
+const WFRAME = ITEM_FRAME.replace('single item', 'single weapon placed diagonally');
 const ARMS = (what, r = 'common') => {
   if (r === 'legendary') return WEAPON(what);
-  if (r === 'epic') return `An epic fantasy weapon showcase: ${what}, floating diagonally above an ancient carved stone pedestal, strong purple magical aura and sparkling particles around it, dark moody background with soft light rays, the weapon centered and large`;
-  if (r === 'rare') return `A rare fantasy weapon showcase: ${what}, floating diagonally above a carved stone pedestal, soft blue magical glow around it, dark moody background, the weapon centered and large`;
-  if (r === 'uncommon') return `A fantasy game weapon showcase: ${what}, laid diagonally on a sturdy wooden weapon table, polished gleam, no magical aura, rustic workshop background softly blurred, warm lantern light, the weapon centered and large`;
-  return `A fantasy game weapon showcase: ${what}, hanging diagonally on a simple wooden wall rack, no magical aura, rustic workshop background softly blurred, warm lantern light, the weapon centered and large`;
+  if (r === 'epic') return `Cute pixel art epic weapon: ${what}, ${WFRAME}, glowing purple aura and sparkle stars`;
+  if (r === 'rare') return `Cute pixel art rare weapon: ${what}, ${WFRAME}, soft blue glow and a small sparkle`;
+  return `Cute pixel art game weapon: ${what}, ${WFRAME}, no magical aura`;
 };
-/** สิ่งก่อสร้างชิ้นเล็ก/กำแพง/พื้น/เฟอร์นิเจอร์: มุมสามส่วนสี่ บนเกาะหญ้าเล็กๆ หนึ่งช่อง */
-const TILE = (what) =>
-  `A survival island base building showcase: ${what}, three-quarter isometric view, centered and large, standing on a small square floating grass island tile, soft blurred tropical island background, golden hour light`;
-/** มอนสเตอร์: ภาพสมุดบันทึกสัตว์ประหลาด */
-const MOB = (what, biome) =>
-  `Fantasy monster bestiary portrait: ${what}, full body, three-quarter view, dynamic pose, in its habitat (${biome}), dramatic lighting`;
-const BOSS = (what, biome) =>
-  `Epic fantasy boss bestiary portrait: ${what}, gigantic towering boss monster, full body, three-quarter view, dynamic menacing pose, in its lair (${biome}), dramatic cinematic lighting, epic scale`;
+/** (b) สิ่งก่อสร้างชิ้นเล็ก/กำแพง/พื้น/เฟอร์นิเจอร์/เครื่องจักร: กรอบเดียวกับอาคาร (เกาะหญ้ากลมเล็ก พื้นหลังไล่สีฟ้า) */
+const TILE = (what) => `Cute chibi-proportioned isometric pixel art: ${what}, ${TILE_FRAME}`;
+/** (c) มอนสเตอร์: น่ารักแต่ดุ เต็มตัว กลางภาพ ~75% พื้นหลังไล่สีตามถิ่นอาศัย เงาที่พื้น · บอส/สัตว์ในตำนาน: epic-chibi */
+const MOB_FRAME = (biome) => `full body, centered, filling about 75 percent of the frame, simple gradient background in the colors of ${biome}, no scene, ground shadow`;
+const MOB = (what, biome) => [`Cute but fierce chibi pixel monster: ${what}, dynamic pose, ${MOB_FRAME(biome)}`, STYLE_MOB];
+const BOSS = (what, biome) => [`Epic chibi pixel art boss monster: ${what}, huge and menacing, dynamic pose, ${MOB_FRAME(biome)}`, STYLE_MOB];
 
 const JOBS = [
   // ---------- วัตถุดิบ ----------
@@ -39,7 +37,7 @@ const JOBS = [
   ['stone', ITEM('a small heap of rough grey stones and rock chunks')],
   ['fiber', ITEM('a bundle of dry golden grass fiber tied together')],
   ['rope', ITEM('a coiled braided rope made of plant fiber')],
-  ['hide', ITEM('a folded raw brown animal hide pelt with fur')],
+  ['hide', ITEM('a folded brown leather animal hide pelt, flat material, no head, no face')],
   ['bone', ITEM('a few white animal bones crossed together')],
   ['coal', ITEM('a heap of black coal lumps')],
   ['sulfur', ITEM('bright yellow sulfur crystal chunks')],
@@ -56,9 +54,9 @@ const JOBS = [
   ['coin', ITEM('a pile of shiny gold coins')],
   ['gem', ITEM('a large brilliant-cut sparkling diamond gemstone', 'epic')],
   ['slime_gel', ITEM('a wobbly blob of translucent green slime gel in a small wooden bowl')],
-  ['bat_wing', ITEM('a single severed leathery dark bat wing with thin finger bones and membrane, one wing only, no bat body, no head')],
-  ['crab_shell', ITEM('a single empty curved red-orange crab back shell lying upside down showing its hollow inside, just a shell piece like a bowl, no living crab, no legs')],
-  ['yeti_fur', ITEM('a folded flat pelt of shaggy white fur hide like a small fur rug, just the fur material, no animal, no face, no creature')],
+  ['bat_wing', ITEM('a single dark purple leathery wing membrane with thin finger bones, lying flat, a crafting material, no body, no head')],
+  ['crab_shell', ITEM('a curved red-orange hard shell plate fragment like an empty bowl, a crafting material, no legs, no eyes')],
+  ['yeti_fur', ITEM('a folded square of shaggy white fur cloth, plain material, no face, no eyes')],
   ['demon_horn', ITEM('a large curved black demon horn with glowing red cracks', 'rare')],
   ['plank', ITEM('a neat stack of sawn wooden planks')],
   ['brick', ITEM('a stack of red clay bricks')],
@@ -94,7 +92,7 @@ const JOBS = [
   ['pumpkin_seed', ITEM('a small open cloth seed pouch with flat white pumpkin seeds spilling out, a tiny pumpkin sprout beside it')],
   ['bandage', ITEM('a rolled white cloth bandage with a small first-aid pouch')],
   ['stone_axe', ITEM('a primitive stone axe with a wooden handle tied with rope')],
-  ['stone_pickaxe', ITEM('a primitive stone pickaxe with a wooden handle tied with rope')],
+  ['stone_pickaxe', ITEM('a primitive mining pick with a long curved pointed grey stone head on a wooden handle')],
   ['iron_axe', ITEM('a sturdy iron woodcutting axe with a wooden handle', 'uncommon')],
   ['iron_pickaxe', ITEM('a sturdy iron mining pickaxe with a wooden handle', 'uncommon')],
   ['fishing_rod', ITEM('a bamboo fishing rod with a reel, line and hook')],
@@ -115,24 +113,24 @@ const JOBS = [
   ['bone_sword', ARMS('a crude sword whose entire blade is a jagged white monster bone, bone handle, no metal at all')],
   ['katana', ARMS('a samurai katana with a curved steel blade and a wrapped hilt', 'rare')],
   ['frost_sword', ARMS('a sword with a frozen ice blade and cold mist', 'rare')],
-  ['iron_greatsword', ARMS('a huge heavy two-handed iron greatsword', 'uncommon')],
-  ['gold_greatsword', ARMS('a huge ornate two-handed golden greatsword', 'rare')],
+  ['iron_greatsword', ARMS('a huge heavy two-handed iron greatsword, only the sword', 'uncommon')],
+  ['gold_greatsword', ARMS('a huge ornate two-handed golden greatsword, no symbols', 'rare')],
   ['meteor_greatsword', ARMS('a huge two-handed dark meteorite greatsword with burning molten cracks and flames', 'epic')],
   ['stone_battleaxe', ARMS('a double-bladed stone battle axe with a wooden handle')],
   ['iron_battleaxe', ARMS('a heavy double-bladed iron battle axe', 'uncommon')],
   ['crab_cleaver', ARMS('a battle axe whose blade is a giant red crab claw', 'rare')],
   ['crystal_battleaxe', ARMS('a battle axe with a cyan ice crystal blade and frost mist', 'rare')],
   ['wood_club', ARMS('a thick wooden club')],
-  ['spiked_club', ARMS('a wooden club studded with sharp bone spikes')],
+  ['spiked_club', ARMS('a thick wooden club studded with many sharp white bone spikes')],
   ['iron_mace', ARMS('a flanged iron mace', 'uncommon')],
   ['gold_warhammer', ARMS('a large two-handed war hammer with a long wooden shaft and a heavy solid gold hammer head', 'rare')],
   ['meteor_maul', ARMS('a giant two-handed maul with a dark meteorite head glowing with molten lava cracks and flames', 'epic')],
   ['bone_spear', ARMS('a long spear tipped with a sharp bone point')],
   ['gold_trident', ARMS('a golden three-pronged trident of the sea', 'rare')],
   ['crystal_halberd', ARMS('a long halberd with an icy cyan crystal axe blade and frost mist', 'rare')],
-  ['meteor_lance', ARMS('a long knight lance made of dark meteorite iron wrapped in flames', 'epic')],
-  ['sickle', ARMS('a farmer\'s curved harvesting sickle with a wooden handle')],
-  ['iron_scythe', ARMS('a classic grim-reaper style farming scythe standing upright: a long curved wooden handle with a long curved iron blade fixed perpendicular at the top end', 'uncommon')],
+  ['meteor_lance', ARMS('a long jousting lance of dark meteorite iron with flames along its shaft, a single weapon object', 'epic')],
+  ['sickle', ARMS('a curved harvesting sickle with a wooden handle, only the tool, no person')],
+  ['iron_scythe', ARMS('a farming scythe tool alone: a long wooden handle with a long curved iron blade at the top, no person', 'uncommon')],
   ['shadow_scythe', ARMS('a grim reaper scythe with a long black shaft and a huge curved black blade at the top, dark shadow mist', 'rare')],
   ['rope_whip', ARMS('a coiled rope whip')],
   ['leather_whip', ARMS('a coiled brown leather bullwhip')],
@@ -156,7 +154,7 @@ const JOBS = [
   ['revolver', ARMS('an old western six-shot revolver pistol', 'rare')],
   ['shotgun', ARMS('a double-barrel shotgun with a wooden stock', 'rare')],
   ['rifle', ARMS('a long bolt-action hunting rifle with a scope', 'epic')],
-  ['slingshot', ARMS('a wooden Y-shaped slingshot with a few pebbles')],
+  ['slingshot', ARMS('a wooden Y-shaped fork slingshot with a rubber band and a pebble')],
   ['wood_boomerang', ARMS('a classic V-shaped wooden boomerang with painted stripes')],
   ['chakram', ARMS('a sharp round iron chakram throwing ring', 'uncommon')],
   ['fire_staff', ARMS('a magic staff topped with a burning fire orb', 'rare')],
@@ -170,58 +168,58 @@ const JOBS = [
   ['ice_bomb', ARMS('a round icy blue frost bomb covered in frost', 'uncommon')],
   ['smoke_bomb', ARMS('a round grey smoke bomb releasing thick smoke')],
   ['flash_bomb', ARMS('a small white flash bomb grenade emitting a bright flash')],
-  ['poison_bomb', ARMS('a round green glass gas bomb leaking toxic green fumes')],
+  ['poison_bomb', ARMS('a round green glass bomb leaking toxic green gas')],
   ['cluster_bomb', ARMS('a large bomb bundled with five smaller bomblets strapped around it', 'uncommon')],
   ['throwing_knife', ARMS('a set of three throwing knives')],
   ['shuriken', ARMS('three flat four-pointed steel ninja throwing stars (shuriken)')],
-  ['javelin', ARMS('a light throwing javelin')],
+  ['javelin', ARMS('a light throwing javelin spear with a slim iron tip')],
   ['arrow', ITEM('a bundle of wooden arrows with feather fletching in a quiver')],
   ['bullet', ITEM('a small pile of round lead musket balls and a powder pouch')],
-  ['shell', ITEM('a few red shotgun shells')],
+  ['shell', ITEM('three red shotgun shells with brass bases')],
   ['rifle_round', ITEM('a few long pointed brass rifle cartridges')],
   // ---------- กล่องสุ่ม ----------
   ['box_wood', ITEM('a closed small wooden treasure chest with iron bands')],
-  ['box_iron', ITEM('a closed sturdy iron treasure chest with rivets', 'uncommon')],
+  ['box_iron', ITEM('a closed sturdy grey iron treasure chest with rivets', 'uncommon')],
   ['box_gold', ITEM('a closed ornate golden treasure chest glowing with light leaking from the seams', 'epic')],
   ['box_legend', ITEM('a closed diamond treasure chest made of cyan-white crystal and diamond, sparkling brilliantly', 'legendary')],
   // ---------- ผลึกพลัง ----------
-  ['elixir_hp', ITEM('a glowing red heart-shaped life crystal in a small potion flask', 'common')],
+  ['elixir_hp', ITEM('a glowing red heart-shaped crystal in a small round potion flask', 'common')],
   ['elixir_sta', ITEM('a glowing yellow-green stamina crystal in a small potion flask', 'common')],
   ['elixir_atk', ITEM('a glowing orange-red power crystal shaped like a sharp shard', 'uncommon')],
   ['elixir_def', ITEM('a glowing steel-blue guardian crystal with a shield-shaped facet', 'uncommon')],
   ['elixir_spd', ITEM('a glowing mint-green wind crystal with swirling wind wisps', 'rare')],
-  ['elixir_crit', ITEM('a razor-sharp glowing bright white-silver crystal shard', 'rare')],
+  ['elixir_crit', ITEM('a sharp glowing white-silver crystal shard', 'rare')],
   ['elixir_luck', ITEM('a glowing emerald luck crystal with a four-leaf clover inside', 'rare')],
   ['elixir_regen', ITEM('a glowing pink healing crystal with tiny green leaves sprouting from it', 'epic')],
-  ['elixir_soul', ITEM('a large glowing dark crimson boss soul crystal with swirling ghostly energy inside', 'legendary')],
+  ['elixir_soul', ITEM('a large glowing dark crimson crystal with swirling ghostly energy', 'legendary')],
   // ---------- ชุดเกราะ / สวมใส่ ----------
   ['leather_armor', GEAR('a brown leather body armor vest', 'common', STAND)],
   ['fur_coat', GEAR('a thick warm fur coat', 'uncommon', STAND)],
-  ['crab_armor', GEAR('a chest breastplate armor made of red crab shell plates', 'uncommon', MANNEQUIN)],
+  ['crab_armor', GEAR('a red spiky shell-plated breastplate chest armor with leather straps, empty armor piece', 'uncommon', MANNEQUIN)],
   ['iron_armor', GEAR('a polished iron plate chest armor', 'uncommon', STAND)],
-  ['gold_armor', GEAR('an ornate golden plate breastplate cuirass armor', 'rare', MANNEQUIN)],
+  ['gold_armor', GEAR('an ornate golden plate breastplate armor', 'rare', MANNEQUIN)],
   ['meteor_armor', GEAR('a dark meteorite plate breastplate cuirass armor with shoulder pauldrons and glowing orange molten cracks', 'epic', MANNEQUIN)],
   ['leather_cap', GEAR('a brown leather hood')],
   ['miner_helmet', GEAR('a yellow miner hard hat with a headlamp', 'uncommon')],
   ['iron_helmet', GEAR('a steel knight helmet with a visor', 'uncommon')],
-  ['samurai_helmet', GEAR('a samurai kabuto helmet with golden crest horns', 'rare')],
+  ['samurai_helmet', GEAR('a samurai kabuto helmet with golden horn crest, just the empty helmet, no face', 'rare')],
   ['wizard_hat', GEAR('a tall pointed blue wizard hat with stars', 'rare')],
   ['royal_crown', GEAR('a golden royal crown with red jewels', 'rare')],
-  ['demon_crown', GEAR('a dark crown with two curved demon horns and a glowing red gem', 'legendary')],
+  ['demon_crown', GEAR('a dark iron crown with two curved demon horns and a glowing red gem, just the crown, no face', 'legendary')],
   ['leather_pants', GEAR('a pair of brown leather trousers', 'common', STAND)],
-  ['iron_greaves', GEAR('a pair of iron shin guard greaves', 'uncommon')],
-  ['meteor_greaves', GEAR('a pair of dark meteorite shin guard greaves with glowing molten cracks', 'rare')],
+  ['iron_greaves', GEAR('two curved iron leg armor plates lying side by side, armor pieces only', 'uncommon')],
+  ['meteor_greaves', GEAR('two dark metal leg armor plates with glowing orange cracks lying side by side, armor pieces only', 'rare')],
   ['leather_boots', GEAR('a pair of brown leather boots')],
   ['snow_boots', GEAR('a pair of fluffy white fur snow boots', 'uncommon')],
   ['iron_boots', GEAR('a pair of heavy iron armored boots', 'uncommon')],
   ['wind_boots', GEAR('a pair of light green boots with small feathered wings and swirling wind', 'epic')],
   ['work_gloves', GEAR('a pair of sturdy canvas work gloves')],
   ['iron_gauntlets', GEAR('a pair of iron armored gauntlets', 'uncommon')],
-  ['fire_gauntlets', GEAR('a pair of red armored gauntlets wreathed in flames', 'epic')],
+  ['fire_gauntlets', GEAR('a pair of red armored gauntlet gloves wreathed in flames, just the gloves, nobody wearing them', 'epic')],
   ['travel_cloak', GEAR('a red hooded travel cloak', 'common', STAND)],
-  ['fur_cloak', GEAR('a blue cloak with a white fur collar', 'uncommon', STAND)],
-  ['shadow_cloak', GEAR('a black shadowy hooded cloak with wisps of dark smoke', 'rare', STAND)],
-  ['arcane_cape', GEAR('a purple magic cape with glowing arcane runes', 'rare', STAND)],
+  ['fur_cloak', GEAR('a blue cloak with a white fur collar folded neatly, a cloth object', 'uncommon', STAND)],
+  ['shadow_cloak', GEAR('a black hooded cloak hanging on a hook with wisps of dark smoke, a cloth object, empty hood', 'rare', STAND)],
+  ['arcane_cape', GEAR('an empty purple magic cape with glowing runes, just the cape, nobody wearing it', 'rare', STAND)],
   ['royal_cape', GEAR('a luxurious gold royal cape with ermine fur trim', 'epic', STAND)],
   ['shell_necklace', GEAR('an island seashell necklace on a cord')],
   ['fang_amulet', GEAR('a necklace with a large wolf fang pendant', 'uncommon')],
@@ -234,11 +232,11 @@ const JOBS = [
   ['meteor_ring', GEAR('a dark metal ring set with a glowing orange meteorite stone', 'epic')],
   ['wood_shield', GEAR('a round wooden shield with iron rim', 'common', STAND)],
   ['iron_shield', GEAR('a heavy iron kite shield', 'uncommon', STAND)],
-  ['crab_shield', GEAR('a round shield made from a red giant crab shell', 'uncommon', STAND)],
+  ['crab_shield', GEAR('a round red spiky shell-plated shield with a leather handle', 'uncommon', STAND)],
   ['lantern', GEAR('a glowing brass oil lantern', 'uncommon', 'a wooden lantern hook')],
   ['pouch', GEAR('a small cloth satchel pouch bag')],
   ['leather_backpack', GEAR('a brown leather backpack', 'uncommon')],
-  ['explorer_pack', GEAR('a large adventurer explorer backpack with a bedroll, rope and compass', 'rare')],
+  ['explorer_pack', GEAR('a large brown canvas travel backpack with a rolled bedroll on top and a coiled rope on the side, an empty bag object', 'rare')],
   // ---------- แปลน (ใช้ภาพกลางตามระดับ แทนแปลนทุกชิ้น) ----------
   ['blueprint_uncommon', ITEM('a rolled blue paper blueprint scroll partly unrolled showing white line drawings of building and weapon plans, soft green glow around it', 'uncommon')],
   ['blueprint_rare', ITEM('a rolled blue paper blueprint scroll partly unrolled showing white line drawings of building and weapon plans, glowing blue aura', 'rare')],
@@ -252,7 +250,7 @@ const JOBS = [
   ['t_grass', TILE('a lush green lawn patch with small flowers')],
   ['t_sand', TILE('a square patch of smooth golden sand with a few seashells')],
   ['t_pond', TILE('a small clear freshwater pond with lily pads and a fish')],
-  ['t_fill', TILE('a piece of newly reclaimed land: a square of sand and earth rising out of shallow turquoise sea water, with a shovel stuck in it')],
+  ['t_fill', TILE('a small square of fresh sand and dirt rising out of shallow sea water, a shovel stuck in it')],
   // ---------- กำแพง / ประตู / พื้น ----------
   ['wood_wall', TILE('a short section of wooden plank fence wall')],
   ['stone_wall', TILE('a short section of sturdy grey stone block wall')],
@@ -307,20 +305,20 @@ const JOBS = [
   ['campfire', TILE('a campfire of logs ringed with stones, burning brightly')],
   ['workbench', TILE('a wooden crafting workbench with tools, a saw and a hammer')],
   ['furnace', TILE('a stone smelting furnace with glowing fire inside')],
-  ['anvil', TILE('a blacksmith iron anvil on a tree stump with a hammer')],
-  ['mech_bench', TILE('a mechanic workbench with a vise, gears, an engine part and tools')],
+  ['anvil', TILE('a black iron blacksmith anvil on a tree stump with a hammer, no characters')],
+  ['mech_bench', TILE('an empty mechanic workbench table with a vise, gears, a wrench and an engine part on it')],
   ['lamp_post', TILE('an electric lamp post with a bright bulb and a power cable')],
   ['charcoal_kiln', TILE('a dome-shaped brick charcoal kiln with smoke, a pile of logs and bricks beside it')],
   ['kitchen', TILE('an outdoor kitchen counter with a clay stove, a wok, pots and vegetables')],
   ['rain_collector', TILE('a wooden rain water collector barrel with a funnel catching rain')],
   ['water_well', TILE('a stone water well with a wooden roof, rope and bucket')],
   ['auto_smelter', TILE('an automatic steampunk metal smelter machine with glowing molten metal, pipes and power cables')],
-  ['adv_workbench', TILE('a large advanced workshop bench combining a workbench, an anvil and a small furnace')],
+  ['adv_workbench', TILE('a large advanced workshop bench with an anvil and a small furnace, no characters')],
   // ---------- ป้องกัน ----------
   ['spike_trap', TILE('a spike trap: many sharp iron spikes pointing straight up out of the bare ground in a grid, no fence, no walls')],
   ['turret_arrow', TILE('a small wooden automatic arrow turret with a loaded crossbow')],
   ['tower_archer', BUILDING('a sturdy stone archer tower with a wooden platform and a mounted crossbow')],
-  ['snare_trap', TILE('an open steel bear trap snare with jagged jaws')],
+  ['snare_trap', TILE('an open metal jaw trap with jagged teeth on the grass')],
   ['bomb_trap', TILE('a buried landmine bomb trap with a pressure plate and a fuse')],
   ['frost_trap', TILE('a frost trap: a rune plate on the ground emitting icy crystals and cold mist')],
   ['torch_pole', TILE('a tall wooden pole with a burning torch on top')],
@@ -336,7 +334,7 @@ const JOBS = [
   ['scarecrow', TILE('a scarecrow with a straw hat and patched clothes on a wooden post')],
   ['hay_bale', TILE('a few stacked golden hay bales')],
   // ---------- อาคาร ----------
-  ['leaf_hut', BUILDING('a simple lean-to shelter hut made of sticks and large palm leaves')],
+  ['leaf_hut', BUILDING('a tiny A-frame shelter hut built from wooden sticks and covered with big green palm leaves')],
   ['thatch_house', BUILDING('a small house with white plaster walls and a thick straw thatched roof')],
   ['storehouse', BUILDING('a large wooden and stone storehouse warehouse with big open doors, wooden conveyor chutes and stacked crates and sacks')],
 
@@ -399,10 +397,10 @@ const JOBS = [
   ['shark_tooth', ITEM('a few large serrated white shark teeth tied on a string', 'uncommon')],
   ['pearl', ITEM('a lustrous white pearl in an open oyster shell', 'rare')],
   ['naga_scale', ITEM('three large loose shimmering emerald-green leaf-shaped serpent scales with golden edges laid flat, only separate scales, no sphere, no egg, no snake', 'epic')],
-  ['garuda_feather', ITEM('a single huge radiant red and gold feather glowing softly', 'epic')],
+  ['garuda_feather', ITEM('one long red and gold bird feather, glowing softly', 'epic')],
   ['qilin_horn', ITEM('a single long straight spiral-twisted golden horn, like a narwhal tusk, glowing with small blue electric sparks, one isolated horn object', 'epic')],
   ['phoenix_feather', ITEM('a single blazing feather made of living flame with embers floating around it', 'epic')],
-  ['kraken_ink', ITEM('a corked glass bottle of swirling deep black and purple ink', 'epic')],
+  ['kraken_ink', ITEM('a corked glass bottle of swirling black and purple ink', 'epic')],
   ['kochasi_tusk', ITEM('a large curved ivory elephant tusk decorated with golden ornaments', 'epic')],
   ['frost_dragon_scale', ITEM('three large pointed teardrop-shaped translucent ice-blue reptile scales with frosty edges laid side by side, like big gem-like dragon scales', 'epic')],
   ['jade_shell', ITEM('a broken curved piece of ancient grey stone shell plate inlaid with glowing green jade gems, a single fragment object, no turtle, no animal, no head, no legs', 'epic')],
@@ -415,10 +413,10 @@ const JOBS = [
   ['holy_staff', ARMS('a white and gold holy magic staff topped with a radiant sun emblem shining holy light', 'epic')],
   ['blood_staff', ARMS('a dark crimson magic staff made of bone with shark teeth and a pulsing blood-red orb', 'epic')],
   ['abyss_tome', ARMS('a dark purple grimoire spellbook bound in black leather with tentacle motifs, shadow magic swirling from its blank pages', 'epic')],
-  ['storm_wand', ARMS('a golden magic wand made from a spiral unicorn horn crackling with blue lightning', 'epic')],
+  ['storm_wand', ARMS('a short golden magic wand with a spiral tip and small blue lightning sparks', 'epic')],
   ['glacier_orb', ARMS('a large magic crystal orb of swirling blizzard ice held in a silver dragon claw, frost mist', 'epic')],
   ['gaia_orb', ARMS('a large magic orb of glowing green jade earth energy encased in floating stone rings', 'epic')],
-  ['naga_staff', ARMS('a Thai Naga scepter, a golden staff shaped like a rearing emerald serpent with a hooded head holding a water orb', 'legendary')],
+  ['naga_staff', ARMS('a golden staff shaped like a rearing green serpent holding a water orb', 'legendary')],
   ['garuda_tome', ARMS('a golden grimoire spellbook with Garuda wings on its cover, radiant red and gold feathers flying from its blank pages', 'legendary')],
   ['phoenix_orb', ARMS('a blazing fire orb with a phoenix made of flames circling it, held in a golden claw', 'legendary')],
   // ---------- ไบโอม/ภัยชุดใหม่ ----------
