@@ -67,6 +67,9 @@ const SCAN = 300;
 
 export class AutoSystem {
   task: AutoTask | null = null;
+  /** คิวงานต่อจากงานปัจจุบัน (หาวัตถุดิบให้ครบตามแปลน) */
+  private queue: AutoTask[] = [];
+  private queueDone = '';
   progress = 0;
   /** พักงานเพราะอยู่นอกเกาะของตัวเอง */
   paused = false;
@@ -88,6 +91,15 @@ export class AutoSystem {
     on('pickup', (item: string, n: number) => this.task?.kind === 'gather' && item === this.task.item && this.count(n));
     on('harvest', () => this.task?.kind === 'crops' && this.count(1));
     on('mob:killed', (id: string) => this.task?.kind === 'kill' && (!this.task.mob || this.task.mob === id) && this.count(1));
+    // ระบบอัตโนมัติทำงานเฉพาะตอนเปิดหน้าจอเกมอยู่ — สลับแอป/ปิดจอ = หยุดทันที
+    const vis = () => {
+      if (document.hidden && this.task) {
+        this.stop(true);
+        EventBus.emit('toast', '🤖 หยุดงานอัตโนมัติ — ระบบอัตโนมัติทำงานเฉพาะตอนเปิดหน้าจอเกมอยู่', '#ef7d57');
+      }
+    };
+    document.addEventListener('visibilitychange', vis);
+    this.off.push(() => document.removeEventListener('visibilitychange', vis));
     s.events.once('shutdown', () => this.off.forEach((f) => f()));
   }
 
@@ -144,7 +156,31 @@ export class AutoSystem {
     return null;
   }
 
-  stop(silent = false) {
+  /**
+   * ออกหาวัตถุดิบที่ขาดให้ครบอัตโนมัติ (ทีละอย่างตามคิว) · คืนรายการที่หาเองไม่ได้ (ไม่มีแหล่งให้เก็บบนเกาะ)
+   * forWhat = ชื่อสิ่งที่จะสร้าง (โชว์ตอนครบ)
+   */
+  gatherFor(missing: [string, number][], forWhat: string): { started: boolean; unavailable: string[] } {
+    const tasks: AutoTask[] = [];
+    const unavailable: string[] = [];
+    for (const [item, n] of missing) {
+      const nodes = (Object.keys(NODE_SPECS) as NodeType[]).filter((k) => NODE_SPECS[k].drops.some((d) => d.item === item));
+      if (!nodes.length || n <= 0) {
+        unavailable.push(ITEMS[item]?.name ?? item);
+        continue;
+      }
+      tasks.push({ kind: 'gather', label: `หา${ITEMS[item]?.name ?? item}ให้${forWhat}`, nodes, item, goal: n });
+    }
+    if (!tasks.length) return { started: false, unavailable };
+    this.stop(true);
+    this.queue = tasks.slice(1);
+    this.queueDone = forWhat;
+    this.start(tasks[0]);
+    return { started: true, unavailable };
+  }
+
+  stop(silent = false, keepQueue = false) {
+    if (!keepQueue) this.queue = [];
     if (!this.task) return;
     if (!silent) EventBus.emit('toast', '🤖 หยุดงานอัตโนมัติ', '#94b0c2');
     this.task = null;
@@ -157,7 +193,15 @@ export class AutoSystem {
     this.progress += n;
     if (t.goal && this.progress >= t.goal) {
       Sfx.play('achievement');
-      EventBus.emit('toast', `✔ งานอัตโนมัติเสร็จ: ${t.label} ${t.goal}/${t.goal}`, '#ffcd75');
+      // มีคิวต่อ (หาวัตถุดิบตามแปลน) → ทำอย่างถัดไปเลย
+      const next = this.queue.shift();
+      if (next) {
+        this.stop(true, true);
+        this.start(next);
+        return;
+      }
+      EventBus.emit('toast', this.queueDone ? `✔ วัตถุดิบครบแล้ว! กด B เพื่อสร้าง${this.queueDone}` : `✔ งานอัตโนมัติเสร็จ: ${t.label} ${t.goal}/${t.goal}`, '#ffcd75');
+      this.queueDone = '';
       this.stop(true);
     }
   }

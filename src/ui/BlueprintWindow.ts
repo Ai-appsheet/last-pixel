@@ -9,7 +9,7 @@ import { ITEMS, type ItemType } from '../data/items';
 import { RARITY } from '../data/loot';
 import { RECIPES, STATION_NAMES, type Recipe } from '../data/recipes';
 import type { GameScene } from '../scenes/GameScene';
-import { affordableTimes, craft, isHiddenRecipe, isPart, planConsume, rawCost, recipeNeeds, type MaterialPool } from '../systems/CraftingSystem';
+import { affordableTimes, craft, isHiddenRecipe, isPart, missingRaw, planConsume, rawCost, recipeNeeds, type MaterialPool } from '../systems/CraftingSystem';
 import { fitText } from './fancyButton';
 import { UIWindow } from './Window';
 import { placeArtCover, withItemArt, withItemThumb } from './itemArt';
@@ -970,7 +970,8 @@ export class BlueprintWindow {
     // ---- ปุ่มหลัก ----
     if (e.ready) btn.set(true, '🔨 สร้างเลย');
     else if (!e.known) btn.set(false, '🔒 ยังไม่มีแปลน');
-    else if (!e.matsOk) btn.set(false, 'วัสดุยังไม่ครบ');
+    // ขาดแค่วัตถุดิบ → ให้ตัวละครออกหาเองอัตโนมัติ (ต้องเปิดหน้าจอเกมไว้)
+    else if (!e.matsOk) btn.set(true, '🤖 ออกหาวัตถุดิบอัตโนมัติ');
     else btn.set(false, `ต้องมี${STATION_NAMES[bp.recipe!.station]}บนเกาะ`);
   }
 
@@ -1042,12 +1043,31 @@ export class BlueprintWindow {
     this.jump(bp.key);
   }
 
+  /** ขาดวัตถุดิบ → สั่งตัวละครเดินไปเก็บของที่ขาดจนครบ แล้วปักหมุดแปลนนี้ไว้ดูความคืบหน้า */
+  private autoGather(bp: Blueprint) {
+    const gs = this.gs;
+    const needs = bp.build ? gs.buildNeeds(bp.build) : recipeNeeds(bp.recipe!, this.mc());
+    const missing = missingRaw(needs, gs.materials());
+    const r = gs.auto.gatherFor(missing, bp.name);
+    if (!r.started) {
+      Sfx.play('error');
+      this.toast(`หาเองไม่ได้: ${r.unavailable.join(', ')} — ต้องหาจากกล่อง/ตลาด/เกาะอื่น`, COLORS.bad);
+      return;
+    }
+    gs.pinned = this.pinKey(bp);
+    this.win.close();
+    if (r.unavailable.length) this.toast(`🤖 ออกหาวัตถุดิบ… (ที่หาเองไม่ได้: ${r.unavailable.join(', ')})`, COLORS.gold);
+    else this.toast(`🤖 ออกหาวัตถุดิบให้${bp.name} — เปิดหน้าจอเกมไว้ · เดินเองทับได้ตลอด`, COLORS.gold);
+  }
+
   private go(times: number) {
     const key = this.sel[this.section];
     const bp = key ? this.byKey.get(key) : undefined;
     if (!bp) return;
+    const ev = this.evaluate(bp);
+    if (ev.known && !ev.matsOk) return this.autoGather(bp);
     if (bp.build) {
-      const e = this.evaluate(bp);
+      const e = ev;
       if (!e.ready) {
         Sfx.play('error');
         this.toast('วัสดุยังไม่ครบ', COLORS.bad);
