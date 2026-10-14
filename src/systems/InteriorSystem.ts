@@ -229,11 +229,36 @@ export class InteriorSystem {
           const tex = rng.pick(['bones_pile', 'cobweb', 'crystal_cluster', 'skull_pillar']);
           const x = (r.cx + rng.between(-r.w / 2 + 2, r.w / 2 - 2)) * T;
           const y = (r.cy + rng.between(-r.h / 2 + 2, r.h / 2 - 2)) * T;
-          this.sprite(tex, x, y, 20, 20, tex === 'skull_pillar');
+          const spr = this.sprite(tex, x, y, 20, 20, tex === 'skull_pillar');
           if (tex === 'crystal_cluster') this.torchLights.push({ x, y: y - 8, radius: 46 });
+          this.gatherProp(tex, spr, x, y);
         }
       }
     }
+  }
+
+  /** ของตกแต่งในดันเจี้ยนเก็บเป็นวัตถุดิบได้ (กด E) — กระดูก ใยแมงมุม ผลึก (เก็บแล้วหายจนกว่าจะโหลดเกมใหม่) */
+  private gatherProp(tex: string, spr: Phaser.GameObjects.GameObject & { x: number; y: number }, x: number, y: number) {
+    const table: Record<string, { label: string; drops: [string, number, number, number][] }> = {
+      bones_pile: { label: 'เก็บกองกระดูก', drops: [['bone', 2, 4, 1], ['shell', 1, 1, 0.1]] },
+      cobweb: { label: 'เก็บใยแมงมุม', drops: [['fiber', 2, 3, 1], ['cloth', 1, 1, 0.25]] },
+      crystal_cluster: { label: 'เก็บเศษคริสตัล', drops: [['crystal_shard', 1, 3, 1], ['glow_dust', 1, 1, 0.3]] },
+    };
+    const t = table[tex];
+    if (!t) return;
+    const spot: Interactable = {
+      x, y: y + 2, r: 26, label: t.label,
+      run: () => {
+        const i = this.spots.indexOf(spot);
+        if (i >= 0) this.spots.splice(i, 1);
+        for (const [item, a, b, chance] of t.drops) if (Math.random() < chance) this.s.spawnDrop(x, y, item, Phaser.Math.Between(a, b));
+        this.s.fx.debris(x, y - 4, tex === 'crystal_cluster' ? 0x73eff7 : 0xd6e4ee, 6);
+        Sfx.play('harvest');
+        spr.destroy();
+        EventBus.emit('node:harvested', tex);
+      },
+    };
+    this.spots.push(spot);
   }
 
   /** รูป (มี fallback ถ้า texture ยังไม่มี) + กันเดินทะลุฐาน */

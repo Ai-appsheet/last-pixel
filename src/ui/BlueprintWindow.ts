@@ -351,7 +351,7 @@ export class BlueprintWindow {
 
   constructor(private scene: Phaser.Scene, private gs: GameScene, private toast: (text: string, color?: string) => void) {
     this.collect();
-    const w = (this.win = new UIWindow(scene, 20, 58, WIN_W, WIN_H, '📐 สมุดแปลน (B)'));
+    const w = (this.win = new UIWindow(scene, 20, 58, WIN_W, WIN_H, '📐 สมุดแปลน'));
 
     // ---- แถวบน: หมวดหลัก + ตัวกรอง ----
     this.secBtns = {
@@ -405,13 +405,13 @@ export class BlueprintWindow {
     this.dims = txt(scene, PX + 62, 108, '', 10, CYAN_S).setOrigin(0.5, 0);
     this.title = txt(scene, PX + 120, 16, '', 18);
     this.sub = txt(scene, PX + 120, 41, '', 11, CYAN_S);
-    this.desc = txt(scene, PX + 120, 58, '', 12, COLORS.text, { wordWrap: { width: PW - 138 }, lineSpacing: 1, maxLines: 3 });
-    this.stats = txt(scene, PX + 18, 124, '', 11, COLORS.gold, { wordWrap: { width: PW - 36 }, lineSpacing: 1, maxLines: 3 });
-    this.reqHead = txt(scene, PX + 18, 0, '📋 ต้องใช้', 13);
-    this.reqSum = txt(scene, PX + PW - 18, 0, '', 11).setOrigin(1, 0);
+    this.desc = txt(scene, PX + 120, 58, '', 12, COLORS.text, { wordWrap: { width: PW - 138 }, lineSpacing: 2, maxLines: 3 });
+    this.stats = txt(scene, PX + 18, 124, '', 12, COLORS.gold, { wordWrap: { width: PW - 36 }, lineSpacing: 2, maxLines: 3 });
+    this.reqHead = txt(scene, PX + 18, 0, '📋 ต้องใช้', 14);
+    this.reqSum = txt(scene, PX + PW - 18, 0, '', 12).setOrigin(1, 0);
     this.reqLine = scene.add.graphics();
     for (let i = 0; i < MAX_ROWS; i++) this.rows.push(this.makeRow());
-    this.notes = txt(scene, PX + 18, 0, '', 10, COLORS.dim, { wordWrap: { width: PW - 36 }, lineSpacing: 1 });
+    this.notes = txt(scene, PX + 18, 0, '', 11, COLORS.dim, { wordWrap: { width: PW - 36 }, lineSpacing: 2 });
     this.placeholder = txt(scene, PX + PW / 2, PH / 2, 'เลือกแปลนทางซ้าย\nเพื่อดูว่าต้องหาอะไรบ้าง', 14, CYAN_S, { align: 'center' }).setOrigin(0.5);
     this.detailParts = [this.sheetNo, this.preview, this.dims, this.title, this.sub, this.desc, this.stats, this.reqHead, this.reqSum, this.reqLine, this.notes];
 
@@ -683,7 +683,7 @@ export class BlueprintWindow {
       sb.b.setActive(sb.id === tab);
       sb.b.setBadge(all.filter((e) => e.bp.section === sec && e.bp.tab === sb.id && e.ready).length);
     }
-    this.chip.setLabel(this.onlyReady ? '☑ แสดงเฉพาะที่สร้างได้' : '☐ แสดงเฉพาะที่สร้างได้');
+    this.chip.setLabel(this.onlyReady ? '☑ เฉพาะที่สร้างได้' : '☐ เฉพาะที่สร้างได้');
     this.chip.setActive(this.onlyReady);
     const isBuild = sec === 'build';
     this.goBuild.setVisible(isBuild);
@@ -708,7 +708,7 @@ export class BlueprintWindow {
       withItemThumb(this.scene, artId, (k) => {
         if (cd.artId !== artId || !cd.c.active) return;
         cd.art.setTexture(k);
-        placeArtCover(cd.art, 5, 5, CARD_W - 10, 44).setVisible(true).setTint(e.known ? 0xffffff : 0x5a6278);
+        placeArtCover(cd.art, 5, 5, CARD_W - 10, 44, 0.2).setVisible(true).setTint(e.known ? 0xffffff : 0x5a6278);
         cd.img.setVisible(false);
       });
       cd.name.setText(`${e.known ? '' : '🔒 '}${bp.name}`).setColor(!e.known ? '#8a95a8' : bp.build ? (e.ready ? COLORS.good : COLORS.text) : bp.color);
@@ -805,9 +805,9 @@ export class BlueprintWindow {
     const row: Row = {
       hit: s.add.rectangle(PX + 14, 0, PW - 28, 34, 0xffffff, 0.05).setOrigin(0).setInteractive({ useHandCursor: true }),
       icon: s.add.image(PX + 32, 0, 'px'),
-      name: txt(s, PX + 52, 0, '', 12),
-      count: txt(s, PX + PW - 22, 0, '', 12).setOrigin(1, 0),
-      hint: txt(s, PX + 52, 0, '', 10, COLORS.dim),
+      name: txt(s, PX + 52, 0, '', 13),
+      count: txt(s, PX + PW - 22, 0, '', 13).setOrigin(1, 0),
+      hint: txt(s, PX + 52, 0, '', 11, COLORS.dim),
       jump: null,
     };
     row.hit.on('pointerdown', () => row.jump && this.jump(row.jump));
@@ -974,8 +974,8 @@ export class BlueprintWindow {
     if (e.ready) btn.set(true, '🔨 สร้างเลย');
     else if (!e.known) btn.set(false, '🔒 ยังไม่มีแปลน');
     // ขาดแค่วัตถุดิบ → ให้ตัวละครออกหาเองอัตโนมัติ (ต้องเปิดหน้าจอเกมไว้)
-    else if (!e.matsOk) btn.set(true, '🤖 ออกหาวัตถุดิบอัตโนมัติ');
-    else btn.set(false, `ต้องมี${STATION_NAMES[bp.recipe!.station]}บนเกาะ`);
+    else if (!e.matsOk) btn.set(true, '🤖 หาวัตถุดิบให้');
+    else btn.set(false, `ต้องมี${STATION_NAMES[bp.recipe!.station]}`);
   }
 
   // ======================================================================

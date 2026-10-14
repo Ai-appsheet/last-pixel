@@ -29,6 +29,8 @@ export interface MetaData {
   tips?: string[];
   /** เคยกดยืนยันกฎเขตผจญภัยแล้ว (PvP · ตายถาวร) — ครั้งต่อไปแสดงแค่แบนเนอร์สั้น */
   adventureSeen?: boolean;
+  /** 🎁 กล่องฟรีรายวัน (วันจริงเวลาไทย · ต่อบัญชี — สร้างเกาะใหม่ก็รับซ้ำไม่ได้) */
+  dailyBox?: { lastDay: string; streak: number };
 }
 
 /** ข้อมูลถาวรแยกตามบัญชี */
@@ -134,6 +136,23 @@ export const MetaSave = {
     d.playerName = name;
     d.lastCharacter = character;
     this.save(d);
+  },
+
+  /** กล่องฟรีวันนี้: รับได้ไหม + จำนวนวันต่อเนื่องถ้ารับวันนี้ (ขาด 1 วัน = เริ่มนับใหม่) */
+  dailyBoxStatus(today: string, yesterday: string): { available: boolean; streak: number } {
+    const b = this.load().dailyBox;
+    if (b?.lastDay === today) return { available: false, streak: b.streak };
+    return { available: true, streak: b?.lastDay === yesterday ? b.streak + 1 : 1 };
+  },
+
+  /** บันทึกว่ารับกล่องฟรีวันนี้แล้ว → คืน streak (0 = รับไปแล้ว) */
+  claimDailyBox(today: string, yesterday: string): number {
+    const st = this.dailyBoxStatus(today, yesterday);
+    if (!st.available) return 0;
+    const d = this.load();
+    d.dailyBox = { lastDay: today, streak: st.streak };
+    this.save(d);
+    return st.streak;
   },
 
   markAdventureSeen() {

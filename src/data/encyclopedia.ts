@@ -1,3 +1,4 @@
+import { nutriLine } from '../systems/BodySystem';
 import { BIOMES, nodeTable, SPECIALTY_NAMES, type Biome, type Specialty } from './islands';
 import { ITEMS, type ItemDef } from './items';
 import { SLOT_NAME, TRAIN_CAP, gearMult, statLine, type Stats } from './equipment';
@@ -17,6 +18,9 @@ export const NODE_NAMES: Record<NodeType, string> = {
   ore_coal: 'สายแร่ถ่านหิน (อีเต้อหิน+)', ore_sulfur: 'สายแร่กำมะถัน (อีเต้อหิน+)', crystal: 'ผลึกคริสตัล (อีเต้อเหล็ก)',
   meteor_rock: 'หินอุกกาบาต (ตกตอนภัยฝนอุกกาบาต · อีเต้อเหล็ก)', ruin_chest: 'หีบสมบัติบนเกาะซากโบราณ/เกาะหมอกผี',
   bamboo: 'กอไผ่ (ตัดด้วยมือ/ขวาน — เกาะป่าไผ่)', coral: 'ปะการัง (อีเต้อ — เกาะปะการังวงแหวน)', shroom: 'เห็ดเรืองแสง (กด E)',
+  barrel: 'ถังไม้ (ตีด้วยมือ/ขวาน — เกาะซากเรือ)', wreckage: 'ซากเรือ (ตัดด้วยขวาน)', cannon: 'ซากปืนใหญ่ (อีเต้อ)', event_chest: 'หีบสมบัติเกาะกิจกรรม (กด E)',
+  clam: 'หอยยักษ์ (กด E)', herb: 'สมุนไพร (กด E)', flower: 'ดงดอกไม้ (กด E)', fruit_bush: 'ต้นผลไม้หายาก (กด E)', obsidian: 'หินออบซิเดียน (อีเต้อหิน+)',
+  ice: 'ก้อนน้ำแข็ง (อีเต้อ)', vine: 'เถาวัลย์ (กด E)',
 };
 
 const SPECIAL_ITEM: Record<Specialty, string> = { iron: 'iron_ore', coal: 'coal', sulfur: 'sulfur', gold: 'gold_ore', crystal: 'crystal' };
@@ -53,6 +57,14 @@ export function itemSources(id: string): string[] {
     out.push(`🎁 สุ่มได้จากกล่อง (กลุ่ม${groups.map((g) => g.name).join('/')} · ระดับ${RARITY[r].name})`);
   }
   if (id === 'fish' || id === 'golden_fish') out.push('🎣 ตกปลาด้วยคันเบ็ดริมน้ำ');
+  const EXTRA: Record<string, string> = {
+    petals: '🌸 กด E ที่ดอกไม้บนพื้น / ใบบัว · เกาะสวนดอกไม้ (กิจกรรม)', shell: '🐚 กด E ที่เปลือกหอย/ดาวทะเลบนหาด · หอยยักษ์', wild_grain: '🌾 กด E ที่หญ้าสูง/กอหญ้า',
+    wild_mushroom: '🍄 กด E ที่เห็ดบนพื้นป่า', scrap_metal: '🛩 รื้อซากเครื่องบินข้างจุดเกิด (E + ขวาน/อีเต้อ) · ซากเรือ/ปืนใหญ่บนเกาะกิจกรรม',
+    cloth: '🛢 ถังไม้/ซากเรือ (เกาะซากเรือสมบัติ) · ซากเครื่องบิน · ใยแมงมุมในดันเจี้ยน', crystal_shard: '💎 ผลึกในดันเจี้ยน (กด E)', dirty_water: '🫙 กด E ริมน้ำตอนอิ่มน้ำแล้ว = ตักใส่กระบอก',
+    coconut: '🌴 ตัดต้นมะพร้าว (ลุ้น 50%)', mango: '🌺 ต้นผลไม้หายาก — เกาะสวนดอกไม้ลอยฟ้า (กิจกรรมตามเวลาจริง)', dragonfruit: '🌺 ต้นผลไม้หายาก — เกาะสวนดอกไม้ลอยฟ้า',
+    obsidian: '🌋 เกาะภูเขาไฟชั่วคราว (กิจกรรมตามเวลาจริง)', herb: '🌿 กด E ที่ดอกไม้/เฟิร์นบนพื้น (ลุ้น) · สมุนไพรบนเกาะป่า/หนองน้ำ',
+  };
+  if (EXTRA[id]) out.push(EXTRA[id]);
   if (id === 'coin') out.push('💰 ขายของที่เกาะกลาง/เรือพ่อค้า · มอนสเตอร์ · ภารกิจ · ตู้จดหมายรายวัน');
   if (id.startsWith('elixir_')) out.push('⚔ ฆ่ามอนสเตอร์/บอส → เปิดกล่องดรอป (ยิ่งกล่องสูง ยิ่งได้ผลึกดี) · บอสดรอปแน่นอน');
   if (id.startsWith('box_')) out.push(id === 'box_wood' ? '🎁 ดรอปจากมอนสเตอร์ · รอดภัยพิบัติ · ตกปลา · ตู้จดหมาย · หีบดันเจี้ยน' : `🎁 ดรอปจากมอนสเตอร์/บอส · รอดภัย · หีบสมบัติ · ผู้รอดชีวิตคู่แข่ง — ${id === 'box_iron' ? 'บนเกาะเราได้จากบอสดันเจี้ยน/คืนบอสเท่านั้น' : 'ต้องไปเขตผจญภัย (เกาะอื่น) หรือซื้อด้วยเพชรที่เกาะกลาง'}`);
@@ -69,6 +81,8 @@ export function itemInfo(def: ItemDef, plus = 0): string[] {
     const f = def.food;
     lines.push([f.hunger && `อิ่ม +${f.hunger}`, f.thirst && `น้ำ +${f.thirst}`, f.hp && `HP ${f.hp > 0 ? '+' : ''}${f.hp}`, f.sanity && `สติ ${f.sanity > 0 ? '+' : ''}${f.sanity}`].filter(Boolean).join('  '));
   }
+  const nl = nutriLine(def);
+  if (nl) lines.push(nl);
   const m = plusMult(plus);
   if (def.tool) lines.push(`ดาเมจ ${Math.round(def.tool.damage * m)} · ตัดไม้ ${def.tool.tree} · ขุด ${def.tool.rock} · ระยะ ${def.tool.range}`);
   const pellets = def.ranged?.pellets ?? (def.weaponClass ? WEAPON_CLASSES[def.weaponClass].pellets : undefined) ?? 1;

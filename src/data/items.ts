@@ -20,6 +20,8 @@ export interface ItemDef {
   /** มูลค่าโดยประมาณ (เหรียญ) — ใช้คิดราคาซื้อ/ขาย */
   value: number;
   food?: { hunger?: number; thirst?: number; hp?: number; sanity?: number };
+  /** สมดุลร่างกาย: p โปรตีน · e พลังงาน/แป้ง · v วิตามิน (+0–100) · risk = โอกาสท้องเสีย · cure = หายป่วย (ดู systems/BodySystem.ts) */
+  nutri?: Nutri;
   tool?: { damage: number; range: number; tree: number; rock: number; durability: number };
   light?: { radius: number; durability: number };
   crop?: string;
@@ -53,6 +55,14 @@ export interface ItemDef {
   enhanceable?: boolean;
   /** ผลึกพลัง: ใช้แล้วเพิ่มค่าสถานะถาวร (มีเพดาน) — ได้จากกล่องเท่านั้น */
   elixir?: { gains: Partial<Stats>; };
+}
+
+export interface Nutri {
+  p?: number;
+  e?: number;
+  v?: number;
+  risk?: number;
+  cure?: boolean;
 }
 
 const I = (d: Omit<ItemDef, 'stack' | 'value'> & { stack?: number; value?: number }): ItemDef => ({ stack: 40, value: 1, ...d });
@@ -141,6 +151,29 @@ const items: ItemDef[] = [
   I({ id: 'cactus_fruit', name: 'ผลกระบองเพชร', desc: 'แหล่งน้ำกลางทะเลทราย', icon: 'i_cactus_fruit', type: 'food', stack: 20, value: 3, food: { thirst: 22, hunger: 4 } }),
   I({ id: 'veggie_stew', name: 'สตูว์ผัก', desc: 'ฟื้นทุกอย่าง', icon: 'i_stew', type: 'food', stack: 10, value: 22, food: { hunger: 55, thirst: 15, hp: 20, sanity: 20 } }),
   I({ id: 'pumpkin_pie', name: 'พายฟักทอง', desc: 'ฟื้นสติมาก', icon: 'i_pie', type: 'food', stack: 10, value: 28, food: { hunger: 45, hp: 10, sanity: 35 } }),
+  // ---------- อาหาร/น้ำ ชุดสมดุลร่างกาย + ของจากเกาะกิจกรรม ----------
+  I({ id: 'coconut', name: 'มะพร้าว', desc: 'จากต้นมะพร้าวริมหาด — น้ำสะอาดดื่มได้เลย', icon: 'i_coconut', type: 'food', stack: 20, value: 4, food: { hunger: 6, thirst: 30 } }),
+  I({ id: 'wild_potato', name: 'มันป่า', desc: 'ขุดจากพืชป่า — กินดิบได้แต่ย่างดีกว่า', icon: 'i_wild_potato', type: 'food', stack: 30, value: 3, food: { hunger: 10 } }),
+  I({ id: 'baked_potato', name: 'มันเผา', desc: 'แป้งให้พลังงาน อิ่มนาน', icon: 'i_baked_potato', type: 'food', stack: 20, value: 8, food: { hunger: 28, hp: 4 } }),
+  I({ id: 'flatbread', name: 'ขนมปังแผ่น', desc: 'อบจากเมล็ดข้าวป่าบนกองไฟ — พลังงานล้วน', icon: 'i_flatbread', type: 'food', stack: 20, value: 8, food: { hunger: 26, sanity: 2 } }),
+  I({ id: 'mango', name: 'มะม่วงสุก', desc: 'ผลไม้หายากจากสวนลอยฟ้า — วิตามินเพียบ', icon: 'i_mango', type: 'food', stack: 20, value: 14, food: { hunger: 12, thirst: 12, sanity: 3 } }),
+  I({ id: 'dragonfruit', name: 'แก้วมังกร', desc: 'ผลไม้หายาก ฉ่ำน้ำ — วิตามินสูงสุด', icon: 'i_dragonfruit', type: 'food', stack: 20, value: 18, food: { hunger: 8, thirst: 16, sanity: 5 } }),
+  I({ id: 'seaweed', name: 'สาหร่ายทะเล', desc: 'จากหอย/แนวปะการัง — วิตามิน + โปรตีนนิดหน่อย', icon: 'i_seaweed', type: 'food', stack: 40, value: 3, food: { hunger: 6, thirst: 2 } }),
+  I({ id: 'wild_mushroom', name: 'เห็ดป่า', desc: 'เก็บจากพื้นป่า — กินดิบเสี่ยงท้องเสียเล็กน้อย', icon: 'i_wild_mushroom', type: 'food', stack: 30, value: 3, food: { hunger: 6 } }),
+  I({ id: 'dirty_water', name: 'น้ำดิบ (กระบอก)', desc: 'ตักจากทะเล/บึง — ดื่มได้แต่เสี่ยงท้องเสีย 20% · ต้มที่กองไฟให้สะอาด', icon: 'i_dirty_water', type: 'food', stack: 10, value: 1, food: { thirst: 25 } }),
+  I({ id: 'clean_water', name: 'น้ำต้มสุก', desc: 'น้ำสะอาด ดื่มปลอดภัย (ต้มน้ำดิบ/น้ำแข็งที่กองไฟ)', icon: 'i_clean_water', type: 'food', stack: 10, value: 4, food: { thirst: 38 } }),
+  I({ id: 'flower_tea', name: 'ชาดอกไม้', desc: 'ชาหอมจากกลีบดอกไม้ ผ่อนคลาย ฟื้นสติ', icon: 'i_flower_tea', type: 'food', stack: 10, value: 12, food: { thirst: 28, sanity: 15 } }),
+  I({ id: 'herb', name: 'สมุนไพร', desc: 'ใบยาจากป่า — เคี้ยวแล้วหายท้องเสีย/ป่วย', icon: 'i_herb', type: 'food', stack: 40, value: 6, food: { hp: 4, sanity: 4 } }),
+  I({ id: 'herbal_medicine', name: 'ยาสมุนไพร', desc: 'ยาต้มจากสมุนไพร — หายป่วยทันที + ฟื้น HP', icon: 'i_herbal_medicine', type: 'heal', stack: 20, value: 22, food: { hp: 15 } }),
+  // ---------- วัตถุดิบจากการเก็บทุกอย่างในโลก (ของตกแต่ง ซากเรือ เกาะกิจกรรม) ----------
+  I({ id: 'scrap_metal', name: 'เศษเหล็ก', desc: 'จากซากเครื่องบิน/ซากเรือ/ปืนใหญ่ — หลอมเป็นเหล็กแท่งได้', icon: 'i_scrap_metal', type: 'material', stack: 60, value: 4 }),
+  I({ id: 'cloth', name: 'ผ้าใบ', desc: 'ผ้าเก่าจากถังไม้/ซากเรือ — ทำผ้าพันแผล เชือก', icon: 'i_cloth', type: 'material', stack: 40, value: 4 }),
+  I({ id: 'shell', name: 'เปลือกหอย', desc: 'เก็บตามชายหาด — ทำสร้อย/ขายได้', icon: 'i_shell', type: 'material', stack: 60, value: 2 }),
+  I({ id: 'petals', name: 'กลีบดอกไม้', desc: 'เก็บจากดอกไม้ — ชงชา ทำยา', icon: 'i_petals', type: 'material', stack: 60, value: 2 }),
+  I({ id: 'wild_grain', name: 'เมล็ดข้าวป่า', desc: 'จากกอหญ้าสูง — อบเป็นขนมปังแผ่นที่กองไฟ', icon: 'i_wild_grain', type: 'material', stack: 60, value: 2 }),
+  I({ id: 'obsidian', name: 'หินออบซิเดียน', desc: 'แก้วภูเขาไฟสีดำ (อีเต้อหิน+) — หลอมเป็นกระจก · หัวลูกธนูคม', icon: 'i_obsidian', type: 'material', stack: 40, value: 15 }),
+  I({ id: 'crystal_shard', name: 'เศษคริสตัล', desc: 'เศษผลึกเรืองแสง — ทำคบไฟ ×2 · ขายได้ราคาดี', icon: 'i_crystal_shard', type: 'material', stack: 60, value: 14 }),
+  I({ id: 'ice_shard', name: 'ก้อนน้ำแข็ง', desc: 'จากเกาะหิมะ/ธารน้ำแข็ง — ต้มที่กองไฟได้น้ำสะอาด', icon: 'i_ice_shard', type: 'material', stack: 40, value: 2 }),
   // ---------- เมล็ด ----------
   I({ id: 'carrot_seed', name: 'เมล็ดแครอท', desc: 'ถือแล้วกด E ที่แปลงผัก', icon: 'i_seed_carrot', type: 'seed', stack: 40, value: 2, crop: 'carrot' }),
   I({ id: 'tomato_seed', name: 'เมล็ดมะเขือเทศ', desc: 'ถือแล้วกด E ที่แปลงผัก', icon: 'i_seed_tomato', type: 'seed', stack: 40, value: 3, crop: 'tomato' }),
@@ -268,6 +301,22 @@ for (const it of items) {
 }
 
 export const ITEMS: Record<string, ItemDef> = Object.fromEntries(items.map((i) => [i.id, i]));
+
+/**
+ * ค่าโภชนาการของอาหาร/เครื่องดื่มทุกชนิด (ระบบสมดุลร่างกาย — systems/BodySystem.ts)
+ * ของดิบ (เนื้อ/ปลา/ไข่) โปรตีนสูงแต่เสี่ยงท้องเสีย · ผักผลไม้ = วิตามิน · แป้ง (มัน ขนมปัง ฟักทอง) = พลังงาน · อาหารปรุง = สมดุล
+ */
+const NUTRI: Record<string, Nutri> = {
+  berry: { v: 8, e: 2 }, carrot: { v: 14, e: 4 }, tomato: { v: 14 }, pumpkin: { e: 22, v: 6 }, cactus_fruit: { v: 8 },
+  raw_meat: { p: 18, risk: 0.35 }, cooked_meat: { p: 32 }, fish: { p: 14, risk: 0.25 }, cooked_fish: { p: 26, v: 4 }, egg: { p: 10, risk: 0.15 },
+  veggie_stew: { v: 28, e: 14, p: 10 }, pumpkin_pie: { e: 30, v: 8, p: 4 }, glow_mushroom: { v: 6, e: 2 }, honey: { e: 12, v: 4 },
+  fried_egg: { p: 22, e: 6 }, tom_yum: { p: 22, v: 22, e: 6 }, pumpkin_curry: { e: 30, v: 18, p: 12 }, honey_cake: { e: 35, p: 6, v: 4 },
+  skewer: { p: 26, e: 10 }, fruit_juice: { v: 28, e: 6 },
+  coconut: { e: 6, v: 6 }, wild_potato: { e: 14, risk: 0.1 }, baked_potato: { e: 32 }, flatbread: { e: 30, p: 4 }, mango: { v: 24, e: 6 }, dragonfruit: { v: 28 },
+  seaweed: { v: 12, p: 4 }, wild_mushroom: { v: 8, p: 4, risk: 0.12 }, dirty_water: { risk: 0.2 }, clean_water: {}, flower_tea: { v: 12 },
+  herb: { v: 6, cure: true }, herbal_medicine: { cure: true },
+};
+for (const [id, n] of Object.entries(NUTRI)) if (ITEMS[id]) ITEMS[id].nutri = n;
 
 /** ลงทะเบียนชุดแฟชั่นเป็นไอเทม (เรียกตอนบูต หลังโหลดข้อมูลชุดจาก heroes.ts) */
 export function registerCosmetics(list: { slot: 'outfit' | 'helmet' | 'cape'; id: string; name: string; rarity: Rarity }[]) {

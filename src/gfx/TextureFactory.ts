@@ -18,6 +18,8 @@ import { itemIcons2 } from './art/icons2';
 import { gearIcons } from './art/gear';
 import { weaponIcons } from './art/weapons';
 import { buildCreatureTextures, creatureIcons } from './art/creatures';
+import { extraArt } from './art/icons_extra';
+import { postArt } from './art/post';
 import { buildBuildingTextures } from './art/buildings';
 import { vehicleArt } from './art/vehicles';
 import { buildMonsterTextures, CHIBI_HUMANOID } from './art/monsters';
@@ -265,6 +267,8 @@ export function buildAllTextures(scene: Phaser.Scene) {
   buildMonsterTextures(scene);
   buildCreatureTextures(scene);
   for (const [key, art] of Object.entries(creatureIcons())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art);
+  for (const [key, art] of Object.entries(extraArt())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art); // กิจกรรมตามเวลาจริง/สมดุลร่างกาย
+  for (const [key, art] of Object.entries(postArt())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art); // 📦 ท่าส่งของ
   // กล่องเปิดแล้ว (หีบซากโบราณ)
   if (!scene.textures.exists('reward_chest_open')) {
     const src = scene.textures.get('reward_chest').getSourceImage() as HTMLCanvasElement;

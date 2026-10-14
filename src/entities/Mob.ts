@@ -43,6 +43,9 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
   private dotTick = 0;
   private statusMask = 0;
   private stars: Phaser.GameObjects.Image[] = [];
+  /** แฟลชขาวตอนโดนตี / ยุบตัวตอนโดนผลัก (วินาทีที่เหลือ) */
+  private flashT = 0;
+  private squashT = 0;
   private stateTime = 0;
   private wanderDir = new Phaser.Math.Vector2();
   private chargeDir = new Phaser.Math.Vector2();
@@ -109,6 +112,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
 
     this.tickStatus(dt);
     if (!this.active) return;
+    this.tickHitFx(dt);
     if (this.burning) {
       this.hurt(10 * dt, undefined, { silent: true });
       if (!this.active) return;
@@ -213,7 +217,9 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
           this.state = 'windup';
           this.stateTime = 0.7;
           this.chargeDir.copy(v);
-          this.setTintFill(0xb13e53);
+          this.setTint(0xff5060);
+          // แถบเตือนแนวพุ่งชาร์จ (ระยะที่พุ่งไปได้จริง)
+          s.fx.telegraphLine(this.x, this.feetY - 2, Math.atan2(v.y, v.x), Math.min(240, this.def.speed * 4.2 * 0.7) + 14, Math.max(14, this.body.width + 8), 0.7);
           Sfx.play('growl');
         } else if (sp === 'summon' && this.def.summon) {
           this.specialCd = this.def.moves ? this.def.moveCd ?? 9 : 9;
@@ -340,7 +346,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
     if (!opts.silent) {
       this.scene.fx.damageNumber(this.x, this.y - this.displayHeight / 2, dmg, opts.crit ? 0xffcd75 : opts.color ?? 0xffffff, opts.crit);
       this.setTintFill(0xffffff);
-      this.scene.time.delayedCall(70, () => this.refreshTint());
+      this.flashT = 0.06;
       const heavy = this.isBoss || this.def.id === 'golem';
       if (!heavy) this.stun = 0.18;
       if (this.def.ai === 'neutral') this.angry = 8;
@@ -352,6 +358,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
       if (from && kb > 0) {
         const k = new Phaser.Math.Vector2(this.x - from.x, this.y - from.y).normalize().scale(kb);
         this.body.setVelocity(k.x, k.y);
+        this.squashT = 0.14;
       }
     }
     if (this.hp <= 0) {
@@ -428,14 +435,14 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
       this.burnTime -= dt;
       this.dotAcc.burn += this.burnDps * dt;
       dot += this.burnDps * dt;
-      if (Math.random() < dt * 8) s.fx.sparks(this.x, this.y - 4, 0xef7d57, 1, 6);
+      s.fx.status('burn', this.x, this.y, this.displayWidth, this.displayHeight, dt);
     }
     if (this.poisonTime > 0) {
       this.poisonTime -= dt;
       const p = this.poisonDps * this.poisonStacks * dt;
       this.dotAcc.poison += p;
       dot += p;
-      if (Math.random() < dt * (3 + this.poisonStacks * 2)) s.fx.sparks(this.x + Phaser.Math.Between(-4, 4), this.y - 6, 0xa7f070, 1, 5);
+      s.fx.status('poison', this.x, this.y, this.displayWidth, this.displayHeight, dt, 1 + this.poisonStacks * 0.6);
       if (this.poisonTime <= 0) this.poisonStacks = 0;
     }
     if (this.bleedTime > 0) {
@@ -445,13 +452,16 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
       const b = this.bleedDps * (moving ? 1.6 : 0.5) * dt;
       this.dotAcc.bleed += b;
       dot += b;
-      if (Math.random() < dt * (moving ? 10 : 3)) s.fx.debris(this.x, this.y, 0xb13e53, 1);
+      s.fx.status('bleed', this.x, this.y, this.displayWidth, this.displayHeight, dt, moving ? 2.2 : 0.7);
     }
     if (this.chillTime > 0) {
       this.chillTime -= dt;
-      if (Math.random() < dt * 4) s.fx.sparks(this.x + Phaser.Math.Between(-5, 5), this.y - 2, 0xc8f4ff, 1, 4);
+      s.fx.status('chill', this.x, this.y, this.displayWidth, this.displayHeight, dt);
     }
-    if (this.frozenTime > 0) this.frozenTime -= dt;
+    if (this.frozenTime > 0) {
+      this.frozenTime -= dt;
+      s.fx.status('frozen', this.x, this.y, this.displayWidth, this.displayHeight, dt);
+    }
     if (this.stunTime > 0) this.stunTime -= dt;
     this.updateStars();
     if (dot > 0) this.hurt(dot, undefined, { silent: true });
@@ -475,11 +485,29 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
     }
   }
 
+  /** แฟลชขาวหมดเวลา → คืนสี · ยุบ-ยืดตัวตอนโดนผลัก · ไฟลุกกะพริบสี */
+  private tickHitFx(dt: number) {
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      if (this.flashT <= 0) this.refreshTint();
+    } else if (this.state === 'windup') {
+      this.setTint(Math.floor(this.scene.worldTime * 12) % 2 ? 0xff5060 : 0xffc0c8); // กะพริบแดงตอนง้าง
+    } else if (this.burnTime > 0 && this.frozenTime <= 0 && this.chillTime <= 0 && this.poisonTime <= 0) {
+      this.setTint(Math.sin(this.scene.worldTime * 28 + this.bob) > 0 ? 0xffb080 : 0xffe0a0);
+    }
+    if (this.squashT > 0) {
+      this.squashT = Math.max(0, this.squashT - dt);
+      const k = this.squashT / 0.14;
+      const sc = this.def.scale ?? 1;
+      this.setScale(sc * (1 + 0.22 * k), sc * (1 - 0.18 * k));
+    }
+  }
+
   /** สีตัวตามสถานะ (แช่แข็ง > เย็น > พิษ > ไฟ > เลือด > สีประจำตัว) */
   refreshTint() {
-    if (!this.active) return;
+    if (!this.active || this.flashT > 0) return;
     if (this.state === 'windup') {
-      this.setTintFill(0xb13e53); // กำลังง้างชาร์จ
+      this.setTint(0xff5060); // กำลังง้างชาร์จ (กะพริบใน tickHitFx)
       return;
     }
     this.clearTint();
@@ -490,7 +518,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
   /** ดาวหมุนเหนือหัวตอนมึน */
   private updateStars() {
     if (this.stunTime > 0 && !this.stars.length) {
-      for (let i = 0; i < 3; i++) this.stars.push(this.scene.add.image(this.x, this.y, 'sparkle').setTint(0xffcd75).setDepth(1e6 + 3).setScale(0.7));
+      for (let i = 0; i < 3; i++) this.stars.push(this.scene.add.image(this.x, this.y, 'fx_star').setDepth(1e6 + 3).setScale(0.6));
     }
     if (!this.stars.length) return;
     if (this.stunTime <= 0) {
@@ -501,7 +529,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
     const top = this.y - this.displayHeight / 2 - 3;
     this.stars.forEach((st, i) => {
       const a = spin + (i * Math.PI * 2) / 3;
-      st.setPosition(this.x + Math.cos(a) * 6, top + Math.sin(a) * 2);
+      st.setPosition(this.x + Math.cos(a) * 7, top + Math.sin(a) * 2.5).setScale(0.5 + 0.15 * Math.sin(a)).setDepth(Math.sin(a) < 0 ? this.depth - 0.1 : 1e6 + 3);
     });
   }
 

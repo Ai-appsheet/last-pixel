@@ -7,7 +7,11 @@
  *   MOCK_DELAY_MS=800 node tools/mock-backend.mjs   (หน่วงเวลาตอบ จำลองความช้าของ Apps Script)
  *   แล้วรันเกมด้วย NEXT_PUBLIC_API_URL=http://localhost:8787 npm run dev
  *
+ * ชีตทุกใบ (รวม Chat ของแชทโลก) ถูกสร้างจาก HEADERS ของ Code.gs ตอน setup — เพิ่มชีตใหม่ใน Code.gs ไม่ต้องแก้ที่นี่
  * MailApp จำลอง: ไม่ส่งจริง เก็บฉบับล่าสุดต่ออีเมลไว้ในหน่วยความจำ (รันเป็นเซิร์ฟเวอร์จะพิมพ์หัวเรื่อง+รหัสลง console)
+ * Google Sign-In จำลอง: UrlFetchApp ไม่ออกเน็ต — tokeninfo รับเฉพาะ token ปลอม fakeGoogleToken() = 'test.' + base64url(JSON payload)
+ *   (payload ไม่ใส่ aud/iss/exp = ค่าที่ถูกต้อง · expIn = หมดอายุในกี่วินาทีตามนาฬิกาของ mock) · token อื่นตอบ 400 เหมือน token เสีย
+ *   Script Property GOOGLE_CLIENT_ID = GOOGLE_TEST_CLIENT_ID (createBackend({ googleClientId: '' }) = ปิด)
  * action สำหรับทดสอบ (มีเฉพาะใน mock นี้ — ไม่มีใน Code.gs):
  *   __mail   { email }             → { mail: { to, subject, body, code } | null, sent: จำนวนที่ส่งทั้งหมด }
  *   __clock  { advanceMs }          → เลื่อนเวลาของ Code.gs + CacheService ไปข้างหน้า (ทดสอบหมดอายุ/รอส่งใหม่)
@@ -22,6 +26,28 @@ import { fileURLToPath } from 'node:url';
 
 const CODE = fileURLToPath(new URL('../backend/apps-script/Code.gs', import.meta.url));
 const CELL_MAX = 50000;
+export const GOOGLE_TEST_CLIENT_ID = 'test-client.apps.googleusercontent.com';
+
+/** ID token ปลอมของ mock (Code.gs ไม่รู้จัก — ไปถึง tokeninfo จำลองด้านล่างเท่านั้น) */
+export const fakeGoogleToken = (payload) => 'test.' + Buffer.from(JSON.stringify(payload)).toString('base64url');
+
+/** tokeninfo จำลอง: ตอบแบบเดียวกับ https://oauth2.googleapis.com/tokeninfo (ทุกค่าเป็นสตริง) */
+function fakeTokenInfo(url, now, clientId) {
+  const u = new URL(url);
+  if (u.origin + u.pathname !== 'https://oauth2.googleapis.com/tokeninfo') throw new Error('mock UrlFetchApp: ไม่รู้จัก ' + u.origin + u.pathname);
+  const tok = u.searchParams.get('id_token') ?? '';
+  let p = null;
+  try {
+    if (tok.startsWith('test.')) p = JSON.parse(Buffer.from(tok.slice(5), 'base64url').toString('utf8'));
+  } catch {
+    p = null;
+  }
+  if (!p) return { status: 400, body: { error: 'invalid_token', error_description: 'Invalid Value' } };
+  const sec = Math.floor(now() / 1000);
+  const { expIn, ...rest } = p;
+  const out = { iss: 'https://accounts.google.com', aud: clientId, azp: clientId, iat: sec, exp: sec + (expIn ?? 3600), email_verified: true, ...rest };
+  return { status: 200, body: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, String(v)])) };
+}
 
 // ---------------------------------------------------------------- จำลอง Google Sheets
 
@@ -149,8 +175,9 @@ class Blob {
   }
 }
 
-function makeContext(ss, clock, mail) {
+function makeContext(ss, clock, mail, google) {
   const cache = new Map();
+  const props = new Map(google.clientId ? [['GOOGLE_CLIENT_ID', google.clientId]] : []);
   const now = () => Date.now() + clock.skew;
   const ctx = {
     __now: now,
@@ -190,6 +217,19 @@ function makeContext(ss, clock, mail) {
       },
       getRemainingDailyQuota: () => mail.quota,
     },
+    PropertiesService: {
+      getScriptProperties: () => ({
+        getProperty: (k) => props.get(k) ?? null,
+        setProperty: (k, v) => void props.set(k, String(v)),
+      }),
+    },
+    UrlFetchApp: {
+      fetch: (url) => {
+        google.calls++;
+        const r = fakeTokenInfo(url, now, google.clientId);
+        return { getResponseCode: () => r.status, getContentText: () => JSON.stringify(r.body) };
+      },
+    },
     // Node รันทีละ request อยู่แล้ว — lock จำลองเป็น no-op
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
     ContentService: {
@@ -213,7 +253,8 @@ export function createBackend(opts = {}) {
   opts.prepare?.(ss);
   const clock = { skew: 0 };
   const mail = { last: new Map(), sent: 0, quota: opts.mailQuota ?? 100, verbose: !!opts.verbose };
-  const gs = makeContext(ss, clock, mail);
+  const google = { clientId: opts.googleClientId ?? GOOGLE_TEST_CLIENT_ID, calls: 0 };
+  const gs = makeContext(ss, clock, mail, google);
   const logs = [];
   /** รัน setup โดยเก็บ Logger.log ไว้ใน logs แทนการพิมพ์ */
   const runSetup = () => {
@@ -251,6 +292,7 @@ export function createBackend(opts = {}) {
     ss,
     mail,
     clock,
+    google,
     setupLog: logs,
     post: (body) => {
       let req = null;

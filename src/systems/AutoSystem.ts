@@ -6,6 +6,7 @@ import { ITEMS } from '../data/items';
 import { MOBS } from '../data/mobs';
 import { HOTBAR_SIZE } from '../components/Inventory';
 import { NODE_SPECS } from '../entities/ResourceNode';
+import { ROBOT_FUEL, eatNutri, foodScore, robotCharge, wantsFood } from './BodySystem';
 import type { Mob } from '../entities/Mob';
 import type { ResourceNode } from '../entities/ResourceNode';
 import type { Structure } from '../entities/Structure';
@@ -80,6 +81,7 @@ export class AutoSystem {
   private stuckT = 0;
   private bestDist = Infinity;
   private healCd = 0;
+  private eatCd = 0;
   private skip = new Map<object, number>();
   private off: (() => void)[] = [];
 
@@ -227,6 +229,11 @@ export class AutoSystem {
     for (const [k, until] of this.skip) if (until < now) this.skip.delete(k);
     this.healCd -= dt;
     if (p.hp < p.maxHp * 0.35 && this.healCd <= 0) this.autoHeal();
+    this.eatCd -= dt;
+    if (this.eatCd <= 0) {
+      this.eatCd = 4;
+      if (wantsFood(p)) this.autoEat();
+    }
     if (t.kind === 'gather' && !this.hasRoom(t.item!)) {
       EventBus.emit('toast', '🎒 กระเป๋าเต็ม — หยุดงานอัตโนมัติ', '#ef7d57');
       return this.stop(true);
@@ -401,6 +408,43 @@ export class AutoSystem {
     }
   }
 
+  /**
+   * หิว/กระหาย/ขาดสารอาหาร/ป่วย → กินของที่เติมส่วนที่ขาดมากที่สุด (BodySystem.foodScore)
+   * เลี่ยงของดิบ/น้ำดิบ (เว้นแต่หิวหรือกระหายจัด) · ป่วย = กินสมุนไพร/ยาก่อน · หุ่นยนต์ = ชาร์จด้วยไม้/ถ่าน/เหล็ก
+   */
+  private autoEat() {
+    const p = this.s.player;
+    const slots = p.inventory.slots;
+    if (p.char.passive.robot) {
+      if (p.hunger >= 45) return;
+      const i = slots.findIndex((sl) => sl && ROBOT_FUEL[sl.id]);
+      if (i < 0) return;
+      const msg = robotCharge(p, slots[i]!.id);
+      p.inventory.consumeAt(i);
+      if (msg) EventBus.emit('toast', `🤖 ${msg}`, '#73eff7');
+      return;
+    }
+    let best = -1;
+    let bs = 4;
+    slots.forEach((sl, i) => {
+      if (!sl) return;
+      const sc = foodScore(p, ITEMS[sl.id]);
+      if (sc > bs) {
+        bs = sc;
+        best = i;
+      }
+    });
+    // ป่วย: ยาสมุนไพร (heal) ก็ใช้ได้
+    if (best < 0 && p.nutri.sick > 0) best = slots.findIndex((sl) => sl && ITEMS[sl.id].nutri?.cure);
+    if (best < 0) return;
+    const def = ITEMS[slots[best]!.id];
+    if (def.food) p.eat(def.food);
+    const msg = eatNutri(p, def);
+    p.inventory.consumeAt(best);
+    Sfx.play('eat');
+    EventBus.emit('toast', `🤖 กิน${def.name}อัตโนมัติ${msg ? ` · ${msg}` : ''}`, '#a7f070');
+  }
+
   /** HP ต่ำ → ใช้ผ้าพันแผล/อาหารที่ฟื้น HP อัตโนมัติ */
   private autoHeal() {
     const p = this.s.player;
@@ -408,6 +452,7 @@ export class AutoSystem {
     if (i < 0) return;
     const def = ITEMS[p.inventory.slots[i]!.id];
     p.eat(def.food!);
+    eatNutri(p, def);
     p.inventory.consumeAt(i);
     this.healCd = 3;
     Sfx.play('eat');

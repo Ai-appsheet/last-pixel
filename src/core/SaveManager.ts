@@ -30,6 +30,8 @@ export interface RunSave {
     /** ซื้อชีวิตไปแล้วกี่ครั้ง */
     revives?: number;
     xp?: number;
+    /** สมดุลร่างกาย: โปรตีน/พลังงาน/วิตามิน + วินาทีที่ยังป่วย (เซฟเก่าไม่มี = 70/70/70) */
+    body?: { p: number; e: number; v: number; sick: number };
   };
   wallet: { coins: number; gems: number };
   /** [id, available, hp, regrowAt] */
@@ -58,6 +60,10 @@ export interface RunSave {
   showcase?: boolean;
   /** แปลนที่ปักหมุดไว้ (b:<id> / r:<recipeId>) */
   pinned?: string;
+  /** กิจกรรมตามเวลาจริง: เกาะกิจกรรมที่เคยขึ้น (id '2026-10-14#2') + ประกาศที่แสดงแล้ว */
+  worldEvents?: { seen: string[]; announced: string[] };
+  /** ซากเครื่องบินรื้อได้อีกกี่ครั้ง (0 = รื้อหมดแล้ว) */
+  wreckLeft?: number;
 }
 
 /** เซฟแยกตามบัญชี (ออนไลน์: localStorage เป็นแคช แล้ว Sync ส่งขึ้นเซิร์ฟเวอร์เบื้องหลัง) */

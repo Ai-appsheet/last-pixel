@@ -13,6 +13,7 @@ import { levelOfSlot } from '../data/upgrade';
 import { lookKey } from '../gfx/UpgradeLook';
 import { MAX_LEVEL, levelStats, xpNeed } from '../data/level';
 import { addStats, emptyStats, gearMult, powerScore, type EquipSlot, type Stats } from '../data/equipment';
+import { freshBody, tickBody, type BodyState } from '../systems/BodySystem';
 
 export type Equipment = Record<EquipSlot, Slot | null>;
 export const emptyEquipment = (): Equipment => ({
@@ -32,6 +33,8 @@ export interface PlayerEnv {
   /** อยู่ในแสงไฟ (กองไฟ/คบไฟ) */
   lit: boolean;
   survival: boolean;
+  /** ช่วงตั้งหลัก: ค่าสมดุลร่างกายลดช้า ไม่มีผลเสีย */
+  grace?: boolean;
 }
 
 export class Player extends Phaser.Physics.Arcade.Sprite {
@@ -86,6 +89,13 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   envSpeed = 1;
   /** พื้นลื่น (น้ำแข็ง): ความเร็วค่อยๆ เปลี่ยน ไถลต่อหลังปล่อยปุ่ม */
   slippery = false;
+  /** สมดุลร่างกาย (โปรตีน/พลังงาน/วิตามิน/ป่วย) — systems/BodySystem.ts */
+  nutri: BodyState = freshBody();
+  bodyStats: Stats = emptyStats();
+  bodyStaminaMult = 1;
+  bodyHealMult = 1;
+  bodyDrainMult = 1;
+  bodySpeedMult = 1;
   private invuln = 0;
   private dodgeTime = 0;
   private dodgeDir = new Phaser.Math.Vector2();
@@ -161,7 +171,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     }
     if (this.equip.weapon?.id === 'gold_sword') g.crit += 10;
     this.gearStats = g;
-    this.stats = addStats(addStats(addStats(addStats(emptyStats(), g), this.baseStats), this.trained), levelStats(this.level));
+    this.stats = addStats(addStats(addStats(addStats(addStats(emptyStats(), g), this.baseStats), this.trained), levelStats(this.level)), this.bodyStats);
     const bag = this.inventory.baseSize + Math.round(this.stats.bag);
     if (this.inventory.bagSize !== bag) {
       // กระเป๋าเล็กลง (เช่น อาคารเพิ่มช่องถูกทำลาย) → ของที่ล้นหล่นลงพื้นข้างตัว
@@ -277,11 +287,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   update(dt: number, input: InputManager, frozen: boolean, env: PlayerEnv) {
     if (this.dead) return;
     this.recalc();
-    if (this.stats.regen > 0 && this.hunger > 0 && this.thirst > 0) this.heal(this.stats.regen * dt);
+    if (this.stats.regen > 0 && this.hunger > 0 && this.thirst > 0) this.heal(this.stats.regen * this.bodyHealMult * dt);
     // ฟื้นเลือดเองช้าๆ เมื่อไม่โดนตี 6 วิ และไม่หิว/กระหายมาก (+0.6 HP/วิ)
     this.calm = this.hp < this.calmHp - 0.01 ? 0 : this.calm + dt;
     this.calmHp = this.hp;
-    if (this.calm >= 6 && this.hunger > 25 && this.thirst > 25 && this.hp < this.maxHp) this.heal(0.6 * dt);
+    if (this.calm >= 6 && this.hunger > 25 && this.thirst > 25 && this.hp < this.maxHp) this.heal(0.6 * this.bodyHealMult * dt);
     this.attackCd = Math.max(0, this.attackCd - dt);
     this.skillCd = Math.max(0, this.skillCd - dt);
     this.invuln = Math.max(0, this.invuln - dt);
@@ -289,7 +299,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     const dir = frozen ? new Phaser.Math.Vector2() : input.move();
     const moving = dir.lengthSq() > 0;
-    let speed = this.char.stats.speed * this.speedMult * this.envSpeed * Math.max(0.5, 1 + this.stats.speed / 100) * (this.overclock > 0 ? 1.8 : 1) * (this.freezing ? 0.85 : 1);
+    let speed = this.char.stats.speed * this.speedMult * this.envSpeed * this.bodySpeedMult * Math.max(0.5, 1 + this.stats.speed / 100) * (this.overclock > 0 ? 1.8 : 1) * (this.freezing ? 0.85 : 1);
     let sprinting = false;
 
     if (this.dodgeTime > 0) {
@@ -297,7 +307,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       this.body.setVelocity(this.dodgeDir.x * speed * this.dodgeMult, this.dodgeDir.y * speed * this.dodgeMult);
       this.setAlpha(0.6);
     } else {
-      this.setAlpha(this.invuln > 0 && Math.floor(this.invuln * 20) % 2 === 0 ? 0.4 : 1);
+      // อมตะหลังโดนตี: กะพริบชัดๆ (จางสลับทึบ ~7 ครั้ง/วิ)
+      this.setAlpha(this.invuln > 0 && Math.floor(this.invuln * 14) % 2 === 0 ? 0.25 : 1);
       if (this.stamina <= 0) this.exhausted = true;
       if (this.exhausted && this.stamina > 30) this.exhausted = false;
       if (moving && input.held('sprint') && !this.exhausted) {
@@ -317,7 +328,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       }
     }
     if (!sprinting && this.dodgeTime <= 0) {
-      this.stamina = Math.min(this.maxStamina, this.stamina + BALANCE.staminaRegenPerSec * dt * (moving ? 0.6 : 1));
+      this.stamina = Math.min(this.maxStamina, this.stamina + BALANCE.staminaRegenPerSec * this.bodyStaminaMult * dt * (moving ? 0.6 : 1));
     }
 
     if (env.survival) this.survive(dt, sprinting, env);
@@ -339,7 +350,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   /** หิว/กระหาย/อุณหภูมิ/สติ */
   private survive(dt: number, sprinting: boolean, env: PlayerEnv) {
     const p = this.char.passive;
-    const drain = sprinting ? BALANCE.sprintHungerMult : 1;
+    const drain = (sprinting ? BALANCE.sprintHungerMult : 1) * this.bodyDrainMult;
+    tickBody(this, dt, !!env.grace);
     this.hunger = Math.max(0, this.hunger - BALANCE.hungerPerSec * this.char.stats.hungerRate * this.hungerMult * drain * dt);
     if (p.robot) {
       this.thirst = 100;
@@ -464,7 +476,10 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       const k = new Phaser.Math.Vector2(this.x - from.x, this.y - from.y).normalize().scale(120);
       this.body.setVelocity(k.x, k.y);
     }
-    this.scene.cameras.main.shake(120, 0.004);
+    // จอสั่นตามความแรง + ขอบจอแดง (GameScene ฟัง player:hurt)
+    const k = Math.min(1, (dmg / Math.max(1, this.maxHp)) * 4);
+    this.scene.cameras.main.shake(90 + 140 * k, 0.002 + 0.006 * k);
+    this.scene.events.emit('player:hurt', dmg, this.maxHp);
     Sfx.play('hurt');
     return dmg;
   }

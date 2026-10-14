@@ -3,10 +3,11 @@
  *   node tools/test-api.mjs                     → เปิด mock backend (Code.gs จริงในหน่วยความจำ) แล้วทดสอบ
  *   API_URL=https://script.google.com/... node tools/test-api.mjs   → ทดสอบ Apps Script ที่ deploy แล้ว (เฉพาะส่วนที่ไม่ต้องอ่านอีเมล)
  *   เทสต์บัญชีอีเมลใช้ action เฉพาะ mock (__mail / __clock / __legacy) อ่านรหัสจากอีเมลจำลองและเลื่อนเวลา
+ *   เทสต์ Google Sign-In ใช้ token ปลอม fakeGoogleToken() ที่ tokeninfo จำลองใน mock รับ
  */
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { createBackend, startServer } from './mock-backend.mjs';
+import { createBackend, fakeGoogleToken, startServer } from './mock-backend.mjs';
 
 let url = process.env.API_URL;
 let server = null;
@@ -264,6 +265,109 @@ await step('บัญชีเก่า (ชื่อผู้ใช้) → เ
   bad(await call('register', { email: `n.${tag}@example.com`, password: 'abcd1234', name: L.username }), 'taken');
 });
 
+const NAME_RE = /^[a-zA-Z0-9_฀-๿]{3,16}$/;
+/** token ปลอมของ Google (mock) — sub/email ไม่ซ้ำกับรอบอื่น */
+const gtok = (o) => fakeGoogleToken({ sub: `1${parseInt(tag, 16)}${o.n ?? 0}`, email: `g${o.n ?? 0}.${tag}@gmail.com`, given_name: 'Gina Tester', name: 'Gina Tester', ...o, n: undefined });
+
+await step('auth.google: token เสีย / aud ผิด / iss ผิด / หมดอายุ / อีเมลยังไม่ยืนยัน → ปฏิเสธ · ปิดอยู่ = google_off', async () => {
+  bad(await call('auth.google', {}), 'invalid');
+  bad(await call('auth.google', { credential: 'not a token!' }), 'invalid');
+  bad(await call('auth.google', { credential: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln' }), 'google_bad'); // Google ตอบ 400
+  bad(await call('auth.google', { credential: gtok({ n: 90, aud: 'someone-else.apps.googleusercontent.com' }) }), 'google_bad');
+  bad(await call('auth.google', { credential: gtok({ n: 91, iss: 'https://evil.example.com' }) }), 'google_bad');
+  bad(await call('auth.google', { credential: gtok({ n: 92, expIn: -5 }) }), 'google_expired');
+  bad(await call('auth.google', { credential: gtok({ n: 93, email_verified: false }) }), 'google_unverified');
+  // ไม่มีบัญชีไหนถูกสร้างจาก token ที่ถูกปฏิเสธ
+  for (const n of [90, 91, 92, 93]) ok(await call('register', { email: `g${n}.${tag}@gmail.com`, password: 'abcd1234', name: `gx${n}_${tag}` }));
+  const off = createBackend({ googleClientId: '' });
+  const r = off.post(JSON.stringify({ action: 'auth.google', credential: gtok({ n: 94 }) }));
+  assert.equal(r.code, 'google_off');
+  assert.equal(off.google.calls, 0);
+});
+
+await step('auth.google บัญชีใหม่ → needName → account.setName (ครั้งเดียว) → เข้าอีกครั้งได้บัญชีเดิม', async () => {
+  const t1 = gtok({ n: 1 });
+  const r = ok(await call('auth.google', { credential: t1 }));
+  assert.match(r.token, /^t[0-9a-f]{64}$/);
+  assert.equal(r.account.email, `g1.${tag}@gmail.com`);
+  assert.equal(r.account.needEmail, false);
+  assert.equal(r.account.needName, true);
+  assert.match(r.account.username, /^Gina_Tester\d*$/);
+  assert.match(r.account.username, NAME_RE);
+  assert.equal(ok(await call('me', {}, r.token)).account.needName, true);
+  // ยังไม่ยืนยันชื่อ → เข้าใหม่ก็ยังถามชื่อ
+  const again = ok(await call('auth.google', { credential: t1 }));
+  assert.equal(again.account.id, r.account.id);
+  assert.equal(again.account.needName, true);
+  // บัญชี Google ไม่มีรหัสผ่าน / ยืนยันอีเมลแล้ว
+  bad(await call('login', { email: `g1.${tag}@gmail.com`, password: 'nopw$0$' }), 'bad_login');
+  bad(await call('verify', { email: `g1.${tag}@gmail.com`, code: '123456' }), 'already');
+  bad(await call('account.setName', { name: 'x' }), 'auth');
+  bad(await call('account.setName', { name: 'a b' }, r.token), 'invalid');
+  bad(await call('account.setName', { name: A.name.toUpperCase() }, r.token), 'taken');
+  const nm = `จีน่า_${tag}`.slice(0, 16);
+  const s = ok(await call('account.setName', { name: nm }, r.token));
+  assert.equal(s.account.username, nm);
+  assert.equal(s.account.needName, false);
+  bad(await call('account.setName', { name: `gina2_${tag}` }, r.token), 'name_set');
+  assert.equal(ok(await call('me', {}, r.token)).account.username, nm);
+  const back = ok(await call('auth.google', { credential: t1 }));
+  assert.equal(back.account.id, r.account.id);
+  assert.equal(back.account.username, nm);
+  assert.equal(back.account.needName, false);
+  // ชื่อที่ตั้งแล้วกันคนอื่นสมัครซ้ำ
+  bad(await call('register', { email: `n2.${tag}@example.com`, password: 'abcd1234', name: nm }), 'taken');
+});
+
+await step('auth.google ชื่อชั่วคราว: ซ้ำ → ต่อตัวเลข · ไทย · สั้น/อักขระแปลก → ใช้ชื่ออื่นแทน', async () => {
+  const dup = ok(await call('auth.google', { credential: gtok({ n: 2, given_name: A.name }) }));
+  assert.notEqual(dup.account.username.toLowerCase(), A.name.toLowerCase());
+  assert.match(dup.account.username, NAME_RE);
+  assert.ok(dup.account.username.startsWith(A.name.slice(0, 10)));
+  const th = ok(await call('auth.google', { credential: gtok({ n: 3, given_name: 'สมชาย', name: 'สมชาย ใจดี' }) }));
+  assert.match(th.account.username, /^สมชาย\d*$/);
+  const odd = ok(await call('auth.google', { credential: gtok({ n: 4, given_name: '李', name: '🙂 Li', email: `li.wei.${tag}@gmail.com` }) }));
+  assert.match(odd.account.username, NAME_RE);
+  assert.ok(odd.account.username.startsWith('liwei'), odd.account.username);
+  // ชื่อซ้ำกันเองในหลายบัญชี Google ก็ไม่ชน
+  const names = new Set();
+  for (const n of [5, 6, 7]) names.add(ok(await call('auth.google', { credential: gtok({ n, given_name: 'Twin' }) })).account.username.toLowerCase());
+  assert.equal(names.size, 3);
+});
+
+await step('auth.google ผูกกับบัญชีอีเมลเดิมอัตโนมัติ · บัญชีค้างยืนยัน → ยืนยันให้ + ล้างรหัสผ่านเดิม · Google คนละคน → google_linked', async () => {
+  const meB = ok(await call('me', {}, tb)).account;
+  const sub = `7${parseInt(tag, 16)}`;
+  const g = ok(await call('auth.google', { credential: fakeGoogleToken({ sub, email: B.email.toUpperCase(), given_name: 'Bob' }) }));
+  assert.equal(g.account.id, meB.id);
+  assert.equal(g.account.username, B.name);
+  assert.equal(g.account.needName, false);
+  // รหัสผ่านเดิมยังใช้ได้ · token เดิมยังใช้ได้
+  ok(await call('login', { email: B.email, password: B.password }));
+  ok(await call('me', {}, tb));
+  // ผูกแล้ว: เปลี่ยนอีเมลใน Google ก็ยังเข้าบัญชีเดิมด้วย sub
+  assert.equal(ok(await call('auth.google', { credential: fakeGoogleToken({ sub, email: `bob.new.${tag}@gmail.com` }) })).account.id, meB.id);
+  bad(await call('auth.google', { credential: fakeGoogleToken({ sub: `8${parseInt(tag, 16)}`, email: B.email }) }), 'google_linked');
+  // สมัครค้างไว้ (ยังไม่ยืนยันอีเมล) แล้วมาเข้าด้วย Google อีเมลเดียวกัน
+  const P = { email: `pending.${tag}@example.com`, password: 'pend1234', name: `pend_${tag}` };
+  ok(await call('register', P));
+  const code = await codeOf(P.email);
+  const pg = ok(await call('auth.google', { credential: fakeGoogleToken({ sub: `9${parseInt(tag, 16)}`, email: P.email }) }));
+  assert.equal(pg.account.username, P.name);
+  assert.equal(pg.account.needName, false);
+  bad(await call('login', { email: P.email, password: P.password }), 'bad_login');
+  bad(await call('verify', { email: P.email, code }), 'already');
+});
+
+await step('auth.google จำกัดความถี่: token ผิดรวมทั้งระบบเกินเพดาน → rate', async () => {
+  const be = createBackend();
+  const post = (o) => be.post(JSON.stringify(o));
+  for (let i = 0; i < 300; i++) assert.equal(post({ action: 'auth.google', credential: fakeGoogleToken({ sub: '1', email: 'x@gmail.com', aud: 'bad' }) }).code, 'google_bad');
+  const calls = be.google.calls;
+  assert.equal(post({ action: 'auth.google', credential: fakeGoogleToken({ sub: '1', email: 'x@gmail.com' }) }).code, 'rate');
+  assert.equal(be.google.calls, calls); // ไม่ถาม Google เพิ่ม
+});
+
 await step('setup เติมคอลัมน์ใหม่ให้ชีต Accounts เดิมโดยข้อมูลไม่หาย', async () => {
   const OLD = ['id', 'username', 'salt', 'hash', 'createdAt', 'lastLogin', 'playerName', 'character', 'banned'];
   let legacyRow;
@@ -281,7 +385,7 @@ await step('setup เติมคอลัมน์ใหม่ให้ชี�
     },
   });
   const sh = be.ss.getSheetByName('Accounts');
-  assert.deepEqual(sh.getRange(1, 1, 1, 14).getValues()[0], [...OLD, 'email', 'verified', 'verifyHash', 'verifyExp', 'verifyTries']);
+  assert.deepEqual(sh.getRange(1, 1, 1, 15).getValues()[0], [...OLD, 'email', 'verified', 'verifyHash', 'verifyExp', 'verifyTries', 'googleSub']);
   assert.deepEqual(sh.getRange(2, 1, 1, 9).getValues()[0], legacyRow.map((v) => (typeof v === 'string' ? v.slice(1) : v)));
   assert.ok(be.setupLog.some((l) => l.includes('เพิ่มคอลัมน์')));
   be.setup(); // รันซ้ำได้
@@ -409,6 +513,73 @@ await step('leaderboard.submit / get (เก็บค่าสูงสุด)',
   assert.equal(top[ia].bestDays, 4);
   assert.ok(top.findIndex((r) => r.playerName === 'บ๊อบ') < ia);
   assert.ok(top.length <= 50);
+});
+
+await step('chat.post / chat.get (since) / ตัดอักขระ+คำหยาบ / ยาวเกิน / จำกัดความถี่', async () => {
+  bad(await call('chat.get'), 'auth');
+  bad(await call('chat.post', { text: '   ' }, ta), 'invalid');
+  bad(await call('chat.post', { text: 'x'.repeat(141) }, ta), 'too_long');
+  bad(await call('chat.post', { text: 'hi', channel: 'island' }, ta), 'invalid');
+  const p1 = ok(await call('chat.post', { text: ' <b>สวัสดี</b>\u0001 ชาว\n\nเกาะ  fuck ', playerName: 'อลิซ' }, ta)).message;
+  assert.equal(p1.text, 'bสวัสดี/b ชาว เกาะ ****');
+  assert.equal(p1.name, 'อลิซ');
+  assert.equal(p1.accountId, accA.id);
+  assert.equal(p1.channel, 'world');
+  assert.match(p1.id, /^C[0-9a-z]+$/);
+  // ส่งซ้ำทันที → ต้องเว้น 2 วิ
+  assert.equal(bad(await call('chat.post', { text: 'เร็วไป' }, ta), 'rate').wait, 2);
+  await advance(2100);
+  const p2 = ok(await call('chat.post', { text: 'ข้อความที่สอง' }, ta)).message;
+  assert.ok(p2.time > p1.time);
+  // ไม่ส่งชื่อ → ใช้ชื่อในบัญชี
+  const pb = ok(await call('chat.post', { text: 'hello from bob' }, tb)).message;
+  assert.equal(pb.name, B.name);
+  // ดึงทั้งหมด: เก่า→ใหม่ + serverTime + latest
+  const g = ok(await call('chat.get', {}, tc));
+  assert.equal(typeof g.serverTime, 'number');
+  const ids = g.messages.map((m) => m.id);
+  assert.deepEqual(ids.slice(ids.indexOf(p1.id)), [p1.id, p2.id, pb.id]);
+  assert.equal(g.latest, pb.time);
+  // since = เวลาที่เห็นล่าสุด → ได้เฉพาะที่ใหม่กว่า
+  assert.deepEqual(ok(await call('chat.get', { since: p1.time }, tc)).messages.map((m) => m.id), [p2.id, pb.id]);
+  assert.equal(ok(await call('chat.get', { since: pb.time }, tc)).messages.length, 0);
+  // ≤ 20 ข้อความ/นาที (A ส่งไปแล้ว 2)
+  for (let i = 0; i < 18; i++) {
+    await advance(2100);
+    ok(await call('chat.post', { text: `spam ${i}` }, ta));
+  }
+  await advance(2100);
+  assert.ok(bad(await call('chat.post', { text: 'ข้อความที่ 21' }, ta), 'rate').wait > 0);
+  await advance(61000);
+  ok(await call('chat.post', { text: 'ครบนาทีแล้ว' }, ta));
+  assert.ok(ok(await call('chat.get', {}, tb)).messages.length <= 50);
+  // heartbeat บอกข้อความล่าสุด
+  const hb = ok(await call('world.heartbeat', { level: 1, power: 1, alive: true }, ta));
+  assert.ok(hb.chat && hb.chat.latest > 0 && /^C/.test(hb.chat.latestId));
+});
+
+await step('ชีต Chat เก็บไม่เกิน 2,000 แถว (เกินแล้วลบ 200 แถวเก่าสุด)', async () => {
+  const be = createBackend({
+    prepare: (ss) => {
+      const sh = ss.insertSheet('Chat');
+      sh.appendRow(['id', 'time', 'accountId', 'playerName', 'text', 'channel']);
+      for (let i = 0; i < 2200; i++) sh.appendRow([`'C${i}`, 1000 + i, "'acc_x", "'x", "'m", "'world"]);
+    },
+  });
+  const em = `zed.${tag}@example.com`;
+  const post = (o) => be.post(JSON.stringify(o));
+  assert.equal(post({ action: 'register', email: em, password: 'abcd1234', name: `zed_${tag}` }).ok, true);
+  const code = /\b(\d{6})\b/.exec(be.mail.last.get(em).body)[1];
+  const v = post({ action: 'verify', email: em, code });
+  assert.equal(v.ok, true, JSON.stringify(v));
+  const p = post({ action: 'chat.post', text: 'ตัดแถวเก่า', token: v.token });
+  assert.equal(p.ok, true, JSON.stringify(p));
+  const sh = be.ss.getSheetByName('Chat');
+  assert.equal(sh.getLastRow() - 1, 2200 + 1 - 200);
+  assert.equal(sh.getRange(2, 1, 1, 1).getValues()[0][0], 'C200');
+  const g = post({ action: 'chat.get', token: v.token });
+  assert.equal(g.messages.length, 50);
+  assert.equal(g.messages[49].id, p.message.id);
 });
 
 await step('logout → token ใช้ไม่ได้', async () => {

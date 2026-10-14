@@ -10,7 +10,9 @@ import { getSettings } from '../core/Settings';
 import { XP_GAIN, levelStats } from '../data/level';
 import { BLUEPRINT_ITEM, BLUEPRINT_KEY, DEFAULT_KNOWN, bpKeyBuild, bpKeyRecipe } from '../data/blueprints';
 import { RECIPES } from '../data/recipes';
-import { SPECIAL_NAME, SPECIAL_SLOT, fmtLeft, specialState, type SpecialState } from '../core/SpecialIsland';
+import { SPECIAL_SLOT, centerState, specialState, type SpecialState } from '../core/SpecialIsland';
+import { WorldEventSystem } from '../systems/WorldEventSystem';
+import { GatherSystem } from '../systems/GatherSystem';
 import { BUILD, hasAnvil, type BuildDef } from '../data/buildables';
 import { getCharacter } from '../data/characters';
 import { BIOMES } from '../data/islands';
@@ -43,7 +45,7 @@ import { HazardSystem } from '../systems/HazardSystem';
 import { BiomeSystem } from '../systems/BiomeSystem';
 import { AmbientSystem } from '../systems/AmbientSystem';
 import { BuildSystem } from '../systems/BuildSystem';
-import { CombatFX } from '../systems/CombatFX';
+import { CombatFx, itemEl, motionOk, projEl, type FxShot } from '../fx/CombatFx';
 import { DailySystem } from '../systems/DailySystem';
 import { DayNightSystem } from '../systems/DayNightSystem';
 import { DisasterSystem } from '../systems/DisasterSystem';
@@ -57,13 +59,15 @@ import { WeatherSystem, type Weather } from '../systems/WeatherSystem';
 import { ChunkManager } from '../world/ChunkManager';
 import { ChunkRenderer } from '../world/ChunkRenderer';
 import { TILE, isWater } from '../world/tiles';
-import { SHAPE_NAMES, World, texFor, type NodeData } from '../world/WorldGenerator';
+import { EVENT_NODE_BASE, SHAPE_NAMES, World, texFor, type NodeData } from '../world/WorldGenerator';
 import { buildShowcase } from '../world/Showcase';
-import { txt } from '../ui/widgets';
 import { fadeIn, fadeTo } from '../ui/transition';
 import { FpsWatch, qualityKnobs } from '../core/Quality';
 import { GRACE_DAYS, STARTER_BASES, STARTER_WEAPONS } from '../data/starter';
 import { GuideSystem } from '../systems/GuideSystem';
+import { NODE_NAMES } from '../data/encyclopedia';
+import { drinkRaw, eatNutri, freshBody, restCure, robotCharge, ROBOT_FUEL } from '../systems/BodySystem';
+import { eventChestBox } from '../data/worldEvents';
 import type { UIScene } from './UIScene';
 
 export interface GameStartData {
@@ -77,7 +81,7 @@ type Layer = 'floor' | 'object' | 'boat';
 const tkey = (layer: string, tx: number, ty: number) => `${layer}:${tx},${ty}`;
 /** ไบโอมที่ไม่มีการ์ดขึ้นเกาะครั้งแรก (มีแบนเนอร์/การ์ดของตัวเองอยู่แล้ว) */
 const NO_LAND_CARD = new Set(['home', 'central', 'special', 'dungeon']);
-const BLOCKING_NODES = new Set(['tree', 'rock', 'ore_iron', 'ore_gold', 'ore_coal', 'ore_sulfur', 'crystal', 'cactus', 'meteor_rock', 'ruin_chest', 'bamboo', 'coral']);
+const BLOCKING_NODES = new Set(['tree', 'rock', 'ore_iron', 'ore_gold', 'ore_coal', 'ore_sulfur', 'crystal', 'cactus', 'meteor_rock', 'ruin_chest', 'bamboo', 'coral', 'barrel', 'wreckage', 'cannon', 'event_chest', 'obsidian', 'ice']);
 
 /** อันเดด (ไม้เท้าแสงศักดิ์สิทธิ์ทำดาเมจ ×1.5) */
 const UNDEAD = new Set(['zombie', 'skeleton', 'mummy', 'shade']);
@@ -93,7 +97,7 @@ export class GameScene extends Phaser.Scene {
   biomeFx!: BiomeSystem;
   world!: World;
   room!: RoomInfo;
-  fx!: CombatFX;
+  fx!: CombatFx;
   market!: MarketSystem;
   daily!: DailySystem;
   weather!: WeatherSystem;
@@ -105,6 +109,10 @@ export class GameScene extends Phaser.Scene {
   /** แปลนที่ปักหมุดไว้ (b:<id> / r:<recipeId>) — HUD แสดงของที่ยังขาด */
   pinned: string | null = null;
   disaster!: DisasterSystem;
+  /** กิจกรรมตามเวลาจริง (เกาะกลาง/มหาสมบัติเปิด-ปิด · เกาะกิจกรรม) */
+  worldEvents!: WorldEventSystem;
+  /** เก็บของตกแต่ง/ซากเครื่องบิน */
+  gather!: GatherSystem;
   quests: QuestSystem | null = null;
   guide!: GuideSystem;
   achievements!: AchievementSystem;
@@ -127,6 +135,8 @@ export class GameScene extends Phaser.Scene {
   ward: { x: number; y: number; r: number; t: number; img: Phaser.GameObjects.Arc } | null = null;
   wreckSprite: Phaser.GameObjects.Image | null = null;
   mailboxSprite: Phaser.GameObjects.Image | null = null;
+  /** 📦 ท่าส่งของ (ร้านค้าทางไกล) ข้างตู้จดหมาย */
+  postSprite: Phaser.GameObjects.Image | null = null;
   merchantSprite: Phaser.GameObjects.Sprite | null = null;
   stalls: { x: number; y: number; index: number }[] = [];
   visited = new Set<string>();
@@ -262,7 +272,7 @@ export class GameScene extends Phaser.Scene {
     cam.setRoundPixels(true);
     cam.setBackgroundColor('#29366f');
 
-    this.fx = new CombatFX(this);
+    this.fx = new CombatFx(this);
     this.dayNight = new DayNightSystem();
     this.lighting = new LightingSystem(this);
     this.spawner = new SpawnSystem(this);
@@ -284,6 +294,8 @@ export class GameScene extends Phaser.Scene {
     this.shelter = new ShelterSystem(this);
     this.quests = new QuestSystem(STORY, (items) => this.giveItems(items));
     this.guide = new GuideSystem(this);
+    this.worldEvents = new WorldEventSystem(this);
+    this.gather = new GatherSystem(this);
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', this.onPointerDown, this);
@@ -339,6 +351,9 @@ export class GameScene extends Phaser.Scene {
     const onGearBroken = (name: string) => EventBus.emit('toast', `${name} พังแล้ว!`, '#b13e53');
     this.events.on('gear:broken', onGearBroken);
     this.offEvents.push(() => this.events.off('gear:broken', onGearBroken));
+    const onHurt = (dmg: number, max: number) => this.fx.hurtFlash(dmg / Math.max(1, max)); // ขอบจอแดงตอนโดนตี
+    this.events.on('player:hurt', onHurt);
+    this.offEvents.push(() => this.events.off('player:hurt', onHurt));
 
     this.chunksR.update(0, cam.worldView);
     this.chunks.update(0, cam.worldView, this.worldTime, true);
@@ -348,7 +363,7 @@ export class GameScene extends Phaser.Scene {
     if (getSettings().tilt > 0) this.setTilt(getSettings().tilt);
     const cam0 = this.cameras.main;
     const shake = cam0.shake.bind(cam0);
-    cam0.shake = ((...args: Parameters<typeof shake>) => (getSettings().shake ? shake(...args) : cam0)) as typeof cam0.shake;
+    cam0.shake = ((...args: Parameters<typeof shake>) => (getSettings().shake && motionOk() ? shake(...args) : cam0)) as typeof cam0.shake; // คุณภาพต่ำ/ลดการเคลื่อนไหว = ไม่สั่น
     Sfx.startMusic(this.dayNight.isNight ? 'night' : 'day');
     if (!this.introSeen) this.time.delayedCall(300, () => EventBus.emit('ui:intro'));
     else if (!this.starterPicked) this.time.delayedCall(300, () => EventBus.emit('ui:starter'));
@@ -422,6 +437,7 @@ export class GameScene extends Phaser.Scene {
     this.removedNodes.clear();
     this.wreckSprite = null;
     this.mailboxSprite = null;
+    this.postSprite = null;
     this.merchantSprite = null;
     this.visited = new Set();
     this.wallet = new Wallet();
@@ -433,7 +449,6 @@ export class GameScene extends Phaser.Scene {
     this.offEvents = [];
     this.zoom = getSettings().zoom;
     this.tilt = 0;
-    this.specialFx = null;
     this.revives = 0;
     this.adventure = false;
   }
@@ -455,6 +470,11 @@ export class GameScene extends Phaser.Scene {
     const m = this.world.mailbox;
     this.mailboxSprite = this.add.image(m.tx * 16 + 8, m.ty * 16 + 16, 'mailbox').setOrigin(0.5, 1).setDepth(m.ty * 16 + 16);
     this.signs.push({ x: m.tx * 16 + 8, y: m.ty * 16 + 16, text: 'ตู้จดหมาย — ของขวัญรายวัน / เงินจากการขาย' });
+    // 📦 ท่าส่งของ: วางข้างตู้จดหมายทุกเกาะบ้าน (ตำแหน่งคิดจากจุดเกิด → เซฟเก่าก็ได้) · ตรงไหนเป็นบก 3 ช่องก่อนใช้ตรงนั้น
+    const land3 = (tx: number, ty: number) => [-1, 0, 1].every((d) => !isWater(this.tileAt(tx + d, ty)));
+    const [px, py] = ([[-2, 0], [0, 2], [-2, -2], [-2, 2]] as [number, number][]).map(([dx, dy]) => [m.tx + dx, m.ty + dy]).find(([x, y]) => land3(x, y)) ?? [m.tx - 2, m.ty];
+    this.postSprite = this.add.image(px * 16 + 8, py * 16 + 16, 'trading_post').setOrigin(0.5, 1).setDepth(py * 16 + 16);
+    this.signs.push({ x: px * 16 + 8, y: py * 16 + 16, text: '📦 ท่าส่งของ — ซื้อ/ขายทางไกลได้ตลอด (แพงกว่าเกาะกลาง)' });
   }
 
   /** เกาะกลาง: แผงร้าน 12 แผงรอบลาน + พ่อค้า + เตาไฟ + ป้าย */
@@ -663,117 +683,82 @@ export class GameScene extends Phaser.Scene {
     return this.nearestNode(x, y, r, () => true);
   }
 
-  // ---------- เกาะพิเศษ (เปิดทุก 4 ชม. ครั้งละ 1 ชม.) ----------
+  // ---------- เกาะที่มีเวลาเปิด (เกาะกลาง/มหาสมบัติ) + เกาะกิจกรรม — systems/WorldEventSystem.ts ----------
   special: SpecialState = specialState();
-  private specialKnown: boolean | null = null;
-  private specialRound = -1;
-  private specialWarned = -1;
-  private specialTimer = 0;
-  private barrierToastAt = 0;
-  private specialFx: { storm: Phaser.GameObjects.Container; beam: Phaser.GameObjects.Container; label: Phaser.GameObjects.Text } | null = null;
+  center: SpecialState = centerState();
 
   /** อยู่ในเขตพายุรอบเกาะพิเศษ (พิกเซลโลก) */
   inSpecialZone(x: number, y: number): boolean {
-    const is = this.world.slots[SPECIAL_SLOT];
-    if (!is) return false;
-    return Math.hypot(x / 16 - is.cx, y / 16 - is.cy) < is.r + 12;
+    return this.worldEvents?.inGateZone('special', x, y) ?? false;
   }
 
-  private buildSpecialFx() {
-    const is = this.world.slots[SPECIAL_SLOT];
-    if (!is) return;
-    const x = is.cx * 16;
-    const y = is.cy * 16;
-    const R = (is.r + 12) * 16;
-    // พายุมิติ (ตอนปิด): วงหมุนสีม่วง
-    const g = this.add.graphics();
-    g.fillStyle(0x5d275d, 0.22).fillCircle(0, 0, R);
-    for (let i = 0; i < 3; i++) {
-      g.lineStyle(10 - i * 3, i === 1 ? 0xa77bdb : 0x5d275d, 0.55 - i * 0.12);
-      for (let a = 0; a < 8; a++) g.beginPath().arc(0, 0, R - i * 26, (a / 8) * Math.PI * 2, (a / 8) * Math.PI * 2 + 0.5).strokePath();
-    }
-    const storm = this.add.container(x, y, [g]).setDepth(5e5);
-    this.tweens.add({ targets: storm, angle: 360, duration: 24000, repeat: -1 });
-    // ลำแสงทอง (ตอนเปิด)
-    const beamG = this.add.graphics();
-    beamG.fillGradientStyle(0xffcd75, 0xffcd75, 0xffcd75, 0xffcd75, 0, 0, 0.55, 0.55).fillRect(-14, -900, 28, 900);
-    beamG.fillStyle(0xfff2b0, 0.35).fillEllipse(0, 0, 90, 28);
-    const beam = this.add.container(x, y, [beamG]).setDepth(5e5).setBlendMode(Phaser.BlendModes.ADD);
-    this.tweens.add({ targets: beam, alpha: 0.55, duration: 900, yoyo: true, repeat: -1 });
-    const label = txt(this, x, y - (is.r + 4) * 16, '', 10, '#ffcd75').setOrigin(0.5).setDepth(5e5 + 1).setStroke('#0b0d1f', 3).setResolution(4);
-    this.specialFx = { storm, beam, label };
-  }
-
-  private updateSpecial(dt: number) {
-    this.specialTimer -= dt;
-    if (this.specialTimer > 0) return;
-    this.specialTimer = 0.5;
-    if (!this.specialFx) this.buildSpecialFx();
-    const st = specialState();
-    this.special = st;
-    const fx = this.specialFx;
-    if (fx) {
-      fx.storm.setVisible(!st.open);
-      fx.beam.setVisible(st.open);
-      fx.label.setText(st.open ? `✨ ${SPECIAL_NAME} — เปิดอยู่! เหลือ ${fmtLeft(st.msLeft)}` : `🔒 ${SPECIAL_NAME} — เปิดอีก ${fmtLeft(st.msLeft)}`).setColor(st.open ? '#ffcd75' : '#a77bdb');
-    }
-    if (st.open && st.round !== this.specialRound) {
-      this.specialRound = st.round;
-      this.refillSpecial();
-    }
-    if (this.specialKnown !== null && st.open !== this.specialKnown) {
-      if (st.open) {
-        Sfx.play('achievement');
-        EventBus.emit('ui:splash', { art: 'special_island', title: `✨ ${SPECIAL_NAME} เปิดแล้ว!`, sub: 'เปิด 1 ชั่วโมง — นั่งเรือไปทางใต้สุดของแผนที่ (ดูแผนที่ M)', color: '#ffcd75', hold: 3200 });
-      } else {
-        EventBus.emit('banner', `🌀 ${SPECIAL_NAME} ปิดแล้ว`, 'เปิดอีกครั้งใน 3 ชั่วโมง', '#a77bdb');
-        this.ejectFromSpecial();
-      }
-    }
-    if (this.specialKnown === null && !st.open) this.ejectFromSpecial(true);
-    this.specialKnown = st.open;
-    if (st.open && st.msLeft < 5 * 60_000 && this.specialWarned !== st.round) {
-      this.specialWarned = st.round;
-      EventBus.emit('toast', `⚠ ${SPECIAL_NAME} จะปิดใน ${fmtLeft(st.msLeft)} — รีบกลับขึ้นเรือ!`, '#ef7d57');
-    }
-  }
-
-  /** เปิดรอบใหม่: ทรัพยากรบนเกาะเกิดใหม่ทั้งหมด */
-  private refillSpecial() {
-    for (const n of this.world.nodes) {
-      if (this.world.slotIndexAt(n.tx, n.ty) !== SPECIAL_SLOT) continue;
-      if (!n.available) n.regrowAt = 0;
-      n.hp = -1;
-    }
-  }
-
-  /** ปิดเกาะ: ผู้เล่น (และเรือของเรา) ที่ยังอยู่ถูกพายุพัดกลับเกาะตัวเอง */
-  private ejectFromSpecial(quiet = false) {
+  /**
+   * ส่งกลับเกาะบ้าน (เกาะปิด/เกาะกิจกรรมหาย): ผู้เล่นในเขต → จุดเกิด (ของติดตัวอยู่ครบ) · ยานของเราที่จอดในเขต → จอดใกล้บ้าน
+   * boatsOnly = ย้ายเฉพาะยานที่จอดทิ้งไว้
+   */
+  sendHome(inZone: (x: number, y: number) => boolean, msg: string | null, color = '#a77bdb', boatsOnly = false) {
     const p = this.player;
-    if (!this.inSpecialZone(p.x, p.y)) return;
-    if (this.riding) {
-      this.riding.riding = false;
-      this.riding = null;
-      p.riding = false;
-    }
     const home = this.world.spawn;
-    p.setPosition(home.tx * 16 + 8, home.ty * 16 + 8);
-    // ยานที่จอดค้างที่เกาะพิเศษ ย้ายกลับมาจอดใกล้บ้าน (ยานบก → ข้างจุดเกิด)
+    const movePlayer = !boatsOnly && inZone(p.x, p.y);
+    if (movePlayer) {
+      if (this.riding) {
+        this.riding.riding = false;
+        this.riding = null;
+        p.riding = false;
+      }
+      p.setPosition(home.tx * 16 + 8, home.ty * 16 + 8);
+      this.cameras.main.flash(400, 167, 123, 219);
+      if (msg) EventBus.emit('toast', msg, color);
+    }
+    // ยานที่จอดค้าง ย้ายกลับมาจอดใกล้บ้าน (ยานบก → ข้างจุดเกิด)
     const water = this.waterNear(home.tx, home.ty);
-    this.boats.filter((b) => this.inSpecialZone(b.x, b.y)).forEach((b, i) => {
-      b.riding = false;
+    this.boats.filter((b) => !b.riding && inZone(b.x, b.y)).forEach((b, i) => {
       b.vel.set(0, 0);
       if (b.kind === 'land') b.setPosition(home.tx * 16 + 8 + ((i % 4) - 1.5) * 20, home.ty * 16 + 30);
       else if (water) b.setPosition(water.x + i * 28, water.y);
       b.setDepth(b.y);
       b.syncLift();
     });
-    this.cameras.main.flash(400, 167, 123, 219);
-    if (!quiet) EventBus.emit('toast', '🌀 พายุมิติพัดคุณกลับเกาะของตัวเอง (ของที่เก็บมายังอยู่ครบ)', '#a77bdb');
+  }
+
+  /** วาดพื้นใหม่ทั้งพื้นที่ (tile) — เกาะกิจกรรมโผล่/หาย */
+  refreshArea(x0: number, y0: number, x1: number, y1: number) {
+    this.chunksR.refreshRect(x0, y0, x1, y1);
+  }
+
+  /** วาด tile เดียวใหม่ (เก็บของตกแต่งบนพื้น) */
+  refreshTile(tx: number, ty: number) {
+    this.chunksR.refreshAt(tx, ty);
+  }
+
+  /** เอา node ออกจากฉาก (เกาะกิจกรรมหาย) */
+  removeWorldNodes(nodes: NodeData[]) {
+    for (const n of nodes) this.chunks.remove(n);
+  }
+
+  /** มอน/คู่แข่งที่อยู่ในช่องนั้น หายไปด้วย */
+  clearSlotCreatures(slot: number) {
+    for (const m of this.mobList()) if (this.world.slotIndexAt(Math.floor(m.x / 16), Math.floor(m.y / 16)) === slot && !m.isBoss) m.destroy();
+  }
+
+  /** เกาะโผล่ทับยาน: ยานทางน้ำ (รวมที่ขี่อยู่) ที่ตอนนี้อยู่บนบก → เลื่อนไปน้ำใกล้สุด */
+  unstickBoats(slot: number) {
+    for (const b of this.boats) {
+      if (b.kind === 'land' || this.world.slotIndexAt(Math.floor(b.x / 16), Math.floor(b.y / 16)) !== slot) continue;
+      const tx = Math.floor(b.x / 16);
+      const ty = Math.floor(b.y / 16);
+      if (isWater(this.tileAt(tx, ty)) && this.tileAt(tx, ty) !== TILE.SHALLOW) continue;
+      const w = this.waterNear(tx, ty);
+      if (!w) continue;
+      b.setPosition(w.x, w.y);
+      b.setDepth(b.y);
+      b.syncLift();
+      if (b.riding) this.player.setPosition(w.x, w.y);
+    }
   }
 
   /** หาน้ำตื้นใกล้จุดที่กำหนด (ไว้จอดเรือ) */
-  private waterNear(tx: number, ty: number): { x: number; y: number } | null {
+  waterNear(tx: number, ty: number): { x: number; y: number } | null {
     for (let r = 4; r < 60; r += 2) {
       for (let a = 0; a < 24; a++) {
         const ang = (a / 24) * Math.PI * 2;
@@ -1125,7 +1110,8 @@ export class GameScene extends Phaser.Scene {
   // ======================================================================
   update(_time: number, deltaMs: number) {
     if (this.gameOverFlag) return;
-    const dt = Math.min(deltaMs / 1000, 0.05);
+    const raw = Math.min(deltaMs / 1000, 0.05);
+    const dt = raw * this.fx.tick(raw); // hit-stop / slow-mo (เอฟเฟกต์ขยับด้วยเวลาจริง)
     this.worldTime += dt;
     const p = this.player;
     const uiOpen = this.uiOpen;
@@ -1186,7 +1172,8 @@ export class GameScene extends Phaser.Scene {
     this.burnTorch(dt);
     this.buffTimer -= dt;
     if (this.buffTimer <= 0) this.refreshBaseBuffs();
-    this.updateSpecial(dt);
+    this.worldEvents.update(dt);
+    this.gather.update(dt);
     this.interiors.update();
     this.hazards.update(dt);
     this.biomeFx.update(dt);
@@ -1205,6 +1192,7 @@ export class GameScene extends Phaser.Scene {
     this.updateFishing(dt);
     this.spawner.update(dt);
     this.creatures.update(dt);
+    this.playerStatusFx(dt);
     this.rivals.update(dt);
     this.disaster.update(dt);
     this.updateZones(dt);
@@ -1294,7 +1282,7 @@ export class GameScene extends Phaser.Scene {
     }
     for (const b of this.braziers) if (Phaser.Math.Distance.Between(p.x, p.y, b.x, b.y) < 90) lit = true;
     const raining = this.weather.raining && is?.biome !== 'desert' && is?.biome !== 'snow' && is?.biome !== 'glacier';
-    return { ambient, warmth, raining, dark: dn.darkness > 0.5, lit, survival: !this.creative };
+    return { ambient, warmth, raining, dark: dn.darkness > 0.5, lit, survival: !this.creative, grace: this.inGrace };
   }
 
   private updateZones(dt: number) {
@@ -1315,13 +1303,14 @@ export class GameScene extends Phaser.Scene {
       const bName = is.biome === 'home' && slot !== this.world.home ? 'เกาะผู้รอดชีวิต' : b.name;
       const bDesc = `${is.biome === 'home' && slot !== this.world.home ? 'เกาะทุ่งหญ้าของผู้เล่นคนอื่น' : b.desc}${this.isAdventureSlot(slot) ? ' · ⚔ เขตผจญภัย' : ''}`;
       // ขึ้นเกาะไบโอมนี้ครั้งแรก = การ์ดภาพเต็มจอ (เก็บใน visited เป็น `b:<ไบโอม>`)
-      const firstBiome = slot !== this.world.home && !NO_LAND_CARD.has(is.biome) && !this.visited.has(`b:${is.biome}`);
+      const firstBiome = slot !== this.world.home && !NO_LAND_CARD.has(is.biome) && !is.event && !this.visited.has(`b:${is.biome}`);
       if (firstBiome) this.visited.add(`b:${is.biome}`);
-      if (slot === CENTER_SLOT) EventBus.emit('ui:splash', { art: 'market_island', title: is.name, sub: b.desc, color: b.color });
+      if (is.event) this.worldEvents.onLand(slot); // เกาะกิจกรรม: แบนเนอร์ของกิจกรรม (ไม่ใช้การ์ดไบโอม)
+      else if (slot === CENTER_SLOT) EventBus.emit('ui:splash', { art: 'market_island', title: is.name, sub: b.desc, color: b.color });
       else if (firstBiome) EventBus.emit('ui:splash', { art: `isl_${is.biome}`, title: `🏝 ${b.name}`, sub: `${b.desc}${b.tip ? ` · ${b.tip}` : ''} · ${SHAPE_NAMES[is.shape.kind]} · ⚔ เขตผจญภัย`, color: b.color, hold: 3600 });
       else EventBus.emit('banner', is.name, `${bName} · ${bDesc}`, b.color);
       if (slot !== this.world.home && slot !== CENTER_SLOT) EventBus.emit('island:visit_other', slot);
-      if (!this.visited.has(String(slot))) {
+      if (!is.event && !this.visited.has(String(slot))) {
         this.visited.add(String(slot));
         MetaSave.bump('islandsVisited', [...this.visited].filter((k) => !k.startsWith('b:')).length, 'max');
       }
@@ -1543,63 +1532,19 @@ export class GameScene extends Phaser.Scene {
     return 0xffffff;
   }
 
-  /** เอฟเฟกต์การฟันตามชนิดอาวุธ */
+  /** เอฟเฟกต์การฟันตามชนิดอาวุธ (fx/CombatFx.swing) */
   private swingFx(cls: WeaponClass | undefined, angle: number, reach: number, color: number) {
     const p = this.player;
-    const depth = p.depth + 1;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const sx = p.x + cos * 6;
-    const sy = p.y + 2 + sin * 6;
-    const slash = (a: number, scale: number, dur = 150) => {
-      const fx = this.add.image(sx, sy, 'slash').setRotation(a).setDepth(depth).setTint(color).setScale(scale);
-      this.tweens.add({ targets: fx, alpha: 0, scale: scale * 1.2, duration: dur, onComplete: () => fx.destroy() });
-    };
-    switch (cls) {
-      case 'spear':
-      case 'whip': {
-        const g = this.add.graphics().setDepth(depth);
-        const len = reach - 4;
-        if (cls === 'spear') {
-          g.lineStyle(2, color, 0.9).lineBetween(sx, sy, p.x + cos * len, p.y + 2 + sin * len);
-          this.fx.sparks(p.x + cos * len, p.y + 2 + sin * len, color, 2, 6);
-        } else {
-          // แส้: เส้นโค้งสะบัด + ประกายปลายแส้
-          g.lineStyle(1, 0xc28a50, 1).beginPath().moveTo(sx, sy);
-          for (let i = 1; i <= 12; i++) {
-            const t = i / 12;
-            const off = Math.sin(t * Math.PI) * 6 * (1 - t * 0.5);
-            g.lineTo(sx + cos * len * t - sin * off, sy + sin * len * t + cos * off);
-          }
-          g.strokePath();
-          this.fx.sparks(sx + cos * len, sy + sin * len, 0xffcd75, 3, 8);
-        }
-        this.tweens.add({ targets: g, alpha: 0, duration: 160, onComplete: () => g.destroy() });
-        break;
-      }
-      case 'greatsword':
-      case 'scythe':
-        slash(angle - 0.55, 1.45, 200);
-        slash(angle + 0.55, 1.45, 200);
-        this.fx.slash(sx, sy, angle, color, depth, true);
-        break;
-      case 'dagger':
-        slash(angle + (this.combo % 2 ? 0.45 : -0.45), 0.75, 110);
-        break;
-      case 'fist': {
-        const tx = p.x + cos * 14;
-        const ty = p.y + 2 + sin * 14;
-        this.fx.ring(tx, ty, color, 7);
-        this.fx.sparks(tx, ty, color, 3, 8);
-        break;
-      }
-      case 'axe':
-      case 'mace':
-        this.fx.slash(sx, sy, angle, color, depth, true);
-        break;
-      default:
-        this.fx.slash(sx, sy, angle, color, depth, reach > 32);
-    }
+    this.fx.swing(cls, p.x, p.y, angle, reach, color, p.depth + 1);
+  }
+
+  /** อนุภาคสถานะบนตัวผู้เล่น (สถานะเก็บใน CreatureSystem) */
+  private playerStatusFx(dt: number) {
+    const p = this.player;
+    if (p.dead || this.riding) return;
+    const cs = this.creatures as unknown as { poisonT: number; poisonFrom: string; chillT: number; chillMult: number };
+    if (cs.poisonT > 0) this.fx.status(cs.poisonFrom.startsWith('ไฟลวก') ? 'burn' : 'poison', p.x, p.y, 12, 16, dt);
+    if (cs.chillT > 0) this.fx.status(cs.chillMult <= 0.4 ? 'shock' : 'frozen', p.x, p.y, 12, 16, dt, 0.6);
   }
 
   /** ตีมอน + ชนิดอาวุธ (คริ/ผลัก/ทะลุเกราะ) + สถานะ + เอฟเฟกต์อาวุธเทพ */
@@ -1612,11 +1557,12 @@ export class GameScene extends Phaser.Scene {
     const dmg = base * (crit ? BALANCE.critMult : 1) * Phaser.Math.FloatBetween(0.9, 1.1);
     m.hurt(dmg, p, { crit, knock: (cls.knock ?? 1) * (def?.knockback ?? 1), armorPierce: cls.armorPierce });
     if (p.stats.lifesteal > 0) p.heal(dmg * p.stats.lifesteal / 100);
-    this.fx.sparks(m.x, m.y, crit ? 0xffcd75 : 0xffffff, crit ? 10 : 5);
-    this.fx.ring(m.x, m.y, crit ? 0xffcd75 : 0xf4f4f4, crit ? 16 : 10);
+    // ประกาย+ดาวตรงจุดโดน · hit-stop เฉพาะคริ/อาวุธหนัก · คริจอสั่นนิดๆ
+    const heavy = (cls.speed ?? 1) < 0.8;
+    this.fx.hit(m.x, m.y - 2, Math.atan2(m.y - p.y, m.x - p.x), crit, heavy, itemEl(def));
     Sfx.play(crit ? 'crit' : 'hit');
-    this.fx.hitStop(crit ? 90 : (cls.speed ?? 1) < 0.8 ? 70 : 45);
-    if (crit) this.cameras.main.shake(90, 0.004);
+    if (crit || heavy) this.fx.hitStop(crit ? 65 : 45);
+    if (crit) this.cameras.main.shake(70, 0.0025);
     this.applyWeaponStatus(m, def, dmg);
     if (effect === 'lifesteal') {
       p.heal(dmg * 0.15);
@@ -1647,16 +1593,9 @@ export class GameScene extends Phaser.Scene {
       const next = this.mobList().find((o) => !hit.has(o) && o.active && Phaser.Math.Distance.Between(from.x, from.y, o.x, o.y) < 60);
       if (!next) break;
       hit.add(next);
-      const g = this.add.graphics().setDepth(1e6 + 4);
-      g.lineStyle(2, 0x73eff7, 1).beginPath().moveTo(from.x, from.y - 4);
-      for (let k = 1; k < 4; k++) {
-        const t = k / 4;
-        g.lineTo(from.x + (next.x - from.x) * t + Phaser.Math.Between(-4, 4), from.y - 4 + (next.y - from.y) * t + Phaser.Math.Between(-4, 4));
-      }
-      g.lineTo(next.x, next.y - 4).strokePath();
-      this.tweens.add({ targets: g, alpha: 0, duration: 200, onComplete: () => g.destroy() });
+      this.fx.bolt(from.x, from.y - 4, next.x, next.y - 4, 0x73eff7, 2, true, 0.22);
       next.hurt(dmg, from, { color: 0x73eff7, knock: 0.3 });
-      this.fx.sparks(next.x, next.y - 4, 0xc8f4ff, 4, 10);
+      this.fx.impact(next.x, next.y - 4, 'bolt', 0.7);
       from = { x: next.x, y: next.y };
     }
   }
@@ -1665,7 +1604,7 @@ export class GameScene extends Phaser.Scene {
   private frostNova(x: number, y: number, dmg: number) {
     this.fx.ring(x, y + 2, 0x73eff7, 56);
     this.time.delayedCall(90, () => this.fx.ring(x, y + 2, 0xc8f4ff, 40));
-    this.fx.sparks(x, y, 0xc8f4ff, 18, 50);
+    this.fx.impact(x, y, 'ice', 2);
     this.cameras.main.shake(120, 0.004);
     Sfx.play('splash');
     for (const m of this.mobList()) {
@@ -1689,6 +1628,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private dropFromNode(node: ResourceNode) {
+    // ต้นมะพร้าว: ลุ้นลูกมะพร้าว (น้ำสะอาด)
+    if (node.kind === 'tree' && node.info.tex.startsWith('palm_') && Math.random() < 0.5) this.spawnDrop(node.x, node.baseY, 'coconut', Phaser.Math.Between(1, 2));
     for (const d of node.spec.drops) {
       if (Math.random() > d.chance) continue;
       this.spawnDrop(node.x, node.baseY, d.item, Phaser.Math.Between(d.qty[0], d.qty[1]));
@@ -1741,11 +1682,14 @@ export class GameScene extends Phaser.Scene {
     const proj = r.projectile;
     const boom = proj === 'bullet' || proj === 'proj_pellet' || def.weaponClass === 'shotgun';
     Sfx.play(boom || proj === 'proj_spark' ? 'thunder' : proj === 'fireball' || proj.startsWith('proj_') && proj !== 'proj_stone' ? 'skill' : returns ? 'swing' : 'bow', 80);
+    const mx = p.x + Math.cos(base) * 10;
+    const my = p.y + Math.sin(base) * 10;
     if (boom) {
       const heavy = def.weaponClass === 'shotgun' || def.weaponClass === 'rifle';
       this.cameras.main.shake(heavy ? 130 : 80, heavy ? 0.007 : 0.004);
-      this.fx.sparks(p.x + Math.cos(base) * 10, p.y + Math.sin(base) * 10, 0xffcd75, heavy ? 8 : 4, 10);
-    }
+      this.fx.muzzle(mx, my, base, heavy ? 'heavy' : 'gun');
+    } else if (def.weaponClass === 'staff' || def.weaponClass === 'wand' || def.weaponClass === 'tome' || def.weaponClass === 'orb') this.fx.muzzle(mx, my, base, 'magic', itemEl(def));
+    else if (!returns) this.fx.muzzle(mx, my, base, 'bow');
   }
 
   /** ของขว้าง: ระเบิดชนิดต่างๆ (โยนโค้งไปตกพื้น) หรือ มีดบิน/ดาวกระจาย/หอกซัด (บินตรง) */
@@ -1836,7 +1780,7 @@ export class GameScene extends Phaser.Scene {
         this.addWeaponArea(x, y, t.radius, 'smoke', t.dur ?? 3.5, 0);
         break;
       case 'flash':
-        this.cameras.main.flash(160, 255, 255, 230);
+        this.fx.flash(0xffffe6, 0.25, 0.22); // จอวาบอ่อน (ไม่แสบตา · ปิดเมื่อลดการเคลื่อนไหว)
         this.fx.ring(x, y, 0xffffff, t.radius);
         this.fx.sparks(x, y, 0xfff2b0, 20, t.radius * 0.8);
         Sfx.play('thunder');
@@ -1921,9 +1865,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   explode(x: number, y: number, radius: number, damage: number, friendly: boolean) {
-    this.fx.ring(x, y, 0xef7d57, radius);
-    this.fx.sparks(x, y, 0xffcd75, 16, radius * 0.8);
-    this.fx.poof(x, y, 0x333c57, 12);
+    this.fx.explosion(x, y, radius);
     this.cameras.main.shake(200, 0.008);
     Sfx.play('breakRock');
     for (const m of this.mobList()) if (Phaser.Math.Distance.Between(x, y, m.x, m.y) < radius) m.hurt(damage, { x, y });
@@ -1950,6 +1892,7 @@ export class GameScene extends Phaser.Scene {
     shot.body!.setSize(icon ? 10 : 6, icon ? 10 : 6);
     shot.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
     if (tex === 'fireball' && this.anims.exists('fireball_spin')) (shot as unknown as Phaser.GameObjects.Sprite).play?.('fireball_spin');
+    (shot as typeof shot & FxShot).fxEl = extra.item ? itemEl(ITEMS[extra.item]) : projEl(tex); // หางกระสุนตามธาตุ
     return shot;
   }
 
@@ -1978,14 +1921,17 @@ export class GameScene extends Phaser.Scene {
     if (def && this.magicBurst(shot, mob, def, sdmg, hit.size === 1)) return;
     // ธาตุหลัก (โอกาสติดสูง) → ตัวเลขดาเมจเป็นสีธาตุ
     const el = def?.status?.find((s) => s.chance >= 0.5);
-    const color = el ? STATUS_INFO[el.kind].color : undefined;
+    const fxEl = (shot as typeof shot & FxShot).fxEl ?? 'phys';
+    // ธาตุหลัก → สีธาตุ · เวทไม่มีธาตุ (อาร์เคน/เงา) → ม่วง
+    const color = el ? STATUS_INFO[el.kind].color : fxEl === 'arcane' || fxEl === 'dark' ? 0xc58cff : undefined;
     mob.hurt(sdmg, shot, { crit, knock: def ? (cls.knock ?? 1) * (def.knockback ?? 1) : 1, color });
     if (this.player.stats.lifesteal > 0) this.player.heal(sdmg * this.player.stats.lifesteal / 100);
     this.applyWeaponStatus(mob, def, sdmg);
     if (def?.chain) this.chainLightning(mob, sdmg * 0.6, def.chain);
     if (def?.special === 'holylight') this.player.heal(sdmg * 0.04);
     if (def?.special === 'bloodpact') this.player.heal(sdmg * 0.1);
-    this.fx.sparks(mob.x, mob.y, color ?? 0xffffff, 4);
+    this.fx.impact(shot.x, shot.y, fxEl, crit ? 1.3 : 0.9);
+    if (crit) this.fx.hit(mob.x, mob.y - 2, Math.atan2(shot.body?.velocity.y ?? 0, shot.body?.velocity.x ?? 1), true, false);
     Sfx.play('hit', 60);
     if (!shot.getData('pierce')) shot.destroy();
   }
@@ -2003,7 +1949,7 @@ export class GameScene extends Phaser.Scene {
     const col = sp === 'tidal' ? 0x41a6f6 : sp === 'phoenixfire' ? 0xef7d57 : (def.status?.[0] ? STATUS_INFO[def.status[0].kind].color : 0xa77bdb);
     this.fx.ring(x, y, col, r);
     this.time.delayedCall(80, () => this.fx.ring(x, y, 0xffffff, r * 0.6));
-    this.fx.sparks(x, y, col, 14, r * 0.8);
+    this.fx.impact(x, y, sp === 'tidal' ? 'water' : itemEl(def), r / 24);
     this.cameras.main.shake(140, 0.005);
     Sfx.play(sp === 'tidal' ? 'splash' : 'breakRock', 80);
     let total = 0;
@@ -2064,13 +2010,25 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** มอนยิงกระสุนใส่ผู้เล่น */
-  enemyShoot(mob: Mob, sh: NonNullable<MobDef['shoot']>) {
+  enemyShoot(mob: Mob, sh: NonNullable<MobDef['shoot']>, warned = false) {
     const p = this.player;
     const base = Phaser.Math.Angle.Between(mob.x, mob.y, p.x, p.y);
+    const n = sh.burst ?? 1;
+    // บอส: แถบเตือนแนวกระสุนก่อนยิงจริง 0.35 วิ (หลบทัน อ่านท่าง่าย)
+    if (mob.isBoss && !warned) {
+      for (let i = 0; i < n; i++) this.fx.telegraphLine(mob.x, mob.y, base + (i - (n - 1) / 2) * 0.22, Math.min(170, sh.speed * 0.7), 8, 0.35);
+      this.time.delayedCall(350, () => mob.active && !this.player.dead && this.enemyShootAt(mob, sh, base));
+      return;
+    }
+    this.enemyShootAt(mob, sh, base);
+  }
+
+  private enemyShootAt(mob: Mob, sh: NonNullable<MobDef['shoot']>, base: number) {
     const n = sh.burst ?? 1;
     for (let i = 0; i < n; i++) {
       const a = base + (i - (n - 1) / 2) * 0.22;
       const s = this.enemyShots.create(mob.x, mob.y - 4, sh.projectile) as Phaser.Physics.Arcade.Image;
+      (s as typeof s & FxShot).fxEl = projEl(sh.projectile);
       s.setRotation(a).setDepth(1e5).setData({ damage: sh.damage, life: 2.2, from: mob.def.name, afflict: mob.def.onHit ?? null });
       s.body!.setSize(6, 6);
       s.setVelocity(Math.cos(a) * sh.speed, Math.sin(a) * sh.speed);
@@ -2086,13 +2044,20 @@ export class GameScene extends Phaser.Scene {
     const dmg = p.hurt(shot.getData('damage'), shot);
     if (dmg > 0) this.fx.damageNumber(p.x, p.y - 12, dmg, 0xef7d57);
     if (dmg > 0 && shot.getData('afflict')) this.creatures.afflict(shot.getData('afflict'), shot.getData('from'));
+    this.fx.impact(shot.x, shot.y, (shot as typeof shot & FxShot).fxEl ?? 'phys', 0.7);
     shot.destroy();
   }
 
   private updateShots(dt: number) {
-    for (const a of [...this.shots.getChildren()] as Phaser.Physics.Arcade.Image[]) if (a.active) this.steerShot(a, dt);
-    for (const group of [this.shots, this.enemyShots]) {
-      for (const a of [...group.getChildren()] as Phaser.Physics.Arcade.Image[]) {
+    // วนจากท้ายไปหัว (ทำลายระหว่างวนได้ ไม่ต้องคัดลอกอาร์เรย์ทุกเฟรม)
+    const own = this.shots.getChildren() as Phaser.Physics.Arcade.Image[];
+    for (let i = own.length - 1; i >= 0; i--) if (own[i].active) this.steerShot(own[i], dt);
+    for (let gi = 0; gi < 2; gi++) {
+      const list = (gi ? this.enemyShots : this.shots).getChildren() as (Phaser.Physics.Arcade.Image & FxShot)[];
+      for (let i = list.length - 1; i >= 0; i--) {
+        const a = list[i];
+        if (!a?.active) continue;
+        this.fx.shotTrail(a, dt);
         const life = a.getData('life') - dt;
         a.setData('life', life);
         if (life <= 0) {
@@ -2102,6 +2067,16 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
+  }
+
+  /** ยืนใกล้ท่าส่งของ (และใกล้กว่าตู้จดหมายที่อยู่ข้างกัน) */
+  private postNear(): boolean {
+    const p = this.player;
+    const s = this.postSprite;
+    if (!s) return false;
+    const d = Phaser.Math.Distance.Between(p.x, p.feetY, s.x, s.y);
+    const m = this.mailboxSprite;
+    return d < BALANCE.reach + 12 && (!m || d < Phaser.Math.Distance.Between(p.x, p.feetY, m.x, m.y));
   }
 
   // ---------- โต้ตอบ (E) ----------
@@ -2119,7 +2094,8 @@ export class GameScene extends Phaser.Scene {
     if (drop) return this.daily.open(drop);
     const grave = this.graves.find((g) => near(g.x, g.y));
     if (grave) return this.openGrave(grave);
-    if (this.mailboxSprite && this.daily.mailboxReady && near(this.mailboxSprite.x, this.mailboxSprite.y)) return this.daily.claim();
+    if (this.postNear()) return EventBus.emit('ui:market', { remote: true });
+    if (this.mailboxSprite && (this.daily.mailboxReady || this.daily.boxAvailable) && near(this.mailboxSprite.x, this.mailboxSprite.y)) return this.daily.claim();
     if (this.merchantSprite && near(this.merchantSprite.x, this.merchantSprite.y, R + 10)) return EventBus.emit('ui:market');
     const stall = this.stalls.find((s) => near(s.x, s.y + 4, 30));
     if (stall) return EventBus.emit('ui:trade', stall.index);
@@ -2140,13 +2116,21 @@ export class GameScene extends Phaser.Scene {
     if (t.broken) return void this.repairStructure(t.broken); // วัสดุไม่พอ → แจ้งเตือน
     const node = this.nearestNode(p.x, p.feetY, R, (n) => n.isPickable);
     if (node) return this.pick(node);
+    if (this.gather.interact()) return;
     if (this.waterNearby()) {
       if (p.held && ITEMS[p.held.id].type === 'rod') return this.castLine();
       if (p.char.passive.robot) return EventBus.emit('toast', 'หุ่นยนต์ดื่มน้ำไม่ได้!', '#ef7d57');
+      // อิ่มน้ำแล้ว = ตักน้ำดิบใส่กระบอกไว้ต้ม · ดื่มน้ำดิบเสี่ยงท้องเสีย 20%
+      if (p.thirst >= 90) {
+        if (p.inventory.add('dirty_water', 1) > 0) return EventBus.emit('toast', 'กระเป๋าเต็ม — ตักน้ำไม่ได้', '#ef7d57');
+        Sfx.play('drink');
+        return EventBus.emit('toast', '🫙 ตักน้ำดิบใส่กระบอก (ต้มที่กองไฟ = น้ำสะอาด)', '#73eff7');
+      }
       p.thirst = Math.min(100, p.thirst + BALANCE.drinkAmount);
       this.fx.sparks(p.x + p.aim.x * 10, p.feetY + p.aim.y * 10, 0x41a6f6, 5, 8);
       Sfx.play('drink');
-      EventBus.emit('toast', 'ดื่มน้ำ 💧', '#73eff7');
+      const sick = drinkRaw(p);
+      EventBus.emit('toast', sick ?? 'ดื่มน้ำดิบ 💧 (เสี่ยงท้องเสีย — น้ำฝน/บ่อน้ำ/น้ำต้มปลอดภัยกว่า)', sick ? '#ef7d57' : '#73eff7');
     }
   }
 
@@ -2238,6 +2222,7 @@ export class GameScene extends Phaser.Scene {
       const p = this.player;
       p.sanity = Math.min(100, p.sanity + 30);
       p.heal(20);
+      if (restCure(p)) EventBus.emit('toast', '🛌 นอนพักแล้วหายป่วย', '#a7f070');
       cam.fadeIn(900);
       EventBus.emit('toast', '😴 นอนหลับสบาย — ฟื้น HP + สติ', '#a7f070');
     });
@@ -2257,6 +2242,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   pick(node: ResourceNode) {
+    if (node.kind === 'event_chest') {
+      // หีบเกาะกิจกรรม (เขตผจญภัย): ไม้ 50% / เหล็ก 38% / ทอง 10% / เพชร 2% — ผ่านเพดานกล่องตามพื้นที่
+      node.deplete(this.worldTime);
+      this.dropFromNode(node);
+      this.spawnDrop(node.x, node.baseY, this.capBox(eventChestBox() as BoxTier, 'chest', node.x, node.baseY), 1);
+      Sfx.play('levelUp');
+      EventBus.emit('node:harvested', node.kind);
+      return;
+    }
     if (node.kind === 'ruin_chest') {
       node.deplete(this.worldTime);
       const dungeonChest = this.interiors.onNodePicked(node);
@@ -2287,11 +2281,11 @@ export class GameScene extends Phaser.Scene {
       Sfx.play('achievement');
       return EventBus.emit('toast', `เก็บ${def.name}เข้าตู้เสื้อผ้า และสวมใส่แล้ว`, '#a77bdb');
     }
-    if (p.char.passive.robot && (held.id === 'wood' || held.id === 'iron_ingot')) {
-      p.hunger = Math.min(100, p.hunger + (held.id === 'wood' ? 8 : 40));
+    if (p.char.passive.robot && ROBOT_FUEL[held.id]) {
+      const msg = robotCharge(p, held.id);
       p.inventory.consumeAt(p.selected);
       Sfx.play('skill');
-      return EventBus.emit('toast', '🔋 ชาร์จแบตเตอรี่', '#73eff7');
+      return EventBus.emit('toast', msg ?? '🔋 ชาร์จแบตเตอรี่', '#73eff7');
     }
     if (def.elixir) return this.useElixir(p.selected);
     if (def.equip || def.type === 'weapon' || def.type === 'ranged') {
@@ -2302,6 +2296,8 @@ export class GameScene extends Phaser.Scene {
     if (p.char.passive.robot && def.type === 'food') return EventBus.emit('toast', 'หุ่นยนต์ไม่กินอาหาร — ถือไม้/เหล็กแท่งแล้วกด F', '#ef7d57');
     if (def.type === 'heal' && p.hp >= p.maxHp) return EventBus.emit('toast', 'HP เต็มอยู่แล้ว', '#94b0c2');
     p.eat(def.food);
+    const bodyMsg = eatNutri(p, def);
+    if (bodyMsg) EventBus.emit('toast', bodyMsg, bodyMsg.startsWith('🌿') ? '#a7f070' : '#ef7d57');
     p.inventory.consumeAt(p.selected);
     Sfx.play(def.type === 'heal' ? 'skill' : 'eat');
     if (def.food.hp && def.food.hp > 0) this.fx.damageNumber(p.x, p.y - 12, def.food.hp * (p.char.passive.healMult ?? 1), 0xa7f070);
@@ -2529,7 +2525,7 @@ export class GameScene extends Phaser.Scene {
     if (!isWater(this.tileAt(Math.floor(x / 16), Math.floor(y / 16)))) return EventBus.emit('toast', 'หันหน้าเข้าหาน้ำแล้วเหวี่ยงเบ็ด', '#94b0c2');
     const bobber = this.add.image(p.x, p.y, 'px').setTint(0xb13e53).setScale(1.2).setDepth(1e5);
     this.tweens.add({ targets: bobber, x, y, duration: 350, ease: 'Quad.easeOut' });
-    const mark = this.add.text(x, y - 14, '!', { fontFamily: 'monospace', fontSize: '12px', color: '#ffcd75', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(1e6 + 5).setVisible(false);
+    const mark = this.add.text(x, y - 14, '!', { fontFamily: '"Mitr", sans-serif', fontSize: '13px', fontStyle: '700', color: '#ffcd75', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(1e6 + 5).setVisible(false);
     // เรือประมง: อวนในตัว ปลากินเร็วขึ้น
     this.fishing = { state: 'wait', t: Phaser.Math.FloatBetween(1.6, 4.5) / (this.riding?.spec.fishing ?? 1), bobber, mark };
     Sfx.play('splash');
@@ -2834,13 +2830,12 @@ export class GameScene extends Phaser.Scene {
       if (isInterior(this.world.slotIndexAt(Math.floor(b.x / 16), Math.floor((b.y + Math.sign(vy) * 10 + vy * dt) / 16)))) vy = 0;
     }
     // เกาะพิเศษปิดอยู่ → พายุมิติกั้นไว้ เข้าไม่ได้ (ทั้งเรือและยานบิน)
-    if (!land && !this.special.open && this.inSpecialZone(b.x + vx * dt, b.y + vy * dt) && !this.inSpecialZone(b.x, b.y)) {
+    // เกาะกลาง/มหาสมบัติปิดอยู่ → พายุกั้นไว้ เข้าไม่ได้ (ทั้งเรือและยานบิน)
+    const gate = land ? null : this.worldEvents.blockedGate(b.x + vx * dt, b.y + vy * dt, b.x, b.y);
+    if (gate) {
       vx = 0;
       vy = 0;
-      if (this.worldTime > this.barrierToastAt) {
-        this.barrierToastAt = this.worldTime + 3;
-        EventBus.emit('toast', `🌀 พายุมิติกั้นเกาะมหาสมบัติ — เปิดอีก ${fmtLeft(this.special.msLeft)}`, '#a77bdb');
-      }
+      this.worldEvents.onBarrier(gate);
     }
     b.vel.set(vx, vy);
     const moving = Math.abs(vx) + Math.abs(vy) > 1;
@@ -3368,14 +3363,14 @@ export class GameScene extends Phaser.Scene {
       m.disaster = mob.disaster;
     }
     if (mob.def.ai !== 'flee') this.kills++;
-    this.fx.poof(mob.x, mob.y + 2, mob.def.id === 'zombie' ? 0x7fae5a : 0x94b0c2, 10);
-    this.fx.sparks(mob.x, mob.y, 0xb13e53, 6);
+    this.fx.mobDeath(mob, mob.feetY, mob.def.id === 'zombie' ? 0x7fae5a : 0xd6e4ee);
+    if (mob.isBoss) this.fx.bossDeath(mob.x, mob.y);
     Sfx.play('mobDie');
     if (mob.isBoss) {
       if (this.boss === mob) this.boss = null;
       const dg = mob.getData('dungeon') as number | undefined;
       if (dg !== undefined) this.interiors.onBossKilled(dg);
-      this.cameras.main.shake(600, 0.01);
+      this.cameras.main.shake(450, 0.008);
       Sfx.play('levelUp');
       EventBus.emit('toast', `👑 ล้ม${mob.def.name}สำเร็จ!`, '#ffcd75');
       MetaSave.bump('bossKills', 1);
@@ -3553,10 +3548,11 @@ export class GameScene extends Phaser.Scene {
         trained: { ...p.trained },
         level: p.level, xp: p.xp, revives: this.revives, blueprints: [...this.learned],
         interiors: this.interiors.serialize(),
+        body: { ...p.nutri },
         equip: Object.fromEntries(Object.entries(p.equip).map(([k, v]) => [k, v ? { ...v } : null])) as Equipment,
       },
       wallet: { coins: this.wallet.coins, gems: this.wallet.gems },
-      nodes: this.world.nodes.filter((n) => !n.daily && (!n.available || n.hp >= 0)).map((n) => [n.id, n.available, n.hp, n.regrowAt]),
+      nodes: this.world.nodes.filter((n) => !n.daily && n.id < EVENT_NODE_BASE && (!n.available || n.hp >= 0)).map((n) => [n.id, n.available, n.hp, n.regrowAt]),
       extraNodes: this.world.nodes.filter((n) => n.daily),
       removedNodes: [...this.removedNodes],
       tiles: [...this.paintedTiles].map(([k, t]) => [...k.split(',').map(Number), t] as [number, number, number]),
@@ -3570,6 +3566,8 @@ export class GameScene extends Phaser.Scene {
       kills: this.kills, counters: this.achievements.counters, visited: [...this.visited],
       survived: this.disaster.survived, trades: this.market.trades, introSeen: this.introSeen, starterPicked: this.starterPicked, freeBuilds: [...this.freeBuilds], showcase: this.showcase,
       pinned: this.pinned ?? undefined,
+      worldEvents: this.worldEvents.serialize(),
+      wreckLeft: this.gather.wreckLeft,
     };
   }
 
@@ -3581,6 +3579,7 @@ export class GameScene extends Phaser.Scene {
     this.weather.state = s.weather as Weather;
     const p = this.player;
     Object.assign(p, { hp: s.player.hp, hunger: s.player.hunger, thirst: s.player.thirst, stamina: s.player.stamina, temp: s.player.temp, sanity: s.player.sanity, selected: s.player.selected });
+    p.nutri = { ...freshBody(), ...(s.player.body ?? {}) }; // เซฟเก่า = ค่าเริ่มต้น 70
     p.setPosition(s.player.x, s.player.y);
     p.equip = { ...emptyEquipment(), ...(s.player.equip ?? {}) };
     if (s.player.armor && !p.equip.body) p.equip.body = s.player.armor; // เซฟเก่า
@@ -3661,6 +3660,9 @@ export class GameScene extends Phaser.Scene {
     this.achievements.counters = s.counters;
     this.visited = new Set(s.visited);
     this.disaster.survived = s.survived;
+    this.worldEvents.load(s.worldEvents);
+    this.gather.wreckLeft = s.wreckLeft ?? this.gather.wreckLeft;
+    if (this.gather.wreckLeft <= 0) this.removeWreck();
     this.market.refresh(this.room.seed, s.day);
     this.market.trades = s.trades;
     this.cameras.main.centerOn(p.x, p.y);
@@ -3829,7 +3831,8 @@ export class GameScene extends Phaser.Scene {
     if (this.crates.some((c) => !c.looted && near(c.sprite.x, c.sprite.y - 4, R))) return 'ค้นกล่องเสบียง';
     if (this.daily.nearest(p.x, p.feetY, R + 4)) return 'เปิดกล่องร่มชูชีพ';
     if (this.graves.some((g) => near(g.x, g.y))) return 'เก็บของคืนจากถุง';
-    if (this.mailboxSprite && this.daily.mailboxReady && near(this.mailboxSprite.x, this.mailboxSprite.y)) return 'เปิดตู้จดหมาย';
+    if (this.postNear()) return '📦 ท่าส่งของ: ซื้อ/ขายทางไกล (แพงกว่าเกาะกลาง)';
+    if (this.mailboxSprite && (this.daily.mailboxReady || this.daily.boxAvailable) && near(this.mailboxSprite.x, this.mailboxSprite.y)) return this.daily.boxAvailable ? 'เปิดตู้จดหมาย (🎁 กล่องฟรีวันนี้)' : 'เปิดตู้จดหมาย';
     if (this.merchantSprite && near(this.merchantSprite.x, this.merchantSprite.y, R + 10)) return 'คุยกับพ่อค้ากลาง (ซื้อ/ขาย/แลกเพชร)';
     if (this.stalls.some((s) => near(s.x, s.y + 4, 30))) return 'แผงตลาด: ดู/ซื้อ/วางขายของ';
     const t = this.structTarget();
@@ -3849,8 +3852,10 @@ export class GameScene extends Phaser.Scene {
     }
     if (t.broken) return `ซ่อม${t.broken.def.name} (${Math.ceil(t.broken.hp)}/${t.broken.maxHp})`;
     const node = this.nearestNode(p.x, p.feetY, R, (n) => n.isPickable);
-    if (node) return node.kind === 'bush' ? 'เก็บเบอร์รี่' : node.kind === 'wild_crop' ? 'เก็บพืชป่า' : node.kind === 'ruin_chest' ? 'เปิดหีบสมบัติ' : node.kind === 'shroom' ? 'เก็บเห็ดเรืองแสง' : 'เก็บหญ้า';
-    if (this.waterNearby()) return p.held && ITEMS[p.held.id].type === 'rod' ? 'ตกปลา' : 'ดื่มน้ำ';
+    if (node) return node.kind === 'bush' ? 'เก็บเบอร์รี่' : node.kind === 'wild_crop' ? 'เก็บพืชป่า' : node.kind === 'ruin_chest' || node.kind === 'event_chest' ? 'เปิดหีบสมบัติ' : node.kind === 'shroom' ? 'เก็บเห็ดเรืองแสง' : node.kind === 'grass' ? 'เก็บหญ้า' : `เก็บ${NODE_NAMES[node.kind].replace(/\s*\(.*\)/, '')}`;
+    const gh = this.gather.hint();
+    if (gh) return gh;
+    if (this.waterNearby()) return p.held && ITEMS[p.held.id].type === 'rod' ? 'ตกปลา' : p.char.passive.robot ? 'หุ่นยนต์ดื่มน้ำไม่ได้' : p.thirst >= 90 ? 'ตักน้ำดิบใส่กระบอก' : 'ดื่มน้ำดิบ (เสี่ยงท้องเสีย 20%)';
     const sign = this.signs.find((s) => near(s.x, s.y, 30));
     if (sign) return `ป้าย: ${sign.text}`;
     return null;

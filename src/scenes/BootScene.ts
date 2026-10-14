@@ -4,7 +4,8 @@ import { CAPES, CLASS_LOOKS, HELMETS, OUTFITS, buildHeroTexture, heroKey, type H
 import { registerCosmetics } from '../data/items';
 import { registerBlueprints } from '../data/blueprints';
 import { LOOT_GROUPS, type Rarity } from '../data/loot';
-import { FONT, PIXEL_FONT } from '../ui/widgets';
+import { FONT, HEAD_FONT, PIXEL_FONT } from '../ui/widgets';
+import { installCrispText } from '../ui/crispText';
 import { TiltPipeline } from '../gfx/TiltPipeline';
 import { coverImage, queueArt } from '../ui/art';
 import { fadeTo } from '../ui/transition';
@@ -54,12 +55,14 @@ export class BootScene extends Phaser.Scene {
   }
 
   create() {
+    // ตัวหนังสือคมชัดทั้งเกม (ui/crispText.ts) — ต้องติดตั้งก่อนสร้างข้อความแรก
+    installCrispText(this.game);
     const w = this.scale.width;
     const h = this.scale.height;
     // หน้าโหลด: ภาพ key art
     coverImage(this, 'keyart', w, h);
     this.add.rectangle(0, h - 46, w, 46, 0x0b0d1f, 0.75).setOrigin(0);
-    const label = this.add.text(w / 2, h - 23, 'SURVIVOR ISLES · LOADING...', { fontFamily: 'monospace', fontSize: '18px', color: '#ffcd75' }).setOrigin(0.5);
+    const label = this.add.text(w / 2, h - 23, 'SURVIVOR ISLES · LOADING...', { fontFamily: FONT, fontSize: '18px', fontStyle: '600', color: '#ffcd75' }).setOrigin(0.5);
     // ข้อความกระพริบให้รู้ว่ายังโหลดอยู่ (หน้าโหลดไม่ดูค้าง)
     this.tweens.add({ targets: label, alpha: 0.45, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
     const r = this.renderer as Phaser.Renderer.WebGL.WebGLRenderer;
@@ -70,7 +73,7 @@ export class BootScene extends Phaser.Scene {
       registerCostumes(this);
       report(0.92);
       const fonts = document.fonts
-        ? Promise.all([document.fonts.load(`700 16px ${FONT}`), document.fonts.load(`16px ${PIXEL_FONT}`)])
+        ? Promise.all([document.fonts.load(`600 16px ${FONT}`), document.fonts.load(`700 16px ${HEAD_FONT}`), document.fonts.load(`16px ${PIXEL_FONT}`)])
         : Promise.resolve();
       Promise.race([fonts, new Promise((r) => setTimeout(r, 3000))]).finally(() => {
         label.destroy();

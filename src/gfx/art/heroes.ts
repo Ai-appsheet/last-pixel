@@ -1,6 +1,7 @@
 import type Phaser from 'phaser';
 import { PALETTE } from '../../data/palette';
 import { PixelCanvas, dither } from '../PixelCanvas';
+import type { HeroId } from '../../data/characters';
 
 // ตัวละครผู้เล่นแบบ paper-doll สไตล์จิบิ: หัวโต (≈60% ของความสูง) ตาอนิเมะ 3×4 ตัวจิ๋ว แขนขาป้อม
 // ผิว/ผม/ชุด/หมวก/ผ้าคลุม ประกอบเป็นชั้น ๆ แล้วตีขอบ 'O'
@@ -1757,7 +1758,7 @@ export function buildHeroTexture(scene: Phaser.Scene, key: string, look: HeroLoo
 }
 
 /** ค่าเริ่มต้นของแต่ละอาชีพ */
-export const CLASS_LOOKS: Record<'mechanic' | 'medic' | 'hunter' | 'farmer' | 'scout' | 'shaman' | 'robot', HeroLook> = {
+export const CLASS_LOOKS: Record<HeroId, HeroLook> = {
   mechanic: { skin: 'K', skinShade: 'k', hair: '#333c57', hairShade: '#1d1630', hairStyle: 'spiky', eyes: 'U', outfit: 'mechanic', helmet: 'goggles', cape: 'none' },
   medic: { skin: '#f3cfb0', skinShade: 'k', hair: 'Y', hairShade: '#c0752a', hairStyle: 'ponytail', eyes: 'T', outfit: 'medic', helmet: 'nurse_cap', cape: 'none' },
   hunter: { skin: 'k', skinShade: '#9a6248', hair: 'M', hairShade: 'm', hairStyle: 'short', eyes: 'V', outfit: 'hunter', helmet: 'hood', cape: 'none' },

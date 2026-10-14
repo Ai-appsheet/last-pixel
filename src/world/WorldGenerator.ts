@@ -5,11 +5,14 @@ import { RNG } from '../core/RNG';
 import { CENTER_SLOT, type RoomPlayer } from '../core/RoomService';
 import { BIOMES, GRID, SLOT_SIZE, WORLD_SIZE, nodeTable, type Biome, type Specialty } from '../data/islands';
 import { TILE, isWater } from './tiles';
+import { EVENT_TYPES, type EventPlan, type EventTypeId } from '../data/worldEvents';
 
 export type NodeType =
   | 'tree' | 'rock' | 'bush' | 'grass' | 'cactus' | 'wild_crop'
   | 'ore_iron' | 'ore_gold' | 'ore_coal' | 'ore_sulfur' | 'crystal' | 'meteor_rock' | 'ruin_chest'
-  | 'bamboo' | 'coral' | 'shroom';
+  | 'bamboo' | 'coral' | 'shroom'
+  // เก็บได้ทุกอย่าง + เกาะกิจกรรม
+  | 'barrel' | 'wreckage' | 'cannon' | 'event_chest' | 'clam' | 'herb' | 'flower' | 'fruit_bush' | 'obsidian' | 'ice' | 'vine';
 
 export interface NodeData {
   id: number;
@@ -41,7 +44,12 @@ export interface IslandSlot {
   /** จุดกลางผืนดินหลัก (เกาะวงแหวน/จันทร์เสี้ยวกลางเกาะอาจเป็นน้ำ) */
   lx: number;
   ly: number;
+  /** เกาะกิจกรรมชั่วคราว (โผล่ตามเวลาจริงแล้วหายไป — systems/WorldEventSystem.ts) */
+  event?: { id: string; type: EventTypeId; end: number };
 }
+
+/** id ของ node บนเกาะกิจกรรม (แยกช่วง ไม่ให้ลำดับ id ของเกาะปกติเลื่อน · ไม่ถูกเซฟ) */
+export const EVENT_NODE_BASE = 9_000_000;
 
 /**
  * รูปร่างเกาะ — สุ่มตาม seed ของช่อง (เกาะเรา/เกาะกลาง/เกาะมหาสมบัติเป็น blob เสมอ)
@@ -97,6 +105,8 @@ export class World {
   private shape: NoiseFunction2D;
   private moist: NoiseFunction2D;
   private patch: NoiseFunction2D;
+  private eventNodeId = EVENT_NODE_BASE;
+  private mapBump = 0;
   /** callback เมื่อสร้างช่องใหม่ (ให้ ChunkManager รับ node) */
   onSlotGenerated: ((slot: number, nodes: NodeData[]) => void) | null = null;
 
@@ -263,7 +273,8 @@ export class World {
     }
     const x0 = (index % GRID) * SLOT_SIZE;
     const y0 = Math.floor(index / GRID) * SLOT_SIZE;
-    const rng = new RNG(this.seed * 7 + index * 104729);
+    const ev = is.event ? EVENT_TYPES[is.event.type] : null;
+    const rng = new RNG(ev ? hashId(is.event!.id) : this.seed * 7 + index * 104729);
     const lagoon = is.shape.kind === 'atoll';
     for (let y = y0; y < y0 + SLOT_SIZE; y++) {
       for (let x = x0; x < x0 + SLOT_SIZE; x++) {
@@ -308,13 +319,14 @@ export class World {
         if (occupied.has(k - 1) || occupied.has(k - S)) continue;
         const t = this.tiles[k];
         const tileName = t === TILE.SAND ? 'sand' : t === TILE.STONE ? 'stone' : t === TILE.FOREST ? 'forest' : t === TILE.BRICK ? 'brick' : 'land';
-        let table = nodeTable(is.biome, tileName);
+        let table = ev ? ev.nodes[tileName as keyof typeof ev.nodes] ?? ev.nodes.land ?? [] : nodeTable(is.biome, tileName);
         // แร่ประจำเกาะบนลานหิน
-        if (t === TILE.STONE && is.biome !== 'central') table = [[SPECIAL_NODE[is.specialty], 0.05], ...table];
+        if (t === TILE.STONE && is.biome !== 'central' && !ev) table = [[SPECIAL_NODE[is.specialty], 0.05], ...table];
         let roll = rng.next();
         for (const [type, p] of table) {
           if (roll < p) {
-            made.push({ id: this.nextNodeId++, type, tx: x, ty: y, tex: texFor(type, t, v, is.biome), available: true, hp: -1, regrowAt: 0 });
+            const tex = ev && type === 'event_chest' ? ev.chest : texFor(type, t, v, is.biome);
+            made.push({ id: ev ? this.eventNodeId++ : this.nextNodeId++, type, tx: x, ty: y, tex, available: true, hp: -1, regrowAt: 0 });
             occupied.add(k);
             break;
           }
@@ -341,6 +353,74 @@ export class World {
     }
     this.nodes.push(...made);
     this.onSlotGenerated?.(index, made);
+  }
+
+  // ------------------------------------------------------------------
+  // เกาะกิจกรรม (ป๊อปอัปกลางทะเล) — สร้าง/ลบทั้งช่องระหว่างเล่น
+  // ------------------------------------------------------------------
+  /** แผนที่ใหญ่ใน UIScene วาดใหม่เมื่อขนาด generated เปลี่ยน → ใส่คีย์ติดลบ (ไม่ใช่ช่องจริง) เพื่อบังคับวาดใหม่ */
+  private bumpMap() {
+    this.generated.add(-1000 - ++this.mapBump);
+  }
+
+  /** ช่องทะเลว่างในขอบแผนที่ที่วางเกาะกิจกรรมได้ (ไม่ใช่เกาะใคร ไม่ติดเกาะกลาง) */
+  freeSeaSlots(exclude: number[] = []): number[] {
+    const out: number[] = [];
+    const c = Math.floor(GRID / 2);
+    for (let gy = this.bounds.y0 / SLOT_SIZE; gy < this.bounds.y1 / SLOT_SIZE; gy++) {
+      for (let gx = this.bounds.x0 / SLOT_SIZE; gx < this.bounds.x1 / SLOT_SIZE; gx++) {
+        const i = gy * GRID + gx;
+        if (gy >= GRID || this.slots[i] || i === CENTER_SLOT || i === SPECIAL_SLOT || exclude.includes(i)) continue;
+        if (Math.max(Math.abs(gx - c), Math.abs(gy - c)) <= 1) continue;
+        out.push(i);
+      }
+    }
+    return out;
+  }
+
+  /** สร้างเกาะกิจกรรมในช่องทะเลว่าง → node ใหม่ (ส่งผ่าน onSlotGenerated ด้วย) */
+  spawnEventIsland(index: number, plan: EventPlan, endAt: number): IslandSlot | null {
+    if (this.slots[index]) return null;
+    const def = EVENT_TYPES[plan.type];
+    const rng = new RNG(hashId(plan.id) ^ 0x5bd1e995);
+    const r = rng.int(def.r[0], def.r[1]);
+    const gx = index % GRID;
+    const gy = Math.floor(index / GRID);
+    const j = (SLOT_SIZE / 2 - r - 12) * 0.4;
+    const cx = gx * SLOT_SIZE + SLOT_SIZE / 2 + Math.round(rng.range(-j, j));
+    const cy = gy * SLOT_SIZE + SLOT_SIZE / 2 + Math.round(rng.range(-j, j));
+    const shape = makeShape(def.shape, cx, cy, r, rng);
+    const land = shape.parts[0] ?? { x: cx, y: cy };
+    this.slots[index] = {
+      index, biome: def.biome, owner: null, ownerName: `${def.icon} ${def.name}`, progress: 0, cx, cy, r, specialty: 'gold', shape,
+      lx: Math.round(land.x), ly: Math.round(land.y), name: `${def.icon} ${def.name}`, event: { id: plan.id, type: plan.type, end: endAt },
+    };
+    this.generated.delete(index);
+    this.ensureSlot(index);
+    this.bumpMap();
+    return this.slots[index];
+  }
+
+  /** ลบเกาะกิจกรรม: พื้นกลับเป็นทะเลลึก · คืน node ที่ต้องเอาออกจากฉาก */
+  clearEventIsland(index: number): NodeData[] {
+    const is = this.slots[index];
+    if (!is?.event) return [];
+    const S = this.size;
+    const x0 = (index % GRID) * SLOT_SIZE;
+    const y0 = Math.floor(index / GRID) * SLOT_SIZE;
+    for (let y = y0; y < y0 + SLOT_SIZE; y++) {
+      for (let x = x0; x < x0 + SLOT_SIZE; x++) {
+        const k = y * S + x;
+        this.tiles[k] = TILE.DEEP;
+        this.island[k] = -1;
+        this.decor[k] = -1;
+      }
+    }
+    const gone = this.nodes.filter((n) => this.slotIndexAt(n.tx, n.ty) === index);
+    this.nodes = this.nodes.filter((n) => this.slotIndexAt(n.tx, n.ty) !== index);
+    this.slots[index] = null;
+    this.bumpMap();
+    return gone;
   }
 
   private nearLand(x: number, y: number) {
@@ -555,9 +635,22 @@ export function texFor(type: NodeType, tile: number, v: (n: number) => number, b
       return 'reward_chest';
     case 'wild_crop':
       return `wild_crop_${v(2)}`;
+    case 'fruit_bush':
+      return `fruit_bush_${v(2)}`;
+    case 'barrel': case 'wreckage': case 'cannon': case 'clam': case 'herb': case 'flower': case 'obsidian': case 'ice': case 'vine':
+      return `n_${type}`;
+    case 'event_chest':
+      return 'reward_chest';
     default:
       return `grass_${v(2)}`;
   }
+}
+
+/** hash id เกาะกิจกรรม → seed */
+function hashId(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
 }
 
 function weighted<T>(rng: RNG, list: [T, number][]): T {

@@ -9,6 +9,8 @@ export const ART = [
   'raid_night', 'market_island',
   'cat_weapons', 'cat_gear', 'cat_build', 'cat_boat', 'cat_machine', 'cat_mobs', 'cat_shop', 'cat_elixir',
   'char_mechanic', 'char_medic', 'char_hunter', 'char_farmer', 'char_scout', 'char_shaman', 'char_robot',
+  // ภาพหน้าตัวละคร 160×160 (ครอปจาก char_*) สำหรับแถบตัวละครหน้าแรก
+  'loader/mechanic', 'loader/medic', 'loader/hunter', 'loader/farmer', 'loader/scout', 'loader/shaman', 'loader/robot',
   // การ์ดขึ้นเกาะไบโอมครั้งแรก (isl_<biome>)
   'isl_forest', 'isl_snow', 'isl_desert', 'isl_jungle', 'isl_volcanic', 'isl_ruins',
   'isl_swamp', 'isl_mushroom', 'isl_crystal', 'isl_bamboo', 'isl_savanna', 'isl_glacier', 'isl_atoll', 'isl_haunted',

@@ -77,6 +77,18 @@ export class ChunkRenderer {
     }
   }
 
+  /** วาดใหม่ทุก chunk ที่โหลดอยู่ซึ่งทับพื้นที่ (tile) — ใช้ตอนเกาะกิจกรรมโผล่/หายทั้งช่อง */
+  refreshRect(x0: number, y0: number, x1: number, y1: number) {
+    for (const [k, c] of [...this.chunks]) {
+      const [cx, cy] = k.split(',').map(Number);
+      if ((cx + 1) * CH < x0 - 2 || cx * CH > x1 + 2 || (cy + 1) * CH < y0 - 2 || cy * CH > y1 + 2) continue;
+      c.colliders.forEach((col) => col.destroy());
+      c.map.destroy();
+      this.chunks.delete(k);
+      this.build(k);
+    }
+  }
+
   private build(k: string) {
     const [cx, cy] = k.split(',').map(Number);
     const W = this.world;

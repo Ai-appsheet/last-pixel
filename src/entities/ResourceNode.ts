@@ -34,7 +34,7 @@ export const NODE_SPECS: Record<NodeType, NodeSpec> = {
   ore_gold: { hp: 20, harvest: 'rock', minPower: 5, drops: [{ item: 'gold_ore', qty: [1, 2], chance: 1 }, { item: 'stone', qty: [1, 2], chance: 0.6 }], regrow: 720, depleted: null, blocker: { w: 12, h: 6 }, sound: 'rock' },
   crystal: { hp: 24, harvest: 'rock', minPower: 5, drops: [{ item: 'crystal', qty: [1, 1], chance: 1 }, { item: 'crystal', qty: [1, 1], chance: 0.25 }], regrow: 900, depleted: null, blocker: { w: 12, h: 6 }, sound: 'rock' },
   bush: { hp: 1, harvest: 'pick', drops: [{ item: 'berry', qty: [2, 3], chance: 1 }], regrow: 150, depleted: (t) => t.replace('bush_', 'bush_empty_'), blocker: null, sound: 'soft' },
-  grass: { hp: 1, harvest: 'pick', drops: [{ item: 'fiber', qty: [1, 2], chance: 1 }, { item: 'carrot_seed', qty: [1, 1], chance: 0.1 }], regrow: 120, depleted: null, blocker: null, sound: 'soft' },
+  grass: { hp: 1, harvest: 'pick', drops: [{ item: 'fiber', qty: [1, 2], chance: 1 }, { item: 'carrot_seed', qty: [1, 1], chance: 0.1 }, { item: 'wild_grain', qty: [1, 2], chance: 0.2 }], regrow: 120, depleted: null, blocker: null, sound: 'soft' },
   // ไบโอมชุดใหม่
   bamboo: { hp: 6, harvest: 'tree', drops: [{ item: 'wood', qty: [2, 3], chance: 1 }, { item: 'fiber', qty: [1, 2], chance: 0.8 }], regrow: 150, depleted: () => 'bamboo_cut', blocker: { w: 6, h: 4 }, sound: 'wood' },
   coral: { hp: 10, harvest: 'rock', minPower: 1, drops: [{ item: 'stone', qty: [1, 2], chance: 1 }, { item: 'pearl', qty: [1, 1], chance: 0.12 }, { item: 'crab_shell', qty: [1, 1], chance: 0.2 }], regrow: 600, depleted: null, blocker: { w: 12, h: 6 }, sound: 'rock' },
@@ -43,10 +43,54 @@ export const NODE_SPECS: Record<NodeType, NodeSpec> = {
     hp: 1, harvest: 'pick',
     drops: [
       { item: 'carrot_seed', qty: [1, 2], chance: 0.6 }, { item: 'tomato_seed', qty: [1, 2], chance: 0.45 },
-      { item: 'pumpkin_seed', qty: [1, 1], chance: 0.25 }, { item: 'carrot', qty: [1, 1], chance: 0.35 },
+      { item: 'pumpkin_seed', qty: [1, 1], chance: 0.25 }, { item: 'carrot', qty: [1, 1], chance: 0.35 }, { item: 'wild_potato', qty: [1, 2], chance: 0.35 },
     ],
     regrow: 300, depleted: null, blocker: null, sound: 'soft',
   },
+  // ---------- เก็บได้ทุกอย่าง + เกาะกิจกรรม (data/worldEvents.ts) ----------
+  barrel: {
+    hp: 4, harvest: 'tree',
+    drops: [{ item: 'wood', qty: [1, 2], chance: 1 }, { item: 'cloth', qty: [1, 2], chance: 0.6 }, { item: 'rope', qty: [1, 2], chance: 0.35 }, { item: 'coin', qty: [5, 20], chance: 0.5 }, { item: 'clean_water', qty: [1, 1], chance: 0.25 }],
+    regrow: 900, depleted: null, blocker: { w: 10, h: 5 }, sound: 'wood',
+  },
+  wreckage: {
+    hp: 10, harvest: 'tree',
+    drops: [{ item: 'wood', qty: [2, 4], chance: 1 }, { item: 'plank', qty: [1, 2], chance: 0.5 }, { item: 'scrap_metal', qty: [1, 2], chance: 0.45 }, { item: 'cloth', qty: [1, 1], chance: 0.3 }],
+    regrow: 900, depleted: null, blocker: { w: 14, h: 6 }, sound: 'wood',
+  },
+  cannon: {
+    hp: 18, harvest: 'rock', minPower: 1,
+    drops: [{ item: 'scrap_metal', qty: [2, 4], chance: 1 }, { item: 'iron_ingot', qty: [1, 1], chance: 0.3 }, { item: 'gunpowder', qty: [1, 2], chance: 0.4 }],
+    regrow: 999999, depleted: null, blocker: { w: 14, h: 6 }, sound: 'rock',
+  },
+  event_chest: {
+    hp: 1, harvest: 'pick',
+    drops: [{ item: 'coin', qty: [20, 60], chance: 1 }, { item: 'rope', qty: [2, 4], chance: 0.4 }, { item: 'cloth', qty: [1, 3], chance: 0.4 }, { item: 'pearl', qty: [1, 1], chance: 0.08 }],
+    regrow: 999999, depleted: (t) => (t === 'crate' ? 'crate_open' : 'reward_chest_open'), blocker: { w: 12, h: 6 }, sound: 'wood',
+  },
+  clam: {
+    hp: 1, harvest: 'pick',
+    drops: [{ item: 'shell', qty: [1, 2], chance: 1 }, { item: 'seaweed', qty: [1, 2], chance: 0.5 }, { item: 'fish', qty: [1, 1], chance: 0.4 }, { item: 'pearl', qty: [1, 1], chance: 0.06 }],
+    regrow: 300, depleted: null, blocker: null, sound: 'soft',
+  },
+  herb: { hp: 1, harvest: 'pick', drops: [{ item: 'herb', qty: [1, 2], chance: 1 }, { item: 'petals', qty: [1, 1], chance: 0.2 }], regrow: 240, depleted: null, blocker: null, sound: 'soft' },
+  flower: {
+    hp: 1, harvest: 'pick',
+    drops: [{ item: 'petals', qty: [2, 3], chance: 1 }, { item: 'herb', qty: [1, 1], chance: 0.2 }, { item: 'tomato_seed', qty: [1, 1], chance: 0.1 }],
+    regrow: 200, depleted: null, blocker: null, sound: 'soft',
+  },
+  fruit_bush: {
+    hp: 1, harvest: 'pick',
+    drops: [{ item: 'mango', qty: [1, 2], chance: 0.6 }, { item: 'dragonfruit', qty: [1, 1], chance: 0.45 }, { item: 'berry', qty: [1, 2], chance: 0.4 }],
+    regrow: 300, depleted: (t) => t.replace('fruit_bush_', 'fruit_bush_empty_'), blocker: null, sound: 'soft',
+  },
+  obsidian: {
+    hp: 18, harvest: 'rock', minPower: 3,
+    drops: [{ item: 'obsidian', qty: [1, 2], chance: 1 }, { item: 'sulfur', qty: [1, 1], chance: 0.3 }, { item: 'stone', qty: [1, 1], chance: 0.5 }],
+    regrow: 600, depleted: null, blocker: { w: 12, h: 6 }, sound: 'rock',
+  },
+  ice: { hp: 8, harvest: 'rock', minPower: 1, drops: [{ item: 'ice_shard', qty: [2, 3], chance: 1 }, { item: 'stone', qty: [1, 1], chance: 0.2 }], regrow: 300, depleted: null, blocker: { w: 12, h: 6 }, sound: 'rock' },
+  vine: { hp: 1, harvest: 'pick', drops: [{ item: 'fiber', qty: [2, 3], chance: 1 }, { item: 'rope', qty: [1, 1], chance: 0.25 }, { item: 'herb', qty: [1, 1], chance: 0.1 }], regrow: 180, depleted: null, blocker: null, sound: 'soft' },
 };
 
 /** sprite ของทรัพยากร — สถานะจริงเก็บใน NodeData (คงอยู่แม้ chunk ถูกปลดออก) */

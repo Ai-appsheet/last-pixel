@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { Sfx } from '../core/AudioManager';
 import { CONTROL_MODES, controlLabel, getControlMode, setControlMode } from '../core/ControlMode';
 import { TASK_PRESETS } from '../systems/AutoSystem';
-import { SPECIAL_NAME, SPECIAL_SLOT, fmtLeft, nextOpenText } from '../core/SpecialIsland';
+import { SPECIAL_NAME, SPECIAL_SLOT, centerState, fmtLeft, nextOpenText } from '../core/SpecialIsland';
 import { EventBus } from '../core/EventBus';
 import { MetaSave } from '../core/MetaSave';
 import { CENTER_SLOT, getRoomService, localPlayerId, type TradeListing } from '../core/RoomService';
@@ -21,16 +21,19 @@ import { HOTBAR_SIZE, type Inventory } from '../components/Inventory';
 import { Wallet } from '../components/Wallet';
 import type { Structure } from '../entities/Structure';
 import { CAPES, HELMETS, OUTFITS, buildHeroTexture, heroKey } from '../gfx/art/heroes';
-import type { Offer } from '../systems/MarketSystem';
+import { CENTER_ONLY_GEM, remoteFee, type Offer } from '../systems/MarketSystem';
 import { TILE, isWater } from '../world/tiles';
 import { vehicleKind } from '../data/vehicles';
 import { ART, coverCrop, coverImage, queueArt, type ArtName } from '../ui/art';
 import { itemArtKey, placeArtCover, queueItemArtIndex, withItemArt } from '../ui/itemArt';
 import { BlueprintWindow } from '../ui/BlueprintWindow';
+import { BodyPanel } from '../ui/BodyPanel';
+import { EventsPanel } from '../ui/EventsPanel';
 import { fitText } from '../ui/fancyButton';
 import { Foldable, UIWindow } from '../ui/Window';
 import { button, COLORS, heading, panel, setTextBoost, SlotView, StatBar, txt, type Button } from '../ui/widgets';
 import { anchorGroup, hudScale, isCompact, touchScale } from '../ui/layout';
+import { ChatPanel } from '../ui/ChatPanel';
 import { fmtFull, fmtMoney } from '../ui/money';
 import { fadeIn, popIn } from '../ui/transition';
 import { QUALITY_PREFS, qualityKnobs, qualityName, qualityPref, setQualityPref } from '../core/Quality';
@@ -43,6 +46,10 @@ const W = 960;
 const H = 540;
 const SLOT = 46;
 const GAP = 4;
+/** ระยะขอบจอของ HUD ทุกมุม (ตารางระยะ 8px) */
+const M = 8;
+/** ความกว้างแผงคอลัมน์ขวา (เป้าหมาย / ปักหมุด) ชิดขอบขวาเท่ามินิแมป */
+const RIGHT_W = 220;
 interface ReviveOffer { coins: number; gems: number; canCoins: boolean; canGems: boolean; haveCoins: number; haveGems: number; cause: string; times: number }
 interface GameOverInfo { cause: string; room: string; days: number; kills: number; power: number; broke: boolean; cost: { coins: number; gems: number }; adventure?: boolean }
 const MINI = 96;
@@ -110,6 +117,9 @@ export class UIScene extends Phaser.Scene {
   private modal: Phaser.GameObjects.Container | null = null;
 
   private wins: UIWindow[] = [];
+  private chat: ChatPanel | null = null;
+  private bodyPanel: BodyPanel | null = null;
+  private eventsPanel: EventsPanel | null = null;
   private bagWin!: UIWindow;
   private blueprint!: BlueprintWindow;
   private infoWin!: UIWindow;
@@ -169,6 +179,9 @@ export class UIScene extends Phaser.Scene {
     this.buildHotbar();
     this.buildToolbar();
     this.buildWallet();
+    // สมดุลร่างกาย + กิจกรรมตามเวลาจริง/กล่องฟรี (ไฟล์แยก) — เช็กขอบเขตใน isPointerOverUI
+    this.bodyPanel = new BodyPanel(this, this.gs);
+    this.eventsPanel = new EventsPanel(this, this.gs);
     // ข้อความกลางล่าง: เหนือ hotbar (จอเล็ก hotbar ขยาย → ยกขึ้นตาม)
     const hotTop = H - 80 * this.kt;
     this.hintText = txt(this, W / 2, hotTop - 18, '', 17, COLORS.gold).setOrigin(0.5);
@@ -178,8 +191,8 @@ export class UIScene extends Phaser.Scene {
     this.advBadge = txt(this, 0, 0, '⚔ เขตผจญภัย\nPvP · ตายถาวร', 11, '#ffffff', { align: 'center', lineSpacing: 1 })
       .setBackgroundColor('#b13e53dd').setPadding(6, 3, 6, 3).setVisible(false);
     // คอม: ซ้ายของมินิแมป · จอเล็ก: ขวาของแถบเงิน (ใต้แถบเครื่องมือ — มุมขวาเต็มแล้ว)
-    if (this.compact) this.gTop.add(this.advBadge.setOrigin(0, 0).setPosition(W / 2 + 112, 60));
-    else this.gRight.add(this.advBadge.setOrigin(1, 0).setPosition(W - 12 - MINI - 16, 8));
+    if (this.compact) this.gTop.add(this.advBadge.setOrigin(0, 0).setPosition(W / 2 + 112, 62));
+    else this.gRight.add(this.advBadge.setOrigin(1, 0).setPosition(W - M - RIGHT_W - M, M));
     this.buildInspectCard();
     this.autoChip = txt(this, W / 2 - 176 * this.kt, hotTop - 4, '', 13, '#a7f070').setOrigin(0, 1).setBackgroundColor('#0b0d1fcc').setPadding(6, 3, 6, 3).setDepth(7).setVisible(false);
     this.padLegend = this.add.container(0, H - 70).setDepth(7);
@@ -229,6 +242,9 @@ export class UIScene extends Phaser.Scene {
       else this.pauseWin.open();
     };
     kb.on('keydown-ESC', escape);
+    // แชทโลก (ui/ChatPanel.ts): Enter = พิมพ์เมื่อไม่มีหน้าต่าง/ป๊อปอัปเปิด (Esc ในช่องพิมพ์ = ปิด)
+    this.chat = new ChatPanel(this, { compact: this.compact, k: this.k, me: this.gs.playerName, toast: (t, c) => this.toast(t, c) });
+    kb.on('keydown-ENTER', () => !this.modal && !this.wins.some((w) => w.visible) && this.chat?.focus());
     EventBus.on('pad:menu', escape);
     EventBus.on('pad:bag', () => this.toggleBag());
     this.events.once('shutdown', () => {
@@ -241,13 +257,16 @@ export class UIScene extends Phaser.Scene {
       this.events.once('shutdown', () => EventBus.off(ev, fn));
     };
     on('toast', (t: string, c?: string) => this.toast(t, c));
-    on('audio:changed', (muted: boolean) => this.muteIcon?.setText(muted ? '🔇' : '🔊'));
+    on('audio:changed', (muted: boolean) => this.muteIcon?.setTexture(muted ? 'tb_mute' : 'tb_sound'));
     on('pickup', (id: string, n: number) => this.pickup(id, n));
     on('banner', (name: string, desc: string, color: string) => this.banner(name, desc, color));
     on('achievement', (a: AchievementDef) => this.achievement(a));
     on('quest:done', (q: { title: string }) => this.toast(`✔ สำเร็จ: ${q.title}`, COLORS.good));
     on('ui:build', () => this.blueprint.toggle('build'));
-    on('ui:market', () => this.marketWin.open());
+    on('ui:market', (o?: { remote?: boolean }) => {
+      this.marketRemote = !!o?.remote; // 📦 ท่าส่งของ = ร้านค้าทางไกล
+      this.marketWin.open();
+    });
     on('ui:trade', (stall: number) => this.openTrade(stall));
     on('ui:enhance', () => this.enhanceWin.open());
     on('ui:storage', (s: Structure) => this.openStorage(s));
@@ -271,6 +290,8 @@ export class UIScene extends Phaser.Scene {
     // UIScene ยังโหลดภาพอยู่ (preload) — HUD ยังไม่ถูกสร้าง
     if (!this.toolbarPanel) return false;
     if (this.modal) return true;
+    if (this.chat?.contains(p.x, p.y)) return true;
+    if (this.bodyPanel?.contains(p.x, p.y) || this.eventsPanel?.contains(p.x, p.y)) return true;
     if (this.pinBox?.visible && this.pinBox.getBounds().contains(p.x, p.y)) return true;
     if (this.wins.some((w) => w.contains(p.x, p.y))) return true;
     if (this.toolbarPanel.getBounds().contains(p.x, p.y)) return true;
@@ -288,10 +309,11 @@ export class UIScene extends Phaser.Scene {
   private cardBody!: Phaser.GameObjects.Text;
   private cardKey = '';
 
+  /** การ์ดข้อมูล: พื้นมืดทึบ ตัวหนังสือ ≥14px บรรทัดห่าง (อ่านง่ายเหนือโลกเกม) */
   private buildInspectCard() {
-    this.cardBg = this.add.nineslice(0, 0, 'ui_panel_dark', undefined, 270, 60, 10, 10, 10, 10).setOrigin(0).setAlpha(0.92);
-    this.cardTitle = txt(this, 12, 8, '', 14, COLORS.gold);
-    this.cardBody = txt(this, 12, 28, '', 11, COLORS.text, { wordWrap: { width: 248 }, lineSpacing: 2 });
+    this.cardBg = this.add.nineslice(0, 0, 'ui_panel_dark', undefined, 300, 60, 10, 10, 10, 10).setOrigin(0);
+    this.cardTitle = txt(this, 14, 10, '', 16, COLORS.gold);
+    this.cardBody = txt(this, 14, 34, '', 14, COLORS.text, { wordWrap: { width: 272 }, lineSpacing: 5 });
     this.card = this.add.container(0, 0, [this.cardBg, this.cardTitle, this.cardBody]).setDepth(8).setVisible(false);
   }
 
@@ -307,21 +329,22 @@ export class UIScene extends Phaser.Scene {
       const fresh = !this.card.visible || !this.cardKey.startsWith(info.title);
       this.cardKey = key;
       this.cardTitle.setText(info.title).setColor(info.color);
+      fitText(this.cardTitle, 272);
       this.cardBody.setText(info.lines.join('\n'));
-      this.cardBg.setSize(270, 36 + this.cardBody.height);
+      this.cardBg.setSize(300, 42 + this.cardBody.height);
       if (fresh) {
         this.card.setAlpha(0);
         this.tweens.add({ targets: this.card, alpha: 1, duration: 140 });
       }
     }
-    // คอม: มุมขวาล่าง · มือถือ: กลางบน ใต้แถบเงิน (ไม่ทับปุ่มสัมผัส) · จอเล็กขยายการ์ดตาม HUD
+    // คอม: มุมขวาล่าง (ชิดขอบเท่ามินิแมป) · มือถือ: กลางบน ใต้แถบเงิน (ไม่ทับปุ่มสัมผัส) · จอเล็กขยายตาม HUD
     const h = this.cardBg.height;
     const k = this.k;
     this.card.setScale(k);
-    if (touch) this.card.setPosition(W / 2 - 135 * k, 118 * k);
+    if (touch) this.card.setPosition(W / 2 - 150 * k, 118 * k);
     else {
       const pin = this.pinBox.visible ? this.pinBox.getBounds() : null;
-      this.card.setPosition(W - 282 * k, pin ? Math.max(H - (92 + h) * k, pin.bottom + 4) : H - (92 + h) * k); // ไม่ทับแผงปักหมุด
+      this.card.setPosition(W - (M + 300) * k, pin ? Math.max(H - (92 + h) * k, pin.bottom + 4) : H - (92 + h) * k); // ไม่ทับแผงปักหมุด
     }
     this.card.setVisible(true);
   }
@@ -347,15 +370,16 @@ export class UIScene extends Phaser.Scene {
   private buildStatus() {
     const p = this.gs.player;
     const parts: Phaser.GameObjects.GameObject[] = [];
-    parts.push(panel(this, 6, 6, 188, 100));
-    this.portrait = this.add.sprite(24, 30, p.texKey, 0).setScale(1.5);
+    // การ์ดเดียว: รูป+ชื่อ+เลเวล แถวบน · แถบสถานะ 6 แถบเป็นกลุ่ม 2 คอลัมน์
+    parts.push(panel(this, M, M, 196, 104));
+    this.portrait = this.add.sprite(M + 20, M + 26, p.texKey, 0).setScale(1.5);
     parts.push(this.portrait);
-    this.levelText = txt(this, 44, 28, '', 10, COLORS.gold);
-    this.xpBg = this.add.rectangle(44, 43, 138, 4, 0x0b0d1f).setOrigin(0, 0.5);
-    this.xpBar = this.add.rectangle(44, 43, 0, 4, 0xa77bdb).setOrigin(0, 0.5);
+    this.levelText = txt(this, M + 40, M + 24, '', 10, COLORS.gold);
+    this.xpBg = this.add.rectangle(M + 40, M + 39, 142, 4, 0x0b0d1f).setOrigin(0, 0.5);
+    this.xpBar = this.add.rectangle(M + 40, M + 39, 0, 4, 0xa77bdb).setOrigin(0, 0.5);
     // ชื่อ (ซ้าย) + พลัง (ขวา) แถวเดียวกัน
-    this.powerText = txt(this, 186, 12, '', 10, '#ef7d57').setOrigin(1, 0);
-    const name = fitText(txt(this, 44, 11, this.gs.playerName, 13), 84);
+    this.powerText = txt(this, M + 182, M + 7, '', 10, '#ef7d57').setOrigin(1, 0);
+    const name = fitText(txt(this, M + 40, M + 6, this.gs.playerName, 13), 84);
     parts.push(name, this.powerText, this.levelText, this.xpBg, this.xpBar);
     const rows: [string, string, number][] = [
       ['hp', 'hud_heart', 0xb13e53], ['hunger', 'hud_food', p.char.passive.robot ? 0x73eff7 : 0xc28a50],
@@ -363,21 +387,21 @@ export class UIScene extends Phaser.Scene {
       ['temp', 'hud_temp', 0xa7f070], ['sanity', 'hud_sanity', 0xa77bdb],
     ];
     rows.forEach(([key, icon, color], i) => {
-      const x = 16 + (i % 2) * 88;
-      const y = 58 + Math.floor(i / 2) * 16;
+      const x = M + 12 + (i % 2) * 92;
+      const y = M + 54 + Math.floor(i / 2) * 16;
       parts.push(this.add.image(x, y, icon).setScale(1.4));
-      const bar = new StatBar(this, x + 8, y, 50, 10, color);
-      const value = txt(this, x + 61, y, '', 9).setOrigin(0, 0.5);
+      const bar = new StatBar(this, x + 8, y, 52, 10, color);
+      const value = txt(this, x + 63, y, '', 9).setOrigin(0, 0.5);
       parts.push(...bar.objects, value);
       this.bars[key] = { bar, value };
     });
-    this.statusFold = new Foldable(this, 10, 108, parts, 'สถานะ');
+    this.statusFold = new Foldable(this, M + 4, M + 106, parts, 'สถานะ');
     this.gLeft.add([...parts, this.statusFold.button]);
   }
 
   /** ขอบล่างของแผงสถานะบนจอ (ใช้วางแผงอื่นต่อลงมา) */
   private get statusBottom() {
-    return (this.statusFold.folded ? 22 : 124) * this.k;
+    return (this.statusFold.folded ? M + 24 : M + 128) * this.k;
   }
 
   // ---------- 💰 แถบเงิน (เหรียญ + เพชร) กลางบน ใต้แถบเครื่องมือ ----------
@@ -524,25 +548,33 @@ export class UIScene extends Phaser.Scene {
     };
   }
 
+  /** มินิแมปมุมขวาบน: การ์ดกว้าง RIGHT_W ชิดขอบขวา (เท่าแผงเป้าหมาย) + กรอบฟ้าทะเล */
   private buildMinimap() {
-    const x0 = W - 12 - MINI;
-    const y0 = 14;
+    const x0 = W - M - RIGHT_W + (RIGHT_W - MINI) / 2;
+    const y0 = M + 8;
     if (this.textures.exists('minimap')) this.textures.remove('minimap');
     this.textures.createCanvas('minimap', MINI, MINI);
-    const parts: Phaser.GameObjects.GameObject[] = [panel(this, x0 - 8, y0 - 8, MINI + 16, MINI + 44, 'ui_panel_dark')];
+    const parts: Phaser.GameObjects.GameObject[] = [panel(this, W - M - RIGHT_W, M, RIGHT_W, MINI + 50, 'ui_panel_dark')];
     this.miniImg = this.add.image(x0, y0, 'minimap').setOrigin(0);
+    const frame = this.add.rectangle(x0 - 1, y0 - 1, MINI + 2, MINI + 2).setOrigin(0).setStrokeStyle(2, 0x41a6f6, 0.9);
     this.miniGfx = this.add.graphics();
-    this.dayText = txt(this, x0, y0 + MINI + 3, '', 11);
-    this.clockText = txt(this, x0 + MINI, y0 + MINI + 4, '', 9, COLORS.dim).setOrigin(1, 0);
-    this.placeText = txt(this, x0 + MINI / 2, y0 + MINI + 19, '', 9, COLORS.gold).setOrigin(0.5, 0);
+    this.dayText = txt(this, W - M - RIGHT_W + 12, y0 + MINI + 5, '', 12);
+    this.clockText = txt(this, W - M - 12, y0 + MINI + 6, '', 11, COLORS.dim).setOrigin(1, 0);
+    this.placeText = txt(this, W - M - RIGHT_W / 2, y0 + MINI + 22, '', 11, COLORS.gold).setOrigin(0.5, 0);
     // แตะมินิแมป = เปิดแผนที่ใหญ่
     this.miniImg.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.mapWin.toggle());
-    const expand = txt(this, x0 + MINI - 2, y0 + 2, '⤢ ขยาย', 9, COLORS.text).setOrigin(1, 0).setBackgroundColor('#0b0d1fcc').setPadding(3, 1, 3, 1);
+    // ⤢ ขยาย (มุมขวาบนการ์ด) · ▾ พับ (มุมซ้ายบนการ์ด) — อยู่ในการ์ด ไม่ล้ำแผงเป้าหมายด้านล่าง
+    const expand = txt(this, W - M - 8, M + 7, '⤢', 12, COLORS.text).setOrigin(1, 0).setBackgroundColor('#0b0d1fcc').setPadding(5, 1, 5, 1);
     expand.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.mapWin.toggle());
     this.specialChip = txt(this, x0 + 2, y0 + MINI - 2, '', 9, COLORS.gold).setOrigin(0, 1).setBackgroundColor('#0b0d1fcc').setPadding(3, 1, 3, 1);
-    parts.push(this.miniImg, this.miniGfx, this.dayText, this.clockText, this.placeText, expand, this.specialChip);
-    const fold = new Foldable(this, x0 - 4, y0 + MINI + 38, parts, 'แผนที่ย่อ');
+    parts.push(this.miniImg, frame, this.miniGfx, this.dayText, this.clockText, this.placeText, expand, this.specialChip);
+    const fold = new Foldable(this, W - M - RIGHT_W + 8, M + 7, parts, '');
     this.gRight.add([...parts, fold.button]);
+  }
+
+  /** ขอบล่างของการ์ดมินิแมป (ในกลุ่มขวา) */
+  private get minimapBottom() {
+    return M + MINI + 50;
   }
 
   /** มินิแมปวาดรอบตัวผู้เล่น (1 px = 1 tile, รัศมี 70 tile) */
@@ -591,19 +623,37 @@ export class UIScene extends Phaser.Scene {
     tex.refresh();
   }
 
+  /** แผงเป้าหมาย: ใต้มินิแมป ชิดขอบขวา กว้างเท่ากัน · สูงตามข้อความ (จอเล็ก = 2 บรรทัด) */
+  private questFold!: Foldable;
   private buildQuest() {
-    const x = W - 12 - MINI - 10;
-    this.questBox = panel(this, x - 104, 168, MINI + 20 + 104, 58, 'ui_panel_dark');
-    this.questTitle = txt(this, x - 92, 176, '', 11, COLORS.gold);
-    this.questText = txt(this, x - 92, 193, '', 10, COLORS.text, { wordWrap: { width: MINI + 96 } });
-    const fold = new Foldable(this, x - 100, 228, [this.questBox, this.questTitle, this.questText], 'เป้าหมาย');
-    this.gRight.add([this.questBox, this.questTitle, this.questText, fold.button]);
+    const x = W - M - RIGHT_W;
+    const y = this.minimapBottom + M;
+    const c = this.compact;
+    this.questBox = panel(this, x, y, RIGHT_W, 60, 'ui_panel_dark');
+    this.questTitle = txt(this, x + 12, y + (c ? 6 : 8), '', 13, COLORS.gold);
+    this.questText = txt(this, x + 12, y + (c ? 24 : 28), '', 12, COLORS.text, { wordWrap: { width: RIGHT_W - 24 }, lineSpacing: c ? 2 : 3, maxLines: c ? 2 : 4 });
+    // ▾ พับ อยู่มุมขวาบนในแผง (จอเล็ก: ไม่กินที่ใต้แผง ไม่ชนปุ่มสัมผัส)
+    this.questFold = new Foldable(this, x + RIGHT_W - 8, y + 6, [this.questBox, this.questTitle, this.questText], '');
+    this.questFold.button.setOrigin(1, 0);
+    this.questFold.button.setY(y + (c ? 5 : 7));
+    this.gRight.add([this.questBox, this.questTitle, this.questText, this.questFold.button]);
     // 📌 แปลนที่ปักหมุด: ของดิบที่ยังขาด (นับรวมหีบ/โกดัง) — แตะเพื่อเปิดสมุดแปลนหน้านั้น
-    this.pinBox = panel(this, 0, 0, MINI + 20 + 104, 40, 'ui_panel_dark').setInteractive({ useHandCursor: true });
-    this.pinTitle = txt(this, 12, 7, '', 11, '#73eff7');
-    this.pinText = txt(this, 12, 24, '', 10, COLORS.text, { lineSpacing: 2 });
+    this.pinBox = panel(this, 0, 0, RIGHT_W, 40, 'ui_panel_dark').setInteractive({ useHandCursor: true });
+    this.pinTitle = txt(this, 12, 8, '', 13, COLORS.sea);
+    this.pinText = txt(this, 12, 28, '', 12, COLORS.text, { lineSpacing: 3 });
     this.pinBox.on('pointerdown', () => this.blueprint.showPinned());
     this.pinC = this.add.container(0, 0, [this.pinBox, this.pinTitle, this.pinText]).setScale(this.k).setDepth(2).setVisible(false);
+  }
+
+  /** ปรับความสูงแผงเป้าหมายตามข้อความ */
+  private layoutQuest() {
+    const h = (this.compact ? 28 : 34) + this.questText.height + (this.compact ? 4 : 8);
+    if (this.questBox.height !== h) this.questBox.setSize(RIGHT_W, h);
+  }
+
+  /** ขอบล่างของแผงเป้าหมายบนจอ (พับแล้ว = ขอบล่างมินิแมป) */
+  private get questBottom() {
+    return (this.questFold.folded ? this.minimapBottom : this.questBox.y + this.questBox.height) * this.k;
   }
 
   /** อัปเดตแผงปักหมุด (ทุก 0.4 วิ) — มือถือย้ายไปฝั่งซ้ายใต้แผงสถานะ (ไม่ทับปุ่มสัมผัส) */
@@ -618,15 +668,14 @@ export class UIScene extends Phaser.Scene {
     const maxRows = touch ? 3 : 5;
     const lines = rows.slice(0, maxRows).map((r) => `${r.have >= r.need ? '✔' : '✘'} ${ITEMS[r.item]?.name ?? r.item} ${Math.min(r.have, 9999)}/${r.need}${r.stored ? ` 📦${r.stored}` : ''}`);
     if (rows.length > maxRows) lines.push(`… อีก ${rows.length - maxRows} อย่าง`);
-    this.pinTitle.setText(`📌 ${info!.name}${info!.ready ? ' — ✔ พร้อมสร้าง (B)' : ''}`).setColor(info!.ready ? COLORS.good : '#73eff7');
+    this.pinTitle.setText(`📌 ${info!.name}${info!.ready ? ' · ✔ พร้อม (B)' : ''}`).setColor(info!.ready ? COLORS.good : COLORS.sea);
     this.pinText.setText(lines.join('\n'));
-    const w = MINI + 20 + 104;
-    this.pinBox.setSize(w, 26 + this.pinText.height + 6);
-    fitText(this.pinTitle, w - 20);
+    this.pinBox.setSize(RIGHT_W, 30 + this.pinText.height + 8);
+    fitText(this.pinTitle, RIGHT_W - 24);
     // คอม: ใต้แผงเป้าหมาย (ขวา) · มือถือ: ซ้ายใต้แผงสถานะ
     const k = this.k;
-    if (touch) this.pinC.setPosition(6 * k, this.statusBottom + 4);
-    else this.pinC.setPosition(W - (12 + MINI + 10 + 104) * k, 246 * k);
+    if (touch) this.pinC.setPosition(M * k, this.statusBottom + 4);
+    else this.pinC.setPosition(W - (M + RIGHT_W) * k, this.questBottom + 4);
   }
 
   private buildBoss() {
@@ -644,7 +693,7 @@ export class UIScene extends Phaser.Scene {
   private buildHotbar() {
     const total = HOTBAR_SIZE * SLOT + (HOTBAR_SIZE - 1) * GAP;
     const x0 = (W - total) / 2 + SLOT / 2;
-    const y = H - SLOT / 2 - 14;
+    const y = H - SLOT / 2 - 10 - M;
     // จอเล็ก: ขยาย kt เท่า ยึดกลางล่าง (เลื่อนซ้ายนิดหน่อย เว้นที่ให้ปุ่มสัมผัสขวา)
     const ax = this.compact ? W / 2 - 26 : W / 2;
     this.gHot = this.add.container(ax - (W / 2) * this.kt, H * (1 - this.kt)).setScale(this.kt).setDepth(2);
@@ -666,44 +715,53 @@ export class UIScene extends Phaser.Scene {
     this.gHot.add([this.skillBox, this.skillLabel, this.skillKey, this.skillCover, this.skillText]);
   }
 
-  private muteIcon: Phaser.GameObjects.Text | null = null;
+  private muteIcon: Phaser.GameObjects.Image | null = null;
 
-  /** แถบปุ่มด้านบน (ใช้ได้ทั้งคอมและมือถือ) — จอเล็ก: ปุ่มใหญ่ขึ้น ตัด 2.5D/ซูม (บีบนิ้วซูม · ตั้งค่าในเมนู ⚙) */
+  /** แถบปุ่มด้านบน (ไอคอนพิกเซล tb_*) — จอเล็ก: ปุ่มใหญ่ขึ้น ตัด 2.5D/ซูม (บีบนิ้วซูม · ตั้งค่าในเมนู ⚙) */
   private buildToolbar() {
     const all: [string, string, () => void][] = [
-      ['🎒', 'กระเป๋า Tab', () => this.toggleBag()],
-      ['📐', 'แปลน B', () => this.blueprint.toggle('build')],
-      ['⬆', 'อัพเกรด U', () => this.gs.build.toggleUpgrade()],
-      ['📖', 'คู่มือ J', () => this.infoWin.toggle()],
-      ['🗺', 'แผนที่ M', () => this.mapWin.toggle()],
-      ['👕', 'ชุด O', () => this.wardrobeWin.toggle()],
-      ['🤖', 'งานอัตโนมัติ T', () => this.autoWin.toggle()],
-      ['🎥', '2.5D V', () => this.gs.setTilt(this.gs.tilt > 0 ? 0 : 0.6)],
-      ['➕', 'ซูมเข้า', () => this.gs.setZoom(this.gs.zoom * 1.2)],
-      ['➖', 'ซูมออก', () => this.gs.setZoom(this.gs.zoom / 1.2)],
+      ['bag', 'กระเป๋า Tab', () => this.toggleBag()],
+      ['blueprint', 'แปลน B', () => this.blueprint.toggle('build')],
+      ['upgrade', 'อัพเกรด U', () => this.gs.build.toggleUpgrade()],
+      ['book', 'คู่มือ J', () => this.infoWin.toggle()],
+      ['map', 'แผนที่ M', () => this.mapWin.toggle()],
+      ['shirt', 'ชุด O', () => this.wardrobeWin.toggle()],
+      ['robot', 'ออโต้ T', () => this.autoWin.toggle()],
+      ['camera', '2.5D V', () => this.gs.setTilt(this.gs.tilt > 0 ? 0 : 0.6)],
+      ['zoomIn', 'ซูมเข้า', () => this.gs.setZoom(this.gs.zoom * 1.2)],
+      ['zoomOut', 'ซูมออก', () => this.gs.setZoom(this.gs.zoom / 1.2)],
       // 🔊/🔇 ปิดเสียงทั้งหมด (ปุ่ม 0 / N ก็ได้) — ไอคอนเปลี่ยนตาม 'audio:changed'
-      [Sfx.isMuted ? '🔇' : '🔊', 'เสียง 0/N', () => this.toggleSound()],
-      ['⚙', 'เมนู Esc', () => this.pauseWin.toggle()],
+      [Sfx.isMuted ? 'mute' : 'sound', 'เสียง N', () => this.toggleSound()],
+      ['gear', 'เมนู Esc', () => this.pauseWin.toggle()],
     ];
-    const items = this.compact ? all.filter(([i]) => !['🎥', '➕', '➖'].includes(i)) : all;
-    const bw = this.compact ? 41 : 42;
+    // จอเล็ก: เหลือ 7 ปุ่ม (คู่มือ/ชุด/2.5D/ซูม อยู่ในเมนู ⚙ · บีบนิ้วซูม) ให้แถบพอดีระหว่างแผงสถานะกับมินิแมป
+    const items = this.compact ? all.filter(([i]) => !['camera', 'zoomIn', 'zoomOut', 'book', 'shirt'].includes(i)) : all;
+    const bw = this.compact ? 41 : 40;
     const bh = this.compact ? 40 : 36;
-    const ph = bh + 16;
-    // จอเล็ก: เลื่อนขวานิดหน่อย ไม่ชนแผงสถานะที่ขยายแล้ว
-    const x0 = W / 2 - (items.length * bw) / 2 + (this.compact ? 6 : 0);
-    this.toolbarPanel = panel(this, x0 - 8, 4, items.length * bw + 16, ph, 'ui_panel_dark');
+    const ph = bh + 14;
+    const x0 = W / 2 - (items.length * bw) / 2;
+    this.toolbarPanel = panel(this, x0 - 8, M, items.length * bw + 16, ph, 'ui_panel_dark');
     this.gTop.add(this.toolbarPanel);
     items.forEach(([icon, tip, fn], i) => {
       const x = x0 + i * bw + bw / 2;
-      const cy = 4 + ph / 2;
+      const cy = M + ph / 2;
       const b = this.add.nineslice(x, cy, 'ui_slot', undefined, bw - 4, bh, 6, 6, 6, 6).setInteractive({ useHandCursor: true });
-      const ic = txt(this, x, cy - 1, icon, this.compact ? 19 : 17).setOrigin(0.5);
+      const ic = this.add.image(x, cy, `tb_${icon}`);
       if (tip.startsWith('เสียง')) this.muteIcon = ic;
-      const tipT = txt(this, x, 4 + ph - 4, tip, 10, COLORS.dim).setOrigin(0.5, 0).setVisible(false).setDepth(30);
-      b.on('pointerover', () => tipT.setVisible(true)).on('pointerout', () => tipT.setVisible(false)).on('pointerdown', () => {
+      const tipT = txt(this, x, M + ph + 2, tip, 12, COLORS.cream).setOrigin(0.5, 0).setBackgroundColor('#0b0d1fdd').setPadding(6, 2, 6, 2).setVisible(false).setDepth(30);
+      b.on('pointerover', () => {
+        tipT.setVisible(true);
+        b.setTexture('ui_slot_sel');
+      }).on('pointerout', () => {
+        tipT.setVisible(false);
+        b.setTexture('ui_slot');
+      }).on('pointerdown', () => {
         Sfx.unlock();
-        // กดแล้วยุบนิดหน่อย (รู้สึกว่ากดติด)
-        this.tweens.add({ targets: [b, ic], scale: 0.9, duration: 60, yoyo: true });
+        // กดแล้วยุบแล้วเด้งกลับ (รู้สึกว่ากดติด)
+        this.tweens.killTweensOf([b, ic]);
+        b.setScale(0.88);
+        ic.setScale(0.88);
+        this.tweens.add({ targets: [b, ic], scale: 1, duration: 220, ease: 'Back.easeOut' });
         fn();
       });
       this.gTop.add([b, ic, tipT]);
@@ -758,7 +816,9 @@ export class UIScene extends Phaser.Scene {
       this.miniTimer = qualityKnobs().minimapMs;
       this.drawMinimap();
     }
-    const mg = this.miniGfx.clear().fillStyle(0xff3355, 1).fillRect(W - 12 - MINI / 2 - 2, 14 + MINI / 2 - 2, 4, 4);
+    const mcx = this.miniImg.x + MINI / 2;
+    const mcy = this.miniImg.y + MINI / 2;
+    const mg = this.miniGfx.clear().fillStyle(0xff3355, 1).fillRect(mcx - 2, mcy - 2, 4, 4);
     // เกาะพิเศษ: สถานะ + ลูกศรชี้ทาง (ตอนเปิด)
     const sp = g.special;
     this.specialChip.setText(sp.open ? `✨ เกาะพิเศษ ${fmtLeft(sp.msLeft)}` : `🔒 เกาะพิเศษ ${fmtLeft(sp.msLeft)}`).setColor(sp.open ? COLORS.gold : '#a77bdb');
@@ -768,8 +828,8 @@ export class UIScene extends Phaser.Scene {
       const dy = sis.cy - p.y / 16;
       if (Math.hypot(dx, dy) > MINI / 2) {
         const a = Math.atan2(dy, dx);
-        const cx = W - 12 - MINI / 2 + Math.cos(a) * (MINI / 2 - 8);
-        const cy = 14 + MINI / 2 + Math.sin(a) * (MINI / 2 - 8);
+        const cx = mcx + Math.cos(a) * (MINI / 2 - 8);
+        const cy = mcy + Math.sin(a) * (MINI / 2 - 8);
         const pulse = 5 + Math.sin(this.time.now / 200) * 1.5;
         mg.fillStyle(0xffcd75, 1).fillTriangle(
           cx + Math.cos(a) * pulse, cy + Math.sin(a) * pulse,
@@ -817,8 +877,10 @@ export class UIScene extends Phaser.Scene {
       this.questText.setText(q.text + (q.goal.type === 'visit' ? '' : ` (${Math.min(g.quests!.progress, target)}/${target})`));
     } else {
       this.questTitle.setText('★ เล่นอิสระ');
-      this.questText.setText('ขยันฟาร์ม ขุดแร่ ตกปลา ล่ามอน เปิดกล่อง อัพเกรด — เกาะยิ่งใหญ่ตามความขยันของคุณ');
+      this.questText.setText('ฟาร์ม ขุดแร่ ตกปลา ล่ามอน เปิดกล่อง อัพเกรด — เกาะโตตามความขยัน');
     }
+    fitText(this.questTitle, RIGHT_W - 52);
+    this.layoutQuest();
     const boss = g.boss;
     const showBoss = !!boss && boss.active && Phaser.Math.Distance.Between(boss.x, boss.y, p.x, p.y) < 300;
     this.setVis(this.bossGroup, showBoss);
@@ -835,13 +897,22 @@ export class UIScene extends Phaser.Scene {
   // ======================================================================
   // แจ้งเตือน
   // ======================================================================
+  /** แจ้งเตือนกลางจอ: ป้ายพื้นมืดมน ตัวหนังสือ 16px (จอเล็กขยายตาม HUD) */
   private toast(text: string, color = COLORS.text) {
-    const t = txt(this, W / 2, 0, text, 16, color).setOrigin(0.5, 0).setDepth(40);
+    const t = txt(this, W / 2, 0, text, 16, color, { wordWrap: { width: 520 }, align: 'center' }).setOrigin(0.5, 0).setDepth(40)
+      .setBackgroundColor('#0b0d1fd9').setPadding(12, 4, 12, 4).setScale(this.k);
     this.toasts.push(t);
     if (this.toasts.length > 4) this.toasts.shift()?.destroy();
-    // ใต้แถบเงิน/ข้อความสถานะ (จอเล็ก HUD ขยาย → เลื่อนลงตาม)
-    const y0 = 168 * this.k;
-    this.toasts.forEach((x, i) => x.setY(y0 + i * 24));
+    // ใต้แถบเงิน/ข้อความสถานะ (จอเล็ก HUD ขยาย → เลื่อนลงตาม) · แบนเนอร์อยู่ต่ำกว่านี้ ไม่ทับกัน
+    const y0 = 122 * this.k;
+    const layout = () => {
+      let y = y0;
+      for (const x of this.toasts) {
+        x.setY(y);
+        y += x.height * this.k + 6;
+      }
+    };
+    layout();
     t.setAlpha(0);
     this.tweens.add({ targets: t, alpha: 1, duration: 140 });
     this.tweens.add({
@@ -849,7 +920,7 @@ export class UIScene extends Phaser.Scene {
       onComplete: () => {
         this.toasts = this.toasts.filter((x) => x !== t);
         t.destroy();
-        this.toasts.forEach((x, i) => x.setY(y0 + i * 24));
+        layout();
       },
     });
   }
@@ -868,18 +939,25 @@ export class UIScene extends Phaser.Scene {
     } });
   }
 
+  /** แบนเนอร์กลางจอ (ชื่อเกาะ/ภัย/เลเวลอัพ): แถบมืดพาดจอให้อ่านออกเหนือโลกเกม */
   private banner(name: string, desc: string, color: string) {
-    // จอเล็ก: ต่ำลงนิดหน่อย ไม่ทับข้อความสถานะใต้แถบเงิน
-    const by = this.compact ? H / 2 - 92 : H / 2 - 120;
+    // ใต้แถว toast (จอเล็ก: ต่ำลงอีก ไม่ทับข้อความสถานะใต้แถบเงิน)
+    const by = this.compact ? H / 2 - 56 : H / 2 - 76;
+    const band = this.add.graphics().setDepth(9).setAlpha(0);
+    band.fillGradientStyle(0x0b0d1f, 0x0b0d1f, 0x0b0d1f, 0x0b0d1f, 0, 0, 0.7, 0.7).fillRect(0, by - 50, W, 30);
+    band.fillStyle(0x0b0d1f, 0.7).fillRect(0, by - 20, W, 84);
+    band.fillGradientStyle(0x0b0d1f, 0x0b0d1f, 0x0b0d1f, 0x0b0d1f, 0.7, 0.7, 0, 0).fillRect(0, by + 64, W, 30);
     const t = heading(this, W / 2, by, name, 38).setOrigin(0.5).setAlpha(0).setDepth(9);
-    const d = txt(this, W / 2, by + 40, desc, 16, color).setOrigin(0.5).setAlpha(0).setDepth(9);
-    this.tweens.add({ targets: [t, d], alpha: 1, duration: 400, yoyo: true, hold: 2000, onComplete: () => (t.destroy(), d.destroy()) });
+    const d = txt(this, W / 2, by + 42, desc, 17, color, { wordWrap: { width: 640 }, align: 'center' }).setOrigin(0.5, 0).setAlpha(0).setDepth(9);
+    t.setScale(1.2);
+    this.tweens.add({ targets: t, scale: 1, duration: 420, ease: 'Back.easeOut' });
+    this.tweens.add({ targets: [t, d, band], alpha: 1, duration: 400, yoyo: true, hold: 2000, onComplete: () => (t.destroy(), d.destroy(), band.destroy()) });
   }
 
   private achievement(a: AchievementDef) {
     const c = this.add.container(W + 10, 360).setDepth(45);
-    c.add([panel(this, 0, 0, 290, 62), txt(this, 14, 8, `🏆 ${a.name}`, 16, COLORS.gold), txt(this, 14, 34, a.desc, 12, COLORS.dim)]);
-    this.tweens.add({ targets: c, x: W - 300, duration: 400, ease: 'Back.easeOut', yoyo: true, hold: 3000, onComplete: () => c.destroy() });
+    c.add([panel(this, 0, 0, 300, 66), txt(this, 14, 8, `🏆 ${a.name}`, 16, COLORS.gold), txt(this, 14, 36, a.desc, 13, COLORS.dim)]);
+    this.tweens.add({ targets: c, x: W - 308, duration: 400, ease: 'Back.easeOut', yoyo: true, hold: 3000, onComplete: () => c.destroy() });
   }
 
   private toggleSound() {
@@ -921,7 +999,7 @@ export class UIScene extends Phaser.Scene {
   private showBaseBuffs = false;
 
   private makeBag() {
-    const w = new UIWindow(this, 110, 40, 740, 484, 'ตัวละคร & กระเป๋า (Tab)');
+    const w = new UIWindow(this, 110, 40, 740, 484, '🎒 กระเป๋า');
     const gs = this.gs;
     const inv = gs.player.inventory;
     // ---- ฝั่งซ้าย: หุ่นอุปกรณ์ ----
@@ -947,7 +1025,7 @@ export class UIScene extends Phaser.Scene {
     const statL = txt(this, 0, 290, '', 11, COLORS.text, { lineSpacing: 1 });
     const statR = txt(this, 124, 290, '', 11, COLORS.text, { lineSpacing: 1 });
     w.add([power, statL, statR]);
-    const baseBtn = button(this, 122, 424, 244, 26, '🏠 บัฟจากฐาน', () => {
+    const baseBtn = button(this, 122, 410, 244, 28, '🏠 บัฟจากฐาน', () => {
       this.showBaseBuffs = !this.showBaseBuffs;
       this.bagSel = null;
       this.eqSel = null;
@@ -990,10 +1068,10 @@ export class UIScene extends Phaser.Scene {
     const sort = button(this, RX + 296, 258, 100, 28, 'จัดเรียง', () => this.sortBag(inv), true, 13);
     const craftB = button(this, RX + 400, 258, 96, 28, '🔨 คราฟต์', () => this.blueprint.toggle('items'), true, 13);
     w.add([...use.objects, ...drop.objects, ...sort.objects, ...craftB.objects]);
-    const info = txt(this, RX, 282, '', 12, COLORS.text, { wordWrap: { width: 446 }, lineSpacing: 3 });
+    const info = txt(this, RX, 282, '', 13, COLORS.text, { wordWrap: { width: 446 }, lineSpacing: 4 });
     w.add(info);
     // ⬆ อัพเกรดของที่เลือก (อาวุธ/เครื่องมือ/อุปกรณ์) — สำเร็จ 100%
-    const upB = button(this, RX + 330, 424, 232, 26, '⬆ อัพเกรด', () => {
+    const upB = button(this, RX + 330, 410, 232, 28, '⬆ อัพเกรด', () => {
       const ref = this.eqSel ?? this.bagSel;
       if (ref === null) return;
       const r = gs.upgradeItem(ref);
@@ -1042,7 +1120,7 @@ export class UIScene extends Phaser.Scene {
         const s = this.bagSel !== null ? inv.slots[this.bagSel] : null;
         lines = s
           ? [...itemInfo(ITEMS[s.id], s.plus), '', 'หาได้จาก:', ...itemSources(s.id).slice(0, 3)]
-          : ['ความเก่ง = เลเวล + อุปกรณ์ที่สวม (×เลเวลอัพเกรด) + บัฟจากฐาน (ตายแล้วเลเวลลด 1)', 'คลิกไอเทม = ดูรายละเอียด · คลิกอีกช่อง = ย้าย · คลิกขวา = แบ่งครึ่ง', 'เลือกอุปกรณ์แล้วกด "สวมใส่" หรือคลิกช่องบนหุ่นทางซ้าย'];
+          : ['• พลัง = เลเวล + อุปกรณ์ (×อัพเกรด) + บัฟฐาน · ตาย = เลเวลลด 1', '• คลิกไอเทม = ดู · คลิกอีกช่อง = ย้าย · คลิกขวา = แบ่งครึ่ง', '• เลือกอุปกรณ์แล้วกด "สวมใส่" หรือคลิกช่องบนหุ่น'];
         if (s && gs.slotFor(s.id)) label = 'สวมใส่ (F)';
       }
       // ปุ่ม/ค่าอัพเกรดของชิ้นที่เลือก
@@ -1145,7 +1223,7 @@ export class UIScene extends Phaser.Scene {
   private infoSel: string | null = null;
 
   private makeInfo() {
-    const w = new UIWindow(this, 100, 60, 760, 460, 'คู่มือไอเทม (J)');
+    const w = new UIWindow(this, 100, 60, 760, 460, '📖 คู่มือไอเทม');
     const cats: [string, string][] = [['all', 'ทั้งหมด'], ['material', 'วัตถุดิบ'], ['food', 'อาหาร'], ['tool', 'เครื่องมือ'], ['weapon', 'อาวุธ'], ['armor', 'เกราะ'], ['box', 'กล่อง/อื่นๆ']];
     const setTab = this.tabs(w, 0, 0, cats, 66, (c) => {
       this.infoCat = c;
@@ -1153,12 +1231,12 @@ export class UIScene extends Phaser.Scene {
     });
     let shown: string[] = [];
     const views = this.grid(w, 0, 40, 11, 66, 36, (i) => (this.infoSel = shown[i] ?? null));
-    const detail = txt(this, 452, 40, '', 12, COLORS.text, { wordWrap: { width: 270 }, lineSpacing: 3 });
+    const detail = txt(this, 452, 40, '', 13, COLORS.text, { wordWrap: { width: 270 }, lineSpacing: 4 });
     const page = txt(this, 200, 290, '', 12, COLORS.dim).setOrigin(0.5);
     const prev = button(this, 120, 290, 50, 26, '◀', () => (this.infoPage = Math.max(0, this.infoPage - 1)), true, 12);
     const next = button(this, 280, 290, 50, 26, '▶', () => this.infoPage++, true, 12);
     w.add([detail, page, ...prev.objects, ...next.objects]);
-    w.add(txt(this, 0, 320, 'สีชื่อบอกความหายาก: ธรรมดา · ดี · หายาก · มหากาพย์ · เทพ\nกล่อง: ไม้ < เหล็ก < ทอง < เทพ — ยิ่งระดับสูงของยิ่งดี (ดูอัตราดรอปในรายละเอียดกล่อง)', 12, COLORS.dim, { lineSpacing: 3 }));
+    w.add(txt(this, 0, 320, 'สีชื่อ = ความหายาก: ธรรมดา · ดี · หายาก · มหากาพย์ · เทพ\nกล่อง: ไม้ < เหล็ก < ทอง < เทพ (ดูอัตราดรอปที่กล่อง)', 13, COLORS.dim, { lineSpacing: 4 }));
     const group: Record<string, string[]> = { tool: ['tool', 'rod', 'light'], weapon: ['weapon', 'ranged', 'throw', 'ammo'], box: ['box', 'cosmetic', 'heal', 'seed'] };
     return this.register(w, () => {
       setTab(this.infoCat as never);
@@ -1205,9 +1283,9 @@ export class UIScene extends Phaser.Scene {
   }
 
   private makeStorage() {
-    const w = new UIWindow(this, 100, 70, 760, 420, 'หีบเก็บของ');
+    const w = new UIWindow(this, 100, 70, 760, 420, '📦 หีบเก็บของ');
     const title = txt(this, 0, 0, '', 14, COLORS.gold);
-    w.add([title, txt(this, 390, 0, 'กระเป๋าของคุณ (คลิกเพื่อฝาก)', 14, COLORS.gold)]);
+    w.add([title, txt(this, 390, 0, 'กระเป๋า (คลิก = ฝาก)', 14, COLORS.gold)]);
     const chest = this.grid(w, 0, 24, 6, 60, 36, (i) => {
       const st = this.liveStorage();
       const s = st?.slots[i];
@@ -1227,20 +1305,20 @@ export class UIScene extends Phaser.Scene {
       }
       Sfx.play('pickup', 40);
     });
-    const all = button(this, 470, 216, 160, 32, 'ฝากทั้งหมด (ยกเว้น hotbar)', () => {
+    const all = button(this, 470, 216, 160, 32, 'ฝากทั้งหมด', () => {
       const st = this.liveStorage();
       const inv = this.gs.player.inventory;
       if (!st) return;
       for (let i = HOTBAR_SIZE; i < inv.slots.length; i++) if (inv.slots[i] && st.addSlot(inv.slots[i]!)) inv.slots[i] = null;
       inv.version++;
     }, true, 12);
-    const same = button(this, 640, 216, 160, 32, 'ฝากของที่ซ้ำกับในคลัง (Z)', () => this.quickDeposit(), true, 12);
+    const same = button(this, 640, 216, 160, 32, 'ฝากของซ้ำ (Z)', () => this.quickDeposit(), true, 12);
     const sortChest = button(this, 470, 254, 160, 32, 'จัดเรียงคลัง', () => {
       const st = this.liveStorage();
       if (st) this.sortSlots(st, 0);
     }, true, 12);
     const sortMine = button(this, 640, 254, 160, 32, 'จัดเรียงกระเป๋า', () => this.sortBag(this.gs.player.inventory), true, 12);
-    const tip = txt(this, 390, 278, '📦 ของในหีบ/โกดังบนเกาะของคุณถูกนับและหยิบใช้อัตโนมัติ ตอนสร้าง คราฟต์ อัพเกรด และซ่อม', 11, COLORS.dim, { wordWrap: { width: 330 }, lineSpacing: 2 });
+    const tip = txt(this, 390, 278, '📦 ของในหีบ/โกดังบนเกาะ ใช้สร้าง คราฟต์ อัพเกรด ซ่อม ได้อัตโนมัติ · "ฝากทั้งหมด" ไม่รวม hotbar', 13, COLORS.dim, { wordWrap: { width: 330 }, lineSpacing: 4 });
     w.add([...all.objects, ...same.objects, ...sortChest.objects, ...sortMine.objects, tip]);
     w.onClose = () => this.storageOf?.setChestOpen(false);
     return this.register(w, () => {
@@ -1257,13 +1335,18 @@ export class UIScene extends Phaser.Scene {
 
   // ---------- ตลาดผู้เล่นบนเกาะกลาง ----------
   private tradeStall = 0;
+  /** ร้านค้าทางไกล (ท่าส่งของ) — ราคา/ค่าส่งคิดใน MarketSystem */
+  private tradeRemote = false;
+  private marketRemote = false;
   private tradePage = 0;
   private sellIdx: number | null = null;
   private sellQty = 1;
   private sellPrice = 10;
 
+  /** stall < 0 = เปิดจากท่าส่งของ (ทางไกล · ค่าส่ง 10%) */
   private openTrade(stall: number) {
     this.tradeStall = stall;
+    this.tradeRemote = stall < 0;
     this.tradePage = 0;
     this.tradeWin.open();
     // ออนไลน์: ดึงแผงล่าสุดจากเซิร์ฟเวอร์ (หน้าต่างอ่านจากแคชทุก 150 ms อยู่แล้ว)
@@ -1271,7 +1354,7 @@ export class UIScene extends Phaser.Scene {
   }
 
   private makeTrade() {
-    const w = new UIWindow(this, 60, 50, 840, 470, 'ตลาดแลกเปลี่ยน (เกาะกลาง)');
+    const w = new UIWindow(this, 60, 50, 840, 470, '⚖ ตลาดผู้เล่น');
     const rooms = getRoomService();
     w.add(txt(this, 0, 0, 'ของที่ผู้เล่นวางขาย', 15, COLORS.gold));
     const rows: { bg: Phaser.GameObjects.Rectangle; icon: Phaser.GameObjects.Image; name: Phaser.GameObjects.Text; btn: Button }[] = [];
@@ -1289,10 +1372,11 @@ export class UIScene extends Phaser.Scene {
     const prev = button(this, 150, 352, 50, 26, '◀', () => (this.tradePage = Math.max(0, this.tradePage - 1)), true, 12);
     const next = button(this, 290, 352, 50, 26, '▶', () => this.tradePage++, true, 12);
     w.add([page, ...prev.objects, ...next.objects]);
-    w.add(txt(this, 0, 376, `ภาษีตลาด ${Wallet.TAX * 100}% · ของที่ขายได้ เงินจะส่งเข้าตู้จดหมายที่เกาะของคุณ\n🕊 เกาะกลางเป็นเขตปลอดภัย — ห้ามต่อสู้เด็ดขาด`, 11, COLORS.dim, { lineSpacing: 3 }));
+    const foot = txt(this, 0, 376, '', 13, COLORS.dim, { lineSpacing: 4 });
+    w.add(foot);
 
     // ฝั่งวางขาย
-    w.add(txt(this, 460, 0, 'วางขายของคุณ: เลือกไอเทม', 15, COLORS.gold));
+    w.add(txt(this, 460, 0, 'วางขาย: เลือกไอเทม', 15, COLORS.gold));
     const pick = this.grid(w, 460, 24, 8, 28, 36, (i) => {
       this.sellIdx = i;
       const s = this.gs.player.inventory.slots[i];
@@ -1310,9 +1394,9 @@ export class UIScene extends Phaser.Scene {
     adj('+1', 696, 236, () => (this.sellPrice += 1));
     adj('+10', 744, 236, () => (this.sellPrice += 10));
     w.add([sellInfo, txt(this, 460, 254, 'จำนวน', 11, COLORS.dim), txt(this, 600, 254, 'ราคา (เหรียญ)', 11, COLORS.dim)]);
-    const post = button(this, 640, 290, 220, 34, 'วางขายที่แผงนี้', () => this.postListing(), true, 14);
+    const post = button(this, 640, 290, 220, 34, 'วางขาย', () => this.postListing(), true, 14);
     w.add(post.objects);
-    const mineTitle = txt(this, 460, 316, 'ของที่คุณวางขายอยู่ (คลิกเพื่อยกเลิก)', 12, COLORS.dim);
+    const mineTitle = txt(this, 460, 316, 'ที่วางขายอยู่ (คลิก = ยกเลิก)', 13, COLORS.dim);
     const mineList = txt(this, 460, 336, '', 12, COLORS.text, { lineSpacing: 3 }).setInteractive({ useHandCursor: true });
     mineList.on('pointerdown', async () => {
       const mine = rooms.listings(this.gs.room.id).filter((l) => l.seller === localPlayerId());
@@ -1341,12 +1425,13 @@ export class UIScene extends Phaser.Scene {
         r.btn.hover.setVisible(false);
         r.icon.setTexture(ITEMS[l.item].icon);
         r.name.setText(`${ITEMS[l.item].name} ×${l.qty}  ·  ผู้ขาย ${l.sellerName}${l.stall === this.tradeStall ? ' ★' : ''}`).setColor(RARITY[ITEMS[l.item].rarity ?? 'common'].color);
-        r.btn.setLabel(`ซื้อ ${l.price}`);
+        r.btn.setLabel(`ซื้อ ${l.price + remoteFee(l.price, this.tradeRemote)}`);
       });
+      foot.setText(`ภาษี ${Wallet.TAX * 100}% · เงินค่าขายส่งเข้าตู้จดหมายที่เกาะคุณ\n${this.tradeRemote ? '📦 ทางไกล: ซื้อ/วางขาย มีค่าส่ง 10% (ราคาที่ปุ่มรวมแล้ว)' : '🕊 เกาะกลาง = เขตปลอดภัย ห้ามต่อสู้'}`);
       const inv = this.gs.player.inventory;
       pick.forEach((v, i) => v.set(inv.slots[i] ?? null, i === this.sellIdx));
       const s = this.sellIdx !== null ? inv.slots[this.sellIdx] : null;
-      sellInfo.setText(s ? `${s.plus ? `Lv.${s.plus + 1} ` : ''}${ITEMS[s.id].name} ×${this.sellQty}  ·  ราคา ${this.sellPrice} (ได้สุทธิ ${Math.floor(this.sellPrice * (1 - Wallet.TAX))})` : 'คลิกไอเทมด้านบนเพื่อวางขาย');
+      sellInfo.setText(s ? `${s.plus ? `Lv.${s.plus + 1} ` : ''}${ITEMS[s.id].name} ×${this.sellQty}  ·  ราคา ${this.sellPrice} (ได้สุทธิ ${Math.floor(this.sellPrice * (1 - Wallet.TAX))})${this.tradeRemote ? ` · ค่าส่ง ${remoteFee(this.sellPrice, true)}` : ''}` : 'คลิกไอเทมด้านบนเพื่อวางขาย');
       const mine = rooms.listings(this.gs.room.id).filter((l) => l.seller === localPlayerId());
       mineList.setText(mine.length ? mine.slice(0, 4).map((l) => `• ${ITEMS[l.item].name} ×${l.qty} — ${l.price} เหรียญ`).join('\n') : '(ยังไม่มี)');
     });
@@ -1365,7 +1450,8 @@ export class UIScene extends Phaser.Scene {
   private async buyListing(l: TradeListing | undefined) {
     if (!l || this.tradeBusy) return;
     const g = this.gs;
-    if (g.wallet.coins < l.price) {
+    const fee = remoteFee(l.price, this.tradeRemote);
+    if (g.wallet.coins < l.price + fee) {
       Sfx.play('error');
       return this.toast('เหรียญไม่พอ', COLORS.bad);
     }
@@ -1378,10 +1464,11 @@ export class UIScene extends Phaser.Scene {
       return this.toast(got.error, COLORS.bad);
     }
     if (!g.wallet.spend(l.price)) return this.toast('เหรียญไม่พอ', COLORS.bad);
+    if (fee) g.wallet.spend(Math.min(fee, g.wallet.coins)); // ค่าส่งทางไกล (หักฝั่งเรา)
     this.receiveListing(got);
     Sfx.play('pickup');
     EventBus.emit('trade');
-    this.toast(`ซื้อ ${ITEMS[l.item].name} ×${l.qty} จาก ${l.sellerName}`, COLORS.good);
+    this.toast(`ซื้อ ${ITEMS[l.item].name} ×${l.qty} จาก ${l.sellerName}${fee ? ` · 📦 ค่าส่ง ${fee}` : ''}`, COLORS.good);
   }
 
   private async postListing() {
@@ -1391,6 +1478,8 @@ export class UIScene extends Phaser.Scene {
     const s = i !== null ? inv.slots[i] : null;
     if (i === null || !s) return this.toast('เลือกไอเทมก่อน', COLORS.bad);
     if (this.tradeBusy) return;
+    const fee = remoteFee(this.sellPrice, this.tradeRemote);
+    if (g.wallet.coins < fee) return this.toast(`ค่าส่งทางไกล ${fee} เหรียญ — เหรียญไม่พอ`, COLORS.bad);
     const qty = Math.min(this.sellQty, s.qty);
     const taken = { ...s, qty: s.plus || s.dur !== undefined ? s.qty : qty };
     if (s.plus || s.dur !== undefined) inv.slots[i] = null;
@@ -1398,7 +1487,7 @@ export class UIScene extends Phaser.Scene {
     inv.version++;
     this.sellIdx = null;
     this.tradeBusy = true;
-    const r = await getRoomService().postListing(g.room.id, { seller: localPlayerId(), sellerName: g.playerName, item: s.id, qty, price: this.sellPrice, stall: this.tradeStall, plus: s.plus || undefined });
+    const r = await getRoomService().postListing(g.room.id, { seller: localPlayerId(), sellerName: g.playerName, item: s.id, qty, price: this.sellPrice, stall: this.tradeStall < 0 ? Phaser.Math.Between(0, 11) : this.tradeStall, plus: s.plus || undefined });
     this.tradeBusy = false;
     if ('error' in r) {
       // วางขายไม่สำเร็จ → คืนของ
@@ -1407,16 +1496,19 @@ export class UIScene extends Phaser.Scene {
       Sfx.play('error');
       return this.toast(r.error, COLORS.bad);
     }
+    if (fee) g.wallet.spend(Math.min(fee, g.wallet.coins)); // ค่าส่งทางไกล (ไม่คืนเมื่อยกเลิก)
     Sfx.play('place');
     EventBus.emit('trade');
-    this.toast(`วางขาย ${ITEMS[s.id].name} ×${qty} ราคา ${this.sellPrice} เหรียญแล้ว`, COLORS.good);
+    this.toast(`วางขาย ${ITEMS[s.id].name} ×${qty} ราคา ${this.sellPrice} เหรียญแล้ว${fee ? ` · 📦 ค่าส่ง ${fee}` : ''}`, COLORS.good);
   }
 
   // ---------- พ่อค้ากลาง (ซื้อ/ขาย/แลกเพชร) ----------
   private makeMarket() {
-    const w = new UIWindow(this, 60, 40, 840, 480, 'พ่อค้ากลาง — ราคาเปลี่ยนทุกวัน');
-    w.add([txt(this, 0, 0, 'ซื้อ (จ่ายเหรียญ)', 15, COLORS.good), txt(this, 410, 0, 'ขาย (ได้เหรียญ) · ★ ราคาพิเศษวันนี้', 15, COLORS.gold)]);
-    const rows: { o: Offer; side: 'buy' | 'sell'; icon: Phaser.GameObjects.Image; name: Phaser.GameObjects.Text; btn: Button }[] = [];
+    const w = new UIWindow(this, 60, 40, 840, 480, '🛒 พ่อค้ากลาง');
+    const buyHead = txt(this, 0, 0, '', 15, COLORS.good);
+    const sellHead = txt(this, 410, 0, '', 15, COLORS.gold);
+    w.add([buyHead, sellHead]);
+    const rows: { o: Offer; side: 'buy' | 'sell'; bg: Phaser.GameObjects.Rectangle; icon: Phaser.GameObjects.Image; name: Phaser.GameObjects.Text; btn: Button }[] = [];
     for (let i = 0; i < 8; i++) {
       for (const side of ['buy', 'sell'] as const) {
         const x = side === 'buy' ? 0 : 410;
@@ -1424,7 +1516,7 @@ export class UIScene extends Phaser.Scene {
         const bg = this.add.rectangle(x, y, 395, 34, 0x333c57, 0.45).setOrigin(0, 0.5);
         const icon = this.add.image(x + 18, y, 'px').setScale(1.6);
         const name = txt(this, x + 38, y, '', 12).setOrigin(0, 0.5);
-        const ref = { o: { item: 'wood', qty: 1, price: 1 } as Offer, side, icon, name, btn: null as unknown as Button };
+        const ref = { o: { item: 'wood', qty: 1, price: 1 } as Offer, side, bg, icon, name, btn: null as unknown as Button };
         ref.btn = button(this, x + 345, y, 92, 28, '', () => this.trade(ref.o, side), true, 12);
         rows.push(ref);
         w.add([bg, icon, name, ...ref.btn.objects]);
@@ -1447,20 +1539,50 @@ export class UIScene extends Phaser.Scene {
       Sfx.play('levelUp');
     }, true, 13);
     const boxBuy = button(this, 706, 368, 196, 32, `ซื้อกล่องเพชร (${LEGEND_BOX_GEMS} เพชร)`, () => {
+      if (this.marketRemote && CENTER_ONLY_GEM.has('box_legend')) return this.toast('กล่องเพชรมีขายเฉพาะที่เกาะกลาง', COLORS.bad);
       if (!this.gs.wallet.spend(0, LEGEND_BOX_GEMS)) return this.toast('เพชรไม่พอ', COLORS.bad);
       this.gs.collect('box_legend', 1, this.gs.player.x, this.gs.player.y);
       Sfx.play('levelUp');
     }, true, 13);
     w.add([...gemBuy.objects, ...gemSell.objects, ...goldBuy.objects, ...boxBuy.objects]);
+    // 📦 ร้านค้าทางไกล: แถบแจ้ง + ปุ่มไปแผงผู้เล่น (แสดงเฉพาะตอนเปิดจากท่าส่งของ)
+    // แถบมนสีน้ำเงินขอบฟ้า (ชุด UI เดียวกับ HUD) — ข้อความย่อให้พอดีแถบ
+    const ribbon = this.add.graphics();
+    ribbon.fillStyle(0x0b0d1f, 0.45).fillRoundedRect(2, 324, 600, 28, 10);
+    ribbon.fillStyle(0x29366f, 0.95).fillRoundedRect(0, 322, 600, 28, 10).lineStyle(2, 0x41a6f6, 0.9).strokeRoundedRect(0, 322, 600, 28, 10);
+    const ribbonTxt = txt(this, 12, 336, '', 13, COLORS.cream).setOrigin(0, 0.5);
+    const stallsBtn = button(this, 712, 336, 180, 30, '⚖ แผงผู้เล่น (+10%)', () => {
+      w.close();
+      this.openTrade(-1);
+    }, true, 12);
+    w.add([ribbon, ribbonTxt, ...stallsBtn.objects]);
     const wallet = this.headerWallet(w);
     return this.register(w, () => {
       wallet();
       const m = this.gs.market;
+      const remote = this.marketRemote;
+      [ribbon, ribbonTxt, stallsBtn.bg, stallsBtn.t].forEach((o) => o.setVisible(remote));
+      if (!remote) stallsBtn.hover.setVisible(false);
+      else {
+        const cs = centerState();
+        ribbonTxt.setText(`📦 ทางไกล แพงกว่าเกาะกลาง · ${cs.open ? `เกาะกลางเปิดอยู่ (อีก ${fmtLeft(cs.msLeft)})` : `เกาะกลางเปิด ${nextOpenText(undefined, 'center')}`}`);
+        fitText(ribbonTxt, 576);
+      }
+      w.setTitle(remote ? '📦 ร้านค้าทางไกล' : '🛒 พ่อค้ากลาง');
+      boxBuy.setLabel(remote ? 'กล่องเพชร: เฉพาะเกาะกลาง' : `ซื้อกล่องเพชร (${LEGEND_BOX_GEMS} เพชร)`);
+      buyHead.setText(remote ? 'ซื้อ · ทางไกล +25%' : 'ซื้อ (จ่ายเหรียญ)');
+      sellHead.setText(remote ? 'ขาย · ทางไกล −20%' : 'ขาย · ★ ราคาพิเศษวันนี้');
+      const buy = m.offers('buy', remote);
+      const sell = m.offers('sell', remote);
       let bi = 0;
       let si = 0;
       for (const r of rows) {
-        const o = r.side === 'buy' ? m.buy[bi++] : m.sell[si++];
-        if (!o) continue;
+        const o = r.side === 'buy' ? buy[bi++] : sell[si++];
+        [r.bg, r.icon, r.name, r.btn.bg, r.btn.t].forEach((x) => x.setVisible(!!o));
+        if (!o) {
+          r.btn.hover.setVisible(false);
+          continue;
+        }
         r.o = o;
         r.icon.setTexture(ITEMS[o.item].icon);
         const have = r.side === 'sell' ? `  (มี ${this.gs.player.inventory.count(o.item)})` : '';
@@ -1492,8 +1614,8 @@ export class UIScene extends Phaser.Scene {
   }
 
   private makeEnhance() {
-    const w = new UIWindow(this, 160, 50, 640, 450, '⬆ อัพเกรดอุปกรณ์ (10 ระดับ)');
-    w.add(txt(this, 0, 0, 'เลือกอาวุธ/เครื่องมือ/อุปกรณ์ (ที่สวม + ในกระเป๋า)', 13, COLORS.gold));
+    const w = new UIWindow(this, 160, 50, 640, 450, '⬆ อัพเกรด');
+    w.add(txt(this, 0, 0, 'เลือกของ (ที่สวม + ในกระเป๋า)', 13, COLORS.gold));
     let idx: (number | EquipSlot)[] = [];
     const views = this.grid(w, 0, 24, 6, 30, 40, (i) => (this.enhSel = idx[i] ?? null));
     const big = this.add.image(440, 56, 'px').setScale(4);
@@ -1502,7 +1624,7 @@ export class UIScene extends Phaser.Scene {
     const bigFrame = this.add.rectangle(400, 16, 80, 72).setOrigin(0).setStrokeStyle(2, 0x566c86).setVisible(false);
     const BAND_TINTS: Record<string, number> = { iron: 0xc8d8ea, gold: 0xffe2a0, legend: 0xe6c8ff };
     const title = txt(this, 440, 92, '', 17).setOrigin(0.5, 0);
-    const info = txt(this, 284, 120, '', 12, COLORS.text, { wordWrap: { width: 320 }, lineSpacing: 3 });
+    const info = txt(this, 284, 120, '', 13, COLORS.text, { wordWrap: { width: 320 }, lineSpacing: 4 });
     const result = txt(this, 440, 356, '', 16, COLORS.gold).setOrigin(0.5);
     // หน้าตา 4 แบบ (ปกติ / เหล็ก / ทอง / ตำนาน)
     const looks = [1, 4, 7, 10].map((lv, i) => {
@@ -1525,7 +1647,7 @@ export class UIScene extends Phaser.Scene {
       }
     }, true, 15);
     w.add([big, bigArt, bigFrame, title, info, result, ...go.objects]);
-    w.add(txt(this, 0, 372, 'อัพเกรดสำเร็จ 100% · ค่าสถานะ +15%/เลเวล (Lv10 = ×2.35) · ความทนทาน +10%/เลเวล · อัพแล้วซ่อมเต็ม\nLv2–3 อัพได้ทุกที่ · Lv4+ ต้องมีทั่งตีเหล็กบนเกาะ · Lv4–6/7–9/10 ต้องมีแปลนอัพเกรดของหมวดนั้น (กล่องทอง/เพชร)', 11, COLORS.dim, { lineSpacing: 3, wordWrap: { width: 600 } }));
+    w.add(txt(this, 0, 372, '• สำเร็จ 100% · ค่าสถานะ +15%/เลเวล · ความทนทาน +10%/เลเวล · อัพแล้วซ่อมเต็ม\n• Lv2–3 อัพได้ทุกที่ · Lv4+ ต้องมีทั่ง · Lv4/7/10 ต้องมีแปลนอัพเกรด (กล่องทอง/เพชร)', 12, COLORS.dim, { lineSpacing: 4, wordWrap: { width: 600 } }));
     const wallet = this.headerWallet(w);
     return this.register(w, () => {
       wallet();
@@ -1547,7 +1669,7 @@ export class UIScene extends Phaser.Scene {
       if (!s || !chk) {
         big.setVisible(false);
         title.setText('');
-        info.setText('เลือกของทางซ้าย\n\nกดอัพเกรดแล้วเลเวล +1 ทันที — ค่าสถานะเพิ่ม และหน้าตาเปลี่ยนเมื่อถึง Lv.4 (เสริมเหล็ก) · Lv.7 (ทองคำ) · Lv.10 (ตำนาน)');
+        info.setText('เลือกของทางซ้าย\n\n• กดอัพเกรด = เลเวล +1 ทันที\n• โฉมใหม่ที่ Lv.4 เหล็ก · Lv.7 ทอง · Lv.10 ตำนาน');
         go.setLabel('⬆ อัพเกรด');
         return;
       }
@@ -1594,7 +1716,7 @@ export class UIScene extends Phaser.Scene {
 
   // ---------- ตู้เสื้อผ้า ----------
   private makeWardrobe() {
-    const w = new UIWindow(this, 200, 50, 560, 460, 'ตู้เสื้อผ้า (O)');
+    const w = new UIWindow(this, 200, 50, 560, 460, '👕 ตู้เสื้อผ้า');
     const preview = this.add.sprite(80, 120, this.gs.player.texKey, 0).setScale(6);
     w.add(preview);
     const lists: { slot: 'outfit' | 'helmet' | 'cape'; label: string; defs: { id: string; name: string }[]; y: number }[] = [
@@ -1616,7 +1738,7 @@ export class UIScene extends Phaser.Scene {
         w.add(t);
       });
     }
-    w.add(txt(this, 0, 380, 'ชุดสีเทา = ยังไม่มี (สุ่มได้จากกล่องกลุ่ม "ชุดแฟชั่น") · ชุดแฟชั่นไม่มีผลต่อค่าพลัง', 11, COLORS.dim));
+    w.add(txt(this, 0, 380, 'สีเทา = ยังไม่มี (สุ่มจากกล่อง) · ชุดไม่มีผลต่อพลัง', 13, COLORS.dim));
     return this.register(w, () => {
       const p = this.gs.player;
       preview.setTexture(p.texKey, 0);
@@ -1652,7 +1774,7 @@ export class UIScene extends Phaser.Scene {
   private mapLabels: Phaser.GameObjects.Text[] = [];
 
   private makeMap() {
-    const w = new UIWindow(this, 40, 20, 880, 500, 'แผนที่โลก (M)');
+    const w = new UIWindow(this, 40, 20, 880, 500, '🗺 แผนที่โลก');
     const viewW = 600;
     const viewH = 430;
     const maskG = this.make.graphics({}, false).fillRect(0, 0, viewW, viewH);
@@ -1702,10 +1824,10 @@ export class UIScene extends Phaser.Scene {
       this.mapPick = best;
     });
     w.add(drag);
-    const side = txt(this, viewW + 16, 0, '', 11, COLORS.text, { wordWrap: { width: 228 }, lineSpacing: 2 });
+    const side = txt(this, viewW + 16, 0, '', 13, COLORS.text, { wordWrap: { width: 228 }, lineSpacing: 4 });
     const zin = button(this, viewW + 60, 398, 80, 30, 'ซูม +', () => (this.mapScale = Math.min(6, this.mapScale * 1.4)), true, 13);
     const zout = button(this, viewW + 160, 398, 80, 30, 'ซูม −', () => (this.mapScale = Math.max(0.5, this.mapScale / 1.4)), true, 13);
-    const center = button(this, viewW + 110, 434, 200, 30, 'กลับมาที่ตัวเรา', () => holder.setPosition(0, 0), true, 13);
+    const center = button(this, viewW + 110, 434, 200, 30, 'กลับหาตัวเรา', () => holder.setPosition(0, 0), true, 13);
     w.add([side, ...zin.objects, ...zout.objects, ...center.objects]);
     w.onClose = () => holder.setPosition(0, 0);
     let built = -1;
@@ -1811,13 +1933,14 @@ export class UIScene extends Phaser.Scene {
         const b = BIOMES[pick.biome];
         info.push(`▶ ${pick.name}`, `${b.name} · แร่เด่น: ${SPECIALTY_NAMES[pick.specialty]}`, `ระยะทาง ~${dist} ช่อง (ต้องใช้เรือ)`, '');
       }
-      const spLine = sp.open ? [`✨ ${SPECIAL_NAME}: เปิดอยู่ เหลือ ${fmtLeft(sp.msLeft)}`, 'ตามเส้นประสีทองไปได้เลย (ใต้สุดของแผนที่)'] : [`🔒 ${SPECIAL_NAME}: เปิดอีก ${fmtLeft(sp.msLeft)}`, `(เปิดทุก 4 ชม. ครั้งละ 1 ชม. รอบหน้า ${nextOpenText()})`];
+      const spLine = sp.open ? [`✨ ${SPECIAL_NAME}: เปิดอยู่ เหลือ ${fmtLeft(sp.msLeft)}`, 'ตามเส้นประสีทองไปได้เลย (ใต้สุดของแผนที่)'] : [`🔒 ${SPECIAL_NAME}: เปิดอีก ${fmtLeft(sp.msLeft)}`, `(เปิดวันละ 2 รอบ รอบละ 60 นาที · รอบหน้า ${nextOpenText()})`];
       side.setText([
         ...info, ...spLine, '',
-        `แผนที่โลก · ผู้รอดชีวิต ${players} คน`,
-        '★ เกาะคุณ · ⚖ เกาะกลาง · ● แดง = คุณ · ■ เหลือง = กล่องร่ม',
-        'เงาเทา = ยังไม่เคยไป · ข้ามทะเลต้องใช้เรือ',
-        'แตะเกาะ = ดูข้อมูล · ลาก = เลื่อน · ล้อเมาส์ = ซูม',
+        `ผู้รอดชีวิต ${players} คน`,
+        '★ เกาะคุณ · ⚖ เกาะกลาง',
+        '● แดง = คุณ · ■ เหลือง = กล่องร่ม',
+        'เทา = ยังไม่เคยไป · ข้ามทะเลใช้เรือ',
+        'แตะเกาะ = ดู · ลาก = เลื่อน · ล้อ = ซูม',
       ].join('\n'));
     });
   }
@@ -1830,8 +1953,8 @@ export class UIScene extends Phaser.Scene {
   }
 
   private makeAuto() {
-    const w = new UIWindow(this, W / 2 - 250, 26, 500, 488, 'งานอัตโนมัติ (T)');
-    w.add(txt(this, 0, 0, 'สั่งงานให้ตัวละครทำเอง — ใช้ได้เฉพาะบนเกาะของคุณ · ครบจำนวนแล้วหยุดเอง', 11, COLORS.dim));
+    const w = new UIWindow(this, W / 2 - 250, 26, 500, 488, '🤖 งานอัตโนมัติ');
+    w.add(txt(this, 0, 0, 'ตัวละครทำเอง · เฉพาะบนเกาะคุณ · ครบแล้วหยุดเอง', 13, COLORS.dim));
     // จำนวน
     const AMOUNTS = [10, 20, 50, 100, 200];
     w.add(txt(this, 0, 22, 'จำนวน:', 13, COLORS.gold));
@@ -1863,26 +1986,26 @@ export class UIScene extends Phaser.Scene {
       w.close();
     }, true, 13);
     const stop = button(this, 234, qy + 56, 220, 32, '⏹ หยุดงาน', () => this.gs.auto.stop(), true, 14);
-    const status = txt(this, 0, qy + 80, '', 12, COLORS.text, { wordWrap: { width: 468 } });
+    const status = txt(this, 0, qy + 80, '', 13, COLORS.text, { wordWrap: { width: 468 }, lineSpacing: 4 });
     w.add([...quest.objects, ...stop.objects, status]);
     return this.register(w, () => {
       const au = this.gs.auto;
       amtBtns.forEach(({ n, b }) => b.hover.setVisible(n === this.autoAmount));
       const qt = au.questTask();
-      quest.setLabel(qt ? `📜 ทำภารกิจปัจจุบันแทน — ${qt.label}${qt.goal ? ` ×${qt.goal}` : ''}` : '📜 ภารกิจปัจจุบัน: ต้องทำเอง');
+      quest.setLabel(qt ? `📜 ทำภารกิจ: ${qt.label}${qt.goal ? ` ×${qt.goal}` : ''}` : '📜 ภารกิจนี้ต้องทำเอง');
       const here = this.gs.world.islandAt(Math.floor(this.gs.player.x / 16), Math.floor(this.gs.player.y / 16));
       const onHome = (here === this.gs.world.home || here >= 1000) && !this.gs.boatRiding;
       status.setText([
         au.active ? `กำลังทำ: ${au.status}` : 'ยังไม่ได้สั่งงาน — เลือกงานด้านบน',
-        onHome ? '✔ อยู่บนเกาะของคุณ — ใช้งานอัตโนมัติได้' : '✘ อยู่นอกเกาะของคุณ — งานจะพักไว้จนกว่าจะกลับเกาะ',
-        'งานเก็บของ/เกี่ยวผัก: เจอมอนเข้าใกล้จะสู้ป้องกันตัวก่อน · HP ต่ำใช้ยาเอง',
+        onHome ? '✔ อยู่บนเกาะคุณ ใช้งานได้' : '✘ อยู่นอกเกาะ — งานพักจนกว่าจะกลับ',
+        '• เจอมอนจะสู้ป้องกันตัวก่อน · HP ต่ำใช้ยาเอง',
       ].join('\n')).setColor(onHome ? COLORS.text : COLORS.bad);
     });
   }
 
   // ---------- เมนูหยุด / ตั้งค่า ----------
   private makePause() {
-    const w = new UIWindow(this, W / 2 - 230, 44, 460, 458, 'เมนู · ⏸ เกมหยุดชั่วคราว');
+    const w = new UIWindow(this, W / 2 - 230, 26, 460, 492, '⏸ เมนู');
     const resume = button(this, 214, 20, 260, 38, 'เล่นต่อ', () => w.close(), true, 15);
     const sound = button(this, 214, 66, 260, 38, '', () => this.toggleSound(), true, 15);
     const vol = txt(this, 214, 112, '', 14).setOrigin(0.5);
@@ -1899,8 +2022,8 @@ export class UIScene extends Phaser.Scene {
       setControlMode(CONTROL_MODES[(i + 1) % CONTROL_MODES.length].id);
       this.toast(`การควบคุม: ${controlLabel()}`, COLORS.gold);
     }, true, 13);
-    const intro = button(this, 120, 284, 220, 32, 'ดูเนื้อเรื่องเปิดอีกครั้ง', () => this.showIntro(0), true, 12);
-    const quit = button(this, 340, 284, 190, 32, 'บันทึกและออก', () => this.gs.saveAndQuit(), true, 13);
+    const intro = button(this, 120, 284, 220, 32, '📖 ดูเนื้อเรื่อง', () => this.showIntro(0), true, 13);
+    const quit = button(this, 340, 284, 190, 32, '💾 บันทึก & ออก', () => this.gs.saveAndQuit(), true, 13);
     // คุณภาพภาพ (วนค่า) + เต็มจอ
     const qual = button(this, 120, 324, 220, 32, '', () => {
       const i = QUALITY_PREFS.findIndex((q) => q.id === qualityPref());
@@ -1908,14 +2031,17 @@ export class UIScene extends Phaser.Scene {
       this.toast(`คุณภาพภาพ: ${QUALITY_PREFS.find((q) => q.id === qualityPref())!.label} (${qualityName()})`, COLORS.gold);
     }, true, 13);
     const full = button(this, 340, 324, 190, 32, '', () => this.scale.toggleFullscreen(), true, 13);
-    w.add([...qual.objects, ...full.objects]);
-    const help = txt(this, 0, 350, 'WASD เดิน · Shift วิ่ง · Space หลบ · คลิก ตี/ยิง/วาง · E ใช้/คุย/ขึ้นเรือ\nF กิน/สวม/เปิดกล่อง · Q สกิล · B สร้าง · X รื้อ · Tab กระเป๋า · J คู่มือ\nM แผนที่ · O ตู้เสื้อผ้า · V มุม 2.5D · ล้อเมาส์/+/− ซูม · 0/N เปิด-ปิดเสียง', 11, COLORS.dim, { lineSpacing: 3 });
+    // คู่มือ/ตู้เสื้อผ้า (จอเล็กไม่มีบนแถบเครื่องมือ)
+    const bookB = button(this, 120, 364, 220, 32, '📖 คู่มือไอเทม', () => (w.close(), this.infoWin.open()), true, 13);
+    const shirtB = button(this, 340, 364, 190, 32, '👕 ตู้เสื้อผ้า', () => (w.close(), this.wardrobeWin.open()), true, 13);
+    w.add([...qual.objects, ...full.objects, ...bookB.objects, ...shirtB.objects]);
+    const help = txt(this, 0, 392, 'WASD เดิน · Shift วิ่ง · Space หลบ · คลิก ตี/วาง · E ใช้ · F กิน/สวม\nQ สกิล · B แปลน · X รื้อ · Tab กระเป๋า · J คู่มือ · M แผนที่ · N เสียง', 12, COLORS.dim, { lineSpacing: 4 });
     w.add([...resume.objects, ...sound.objects, vol, ...vm.objects, ...vp.objects, tilt, ...tm.objects, ...tp.objects, zoom, ...zm.objects, ...zp.objects, ...intro.objects, ...quit.objects, ...ctrl.objects, help]);
     return this.register(w, () => {
-      ctrl.setLabel(`การควบคุม: ${controlLabel()}  (กดเพื่อเปลี่ยน)`);
+      ctrl.setLabel(`🎮 ควบคุม: ${controlLabel()}`);
       sound.setLabel(Sfx.settings.muted ? '🔇 เสียง: ปิด' : '🔊 เสียง: เปิด');
       vol.setText(`ระดับเสียง ${Math.round(Sfx.settings.master * 100)}%`);
-      tilt.setText(`มุมกล้อง 2.5D: ${this.gs.tilt > 0 ? Math.round(this.gs.tilt * 100) + '%' : 'ปิด (บนลงล่าง)'}`);
+      tilt.setText(`มุมกล้อง 2.5D: ${this.gs.tilt > 0 ? Math.round(this.gs.tilt * 100) + '%' : 'ปิด'}`);
       zoom.setText(`ซูม ${this.gs.zoom.toFixed(1)}×`);
       qual.setLabel(`🖥 คุณภาพ: ${QUALITY_PREFS.find((q) => q.id === qualityPref())!.label}${qualityPref() === 'auto' ? ` (${qualityName()})` : ''}`);
       full.setLabel(this.scale.isFullscreen ? '⛶ ออกจากเต็มจอ' : '⛶ เต็มจอ');
@@ -1966,13 +2092,13 @@ export class UIScene extends Phaser.Scene {
           // มีภาพวาดของชิ้นนี้ → ใช้แทนไอคอนพิกเซลขยาย
           withItemArt(this, l.item, (k) => {
             if (!icon.scene) return;
-            const art = placeArtCover(this.add.image(0, 0, k), x - 46, 158, 92, 74);
+            const art = placeArtCover(this.add.image(0, 0, k), x - 46, 158, 92, 74, 0.25);
             const frame = this.add.rectangle(x - 46, 158, 92, 74).setOrigin(0).setStrokeStyle(2, RARITY[l.rarity].hex, 0.9);
             c.add([art, frame]);
             icon.setVisible(false);
           });
-          const name = txt(this, x, 236, ITEMS[l.item].name, 13, RARITY[l.rarity].color, { wordWrap: { width: 100 }, align: 'center' }).setOrigin(0.5, 0);
-          const q = txt(this, x, 272, `×${l.qty}  ${RARITY[l.rarity].name}`, 11, RARITY[l.rarity].color).setOrigin(0.5, 0);
+          const name = txt(this, x, 236, ITEMS[l.item].name, 14, RARITY[l.rarity].color, { wordWrap: { width: 100 }, align: 'center', maxLines: 2 }).setOrigin(0.5, 0);
+          const q = txt(this, x, 274, `×${l.qty} · ${RARITY[l.rarity].name}`, 13, RARITY[l.rarity].color).setOrigin(0.5, 0);
           for (const o of [card, icon, name, q]) {
             o.setAlpha(0);
             this.tweens.add({ targets: o, alpha: 1, delay: i * 180, duration: 250 });
@@ -1986,13 +2112,16 @@ export class UIScene extends Phaser.Scene {
 
   private showDeath(cause: string, lost: number, items: number, lv0 = 1, lv1 = 1) {
     this.openModal((c, close) => {
-      c.add(panel(this, W / 2 - 230, 110, 460, 290));
-      c.add(heading(this, W / 2, 130, 'คุณหมดสติ…', 34).setOrigin(0.5, 0));
-      c.add(txt(this, W / 2, 182, `💀 เลเวลลดลง  Lv.${lv0} → Lv.${lv1}${lv1 <= 1 ? '  ⚠ ตายอีกครั้ง = ตายถาวร!' : ''}`, lv1 <= 1 ? 16 : 18, COLORS.bad).setOrigin(0.5, 0));
-      void lv0;
-      c.add(txt(this, W / 2, 222, `สาเหตุ: ${cause}\nเสียเหรียญ ${lost} · ของในกระเป๋า ${items} ช่องตกเป็นถุงที่จุดล้ม\nกลับไปเก็บคืนได้ (กด E ที่ถุง)`, 15, COLORS.text, { align: 'center', lineSpacing: 6 }).setOrigin(0.5, 0));
-      c.add(txt(this, W / 2, 312, '⚔ เตือน: ถ้าตายในเขตผจญภัย (เกาะอื่น) = ตายถาวรทันที', 12, '#ef7d57').setOrigin(0.5, 0));
-      c.add(button(this, W / 2, 352, 220, 44, 'ฟื้นที่บ้าน', close, true, 16).objects);
+      c.add(panel(this, W / 2 - 240, 100, 480, 320));
+      c.add(heading(this, W / 2, 118, '💫 คุณหมดสติ…', 34).setOrigin(0.5, 0));
+      c.add(txt(this, W / 2, 174, `💀 เลเวล  Lv.${lv0} → Lv.${lv1}${lv1 <= 1 ? '   ⚠ ตายอีก = ตายถาวร!' : ''}`, 18, COLORS.bad).setOrigin(0.5, 0));
+      c.add(txt(this, W / 2, 210, [
+        `สาเหตุ: ${cause}`,
+        `• เสียเหรียญ ${lost.toLocaleString()}`,
+        `• ของในกระเป๋า ${items} ช่อง ตกเป็นถุงที่จุดล้ม (กด E เก็บคืน)`,
+      ].join('\n'), 15, COLORS.text, { align: 'center', lineSpacing: 8 }).setOrigin(0.5, 0));
+      c.add(txt(this, W / 2, 312, '⚔ ตายในเขตผจญภัย (เกาะอื่น) = ตายถาวรทันที', 14, '#ef7d57').setOrigin(0.5, 0));
+      c.add(button(this, W / 2, 370, 220, 44, '🏠 ฟื้นที่บ้าน', close, true, 16).objects);
     });
   }
 
@@ -2003,11 +2132,11 @@ export class UIScene extends Phaser.Scene {
       const art = coverImage(this, 'death', W, H);
       if (art) c.add(art.setAlpha(0.85));
       c.add(this.add.rectangle(0, 0, W, H, 0x2a0710, 0.55).setOrigin(0));
-      c.add(panel(this, W / 2 - 270, 80, 540, 370));
-      c.add(heading(this, W / 2, 98, '💀 เลเวลหมด!', 38).setOrigin(0.5, 0).setColor('#ef7d57'));
-      c.add(txt(this, W / 2, 150, `สาเหตุ: ${r.cause}`, 14, COLORS.dim).setOrigin(0.5, 0));
-      c.add(txt(this, W / 2, 176, 'ซื้อชีวิตเพื่อเกิดใหม่ — ไม่งั้นจะ "ตายถาวร" ต้องเริ่มเล่นใหม่ทั้งหมด', 15, COLORS.text).setOrigin(0.5, 0));
-      c.add(txt(this, W / 2, 202, `ซื้อไปแล้ว ${r.times} ครั้ง · ครั้งหน้าราคาจะแพงขึ้น · มีเงิน ${r.haveCoins.toLocaleString()} เหรียญ · ${r.haveGems} เพชร`, 12, COLORS.dim).setOrigin(0.5, 0));
+      c.add(panel(this, W / 2 - 270, 70, 540, 390));
+      c.add(heading(this, W / 2, 88, '💀 เลเวลหมด!', 38).setOrigin(0.5, 0).setColor('#ef7d57'));
+      c.add(txt(this, W / 2, 142, `สาเหตุ: ${r.cause}`, 14, COLORS.dim).setOrigin(0.5, 0));
+      c.add(txt(this, W / 2, 168, 'ซื้อชีวิตเพื่อเกิดใหม่ — ไม่งั้น "ตายถาวร" เริ่มใหม่ทั้งหมด', 16, COLORS.text).setOrigin(0.5, 0));
+      c.add(txt(this, W / 2, 198, `ซื้อแล้ว ${r.times} ครั้ง (ครั้งหน้าแพงขึ้น) · มี 💰 ${r.haveCoins.toLocaleString()} · 💎 ${r.haveGems}`, 14, COLORS.dim).setOrigin(0.5, 0));
       const pay = (kind: 'coins' | 'gems') => {
         if (!this.gs.buyRevive(kind)) return;
         close();
@@ -2017,8 +2146,8 @@ export class UIScene extends Phaser.Scene {
       const bg = button(this, W / 2 + 128, 268, 236, 64, '', () => r.canGems && pay('gems'), r.canGems, 15);
       bg.setLabel(`💎 ${r.gems} เพชร${r.canGems ? '' : '\n(ไม่พอ)'}`);
       c.add([...bc.objects, ...bg.objects]);
-      c.add(txt(this, W / 2, 312, 'เกิดใหม่ที่บ้าน Lv.1 · ของในกระเป๋าตกเป็นถุงตามปกติ · อุปกรณ์ที่สวมยังอยู่', 12, COLORS.dim).setOrigin(0.5, 0));
-      c.add(button(this, W / 2, 384, 260, 40, 'ยอมแพ้ (ตายถาวร)', () => {
+      c.add(txt(this, W / 2, 316, 'เกิดใหม่ที่บ้าน Lv.1 · ของในกระเป๋าตกเป็นถุง · อุปกรณ์ที่สวมยังอยู่', 14, COLORS.dim).setOrigin(0.5, 0));
+      c.add(button(this, W / 2, 396, 260, 40, 'ยอมแพ้ (ตายถาวร)', () => {
         close();
         this.gs.giveUp();
       }, true, 14).objects);
@@ -2030,20 +2159,20 @@ export class UIScene extends Phaser.Scene {
     this.openModal((c, close) => {
       const art = coverImage(this, 'death', W, H);
       if (art) c.add(art.setAlpha(0.5));
-      c.add(panel(this, W / 2 - 280, 96, 560, 330));
-      c.add(heading(this, W / 2, 112, '⚔ เขตผจญภัย', 36).setOrigin(0.5, 0).setColor('#ef7d57'));
-      if (name) c.add(txt(this, W / 2, 158, name, 14, COLORS.dim).setOrigin(0.5, 0));
-      c.add(txt(this, W / 2, 186, [
+      c.add(panel(this, W / 2 - 280, 90, 560, 350));
+      c.add(heading(this, W / 2, 106, '⚔ เขตผจญภัย', 36).setOrigin(0.5, 0).setColor('#ef7d57'));
+      if (name) c.add(txt(this, W / 2, 154, name, 14, COLORS.dim).setOrigin(0.5, 0));
+      c.add(txt(this, W / 2 - 240, 182, [
         '⚔ ผู้เล่นอื่นโจมตีคุณได้ (PvP)',
-        '💀 ตายที่นี่ = เริ่มใหม่ทั้งหมด (ไม่มีซื้อชีวิต · ไม่สนเลเวล)',
-        '🎁 ของดรอปดีกว่ามาก — กล่องทอง/เพชรและแปลนหายากหาได้ที่นี่',
-        '🏠 เกาะของคุณปลอดภัยกว่า แต่ได้แค่กล่องไม้ (บอสดันเจี้ยน = กล่องเหล็ก)',
-      ].join('\n'), 15, COLORS.text, { align: 'center', lineSpacing: 8 }).setOrigin(0.5, 0));
-      c.add(button(this, W / 2 - 120, 376, 220, 46, 'เข้าใจแล้ว ไปต่อ', () => {
+        '💀 ตายที่นี่ = เริ่มใหม่ทั้งหมด (ซื้อชีวิตไม่ได้)',
+        '🎁 ของดรอปดีกว่ามาก: กล่องทอง/เพชร แปลนหายาก',
+        '🏠 เกาะของคุณปลอดภัยกว่า แต่ได้แค่กล่องไม้',
+      ].join('\n'), 16, COLORS.text, { lineSpacing: 10 }).setOrigin(0, 0));
+      c.add(button(this, W / 2 - 110, 392, 200, 46, '✔ ไปต่อ', () => {
         MetaSave.markAdventureSeen();
         close();
-      }, true, 15).objects);
-      c.add(button(this, W / 2 + 120, 376, 200, 46, 'ถอยกลับ', () => {
+      }, true, 16).objects);
+      c.add(button(this, W / 2 + 110, 392, 200, 46, '↩ ถอยกลับ', () => {
         close();
         this.gs.retreatFromAdventure();
       }, true, 15).objects);
@@ -2063,21 +2192,21 @@ export class UIScene extends Phaser.Scene {
       const art = coverImage(this, 'death', W, H);
       if (art) c.add(art.setAlpha(0.85).setTint(0xb0a0c0));
       c.add(this.add.rectangle(0, 0, W, H, 0x2a0710, 0.6).setOrigin(0));
-      c.add(panel(this, W / 2 - 260, 90, 520, 340));
-      c.add(heading(this, W / 2, 110, '💀 ตายถาวร', 42).setOrigin(0.5, 0).setColor('#ef7d57'));
-      const why = r.adventure ? '⚔ ตายในเขตผจญภัย = ตายถาวรทันที (ไม่มีซื้อชีวิต)'
-        : r.broke ? `เลเวลหมดและเงินไม่พอซื้อชีวิต (ต้องใช้ ${r.cost.coins.toLocaleString()} เหรียญ หรือ ${r.cost.gems} เพชร)` : 'ยอมแพ้ — ตายถาวร เกาะของคุณหายไปจากแผนที่';
-      c.add(txt(this, W / 2, 170, why, r.broke || r.adventure ? 14 : 18, COLORS.bad).setOrigin(0.5, 0));
-      c.add(txt(this, W / 2, 204, 'เกาะ อุปกรณ์ และของทั้งหมดหายไป\nต้องเริ่มเล่นใหม่ — สุ่มลงเกาะใหม่บนแผนที่โลก', 14, COLORS.text, { align: 'center', lineSpacing: 6 }).setOrigin(0.5, 0));
-      c.add(txt(this, W / 2, 262, `สาเหตุ: ${r.cause}\nรอดมาได้ ${r.days} วัน · ฆ่ามอนสเตอร์ ${r.kills} ตัว · พลังสูงสุด ${r.power.toLocaleString()}`, 14, COLORS.gold, { align: 'center', lineSpacing: 6 }).setOrigin(0.5, 0));
+      c.add(panel(this, W / 2 - 260, 80, 520, 360));
+      c.add(heading(this, W / 2, 98, '💀 ตายถาวร', 42).setOrigin(0.5, 0).setColor('#ef7d57'));
+      const why = r.adventure ? '⚔ ตายในเขตผจญภัย = ตายถาวรทันที'
+        : r.broke ? `เงินไม่พอซื้อชีวิต (ต้องใช้ 💰 ${r.cost.coins.toLocaleString()} หรือ 💎 ${r.cost.gems})` : 'ยอมแพ้ — เกาะของคุณหายไปจากแผนที่';
+      c.add(txt(this, W / 2, 160, why, 16, COLORS.bad, { wordWrap: { width: 480 }, align: 'center' }).setOrigin(0.5, 0));
+      c.add(txt(this, W / 2, 200, 'เกาะ อุปกรณ์ และของทั้งหมดหายไป\nเริ่มใหม่ — สุ่มลงเกาะใหม่บนแผนที่โลก', 15, COLORS.text, { align: 'center', lineSpacing: 8 }).setOrigin(0.5, 0));
+      c.add(txt(this, W / 2, 266, `สาเหตุ: ${r.cause}\nรอด ${r.days} วัน · ฆ่ามอน ${r.kills} ตัว · พลังสูงสุด ${r.power.toLocaleString()}`, 15, COLORS.gold, { align: 'center', lineSpacing: 8 }).setOrigin(0.5, 0));
       const go = (scene: string, data?: object) => {
         this.modal?.destroy();
         this.modal = null;
         this.scene.stop('GameScene');
         this.scene.start(scene, data);
       };
-      c.add(button(this, W / 2 - 115, 372, 210, 44, 'เริ่มใหม่ (เลือกตัวละคร)', () => go('CharacterSelectScene', { play: true }), true, 14).objects);
-      c.add(button(this, W / 2 + 115, 372, 190, 44, 'กลับหน้าแรก', () => go('TitleScene'), true, 14).objects);
+      c.add(button(this, W / 2 - 110, 384, 200, 44, '🔄 เริ่มใหม่', () => go('CharacterSelectScene', { play: true }), true, 15).objects);
+      c.add(button(this, W / 2 + 110, 384, 200, 44, '🏠 หน้าแรก', () => go('TitleScene'), true, 15).objects);
     });
   }
 
@@ -2094,8 +2223,8 @@ export class UIScene extends Phaser.Scene {
       shade.fillGradientStyle(0x0b0d1f, 0x0b0d1f, 0x0b0d1f, 0x0b0d1f, 0, 0, 0.92, 0.92).fillRect(0, H - 250, W, 150);
       shade.fillStyle(0x0b0d1f, 0.92).fillRect(0, H - 100, W, 100);
       c.add(shade);
-      c.add(heading(this, W / 2, H - 200, s.title, 36).setOrigin(0.5));
-      c.add(txt(this, W / 2, H - 132, s.text, 16, COLORS.text, { align: 'center', lineSpacing: 8 }).setOrigin(0.5).setStroke('#0b0d1f', 4));
+      c.add(heading(this, W / 2, H - 204, s.title, 36).setOrigin(0.5));
+      c.add(txt(this, W / 2, H - 134, s.text, 17, COLORS.text, { align: 'center', lineSpacing: 10, wordWrap: { width: 720 } }).setOrigin(0.5).setStroke('#0b0d1f', 4));
       // จุดบอกหน้า
       INTRO_SLIDES.forEach((_, k) => c.add(this.add.circle(W / 2 - (INTRO_SLIDES.length - 1) * 9 + k * 18, H - 82, k === i ? 5 : 3.5, k === i ? 0xffcd75 : 0x94b0c2, k === i ? 1 : 0.6)));
       const last = i === INTRO_SLIDES.length - 1;
@@ -2120,19 +2249,19 @@ export class UIScene extends Phaser.Scene {
   private guideCard?: Phaser.GameObjects.Container;
   private showGuide(title: string, lines: string[]) {
     this.guideCard?.destroy();
-    const w = 300;
-    const h = 30 + lines.length * 19 + 10;
-    const x = 12;
+    const w = 320;
+    const h = 34 + lines.length * 22 + 10;
+    const x = M;
     // ใต้แผงสถานะ (จอเล็กแผงสถานะขยาย → เลื่อนลงตาม)
     const y = Math.max(150, this.statusBottom + 6);
-    const c = this.add.container(x, y).setDepth(40);
+    const c = this.add.container(x, y).setDepth(4); // ใต้หน้าต่าง (depth 10) ไม่ทับกระเป๋า/สมุดแปลน
     const bg = this.add.graphics();
-    bg.fillStyle(0x0b0d1f, 0.86).fillRoundedRect(0, 0, w, h, 8);
-    bg.lineStyle(2, 0xffcd75, 0.9).strokeRoundedRect(0, 0, w, h, 8);
+    bg.fillStyle(0x0b0d1f, 0.88).fillRoundedRect(0, 0, w, h, 10);
+    bg.lineStyle(2, 0xffcd75, 0.9).strokeRoundedRect(0, 0, w, h, 10);
     c.add(bg);
-    c.add(txt(this, 10, 7, title, 14, COLORS.gold));
-    lines.forEach((l, i) => c.add(txt(this, 10, 30 + i * 19, l, 12, COLORS.text)));
-    const x1 = txt(this, w - 10, 6, '✕', 14, COLORS.dim).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    c.add(txt(this, 12, 8, title, 15, COLORS.gold));
+    lines.forEach((l, i) => c.add(fitText(txt(this, 12, 34 + i * 22, l, 14, COLORS.text), w - 24)));
+    const x1 = txt(this, w - 10, 6, '✕', 15, COLORS.dim).setOrigin(1, 0).setPadding(6, 2, 6, 2).setInteractive({ useHandCursor: true });
     const close = () => {
       if (this.guideCard !== c) return;
       this.guideCard = undefined;
@@ -2156,14 +2285,19 @@ export class UIScene extends Phaser.Scene {
     this.openModal((c, close) => {
       const art = coverImage(this, 'intro_5', W, H);
       if (art) c.add(art.setAlpha(0.35));
-      c.add(heading(this, W / 2, 16, '🗺 เลือกแปลนเริ่มต้น', 30).setOrigin(0.5, 0));
-      c.add(txt(this, W / 2, 56, 'เลือกฐานที่มั่น 1 แบบ และอาวุธ 1 แบบ — ⚔ ได้อาวุธถือในมือทันที · 🏠 สร้างฐานที่มั่นฟรี 1 หลัง (ไม่ใช้วัตถุดิบ)\nกด B → สิ่งก่อสร้าง → เลือกบ้านของคุณ → สร้างเลย แล้ววางบนพื้น', 13, COLORS.text, { align: 'center', lineSpacing: 4 }).setOrigin(0.5, 0).setStroke('#0b0d1f', 3));
+      c.add(heading(this, W / 2, 10, '🗺 เลือกแปลนเริ่มต้น', 30).setOrigin(0.5, 0));
+      c.add(txt(this, W / 2, 50, 'ฐาน 1 + อาวุธ 1 — 🏠 สร้างฐานฟรี 1 หลัง · ⚔ อาวุธถือในมือทันที', 14, COLORS.text, { align: 'center' }).setOrigin(0.5, 0).setStroke('#0b0d1f', 3));
       const pick: { base: string | null; weapon: string | null } = { base: null, weapon: null };
       const cw = 210;
-      const ch = 150;
+      const ch = 162;
       const gap = 14;
       const x0 = (W - (cw * 4 + gap * 3)) / 2;
-      const frames: Record<'base' | 'weapon', { id: string; f: Phaser.GameObjects.Rectangle }[]> = { base: [], weapon: [] };
+      const frames: Record<'base' | 'weapon', { id: string; f: Phaser.GameObjects.Graphics }[]> = { base: [], weapon: [] };
+      const drawFrame = (f: Phaser.GameObjects.Graphics, x: number, y: number, on: boolean) => {
+        f.clear();
+        f.fillStyle(0x1a1c2c, 0.94).fillRoundedRect(x, y, cw, ch, 10);
+        f.lineStyle(on ? 4 : 2, on ? 0xffcd75 : 0x566c86, 1).strokeRoundedRect(x, y, cw, ch, 10);
+      };
       const row = (kind: 'base' | 'weapon', y: number, label: string, list: StarterPick[]) => {
         c.add(txt(this, x0, y, label, 16, COLORS.gold).setStroke('#0b0d1f', 4));
         list.forEach((o, i) => {
@@ -2171,44 +2305,47 @@ export class UIScene extends Phaser.Scene {
           const cy = y + 24;
           const b = kind === 'base' ? BUILD[o.id] : undefined;
           const it = kind === 'weapon' ? ITEMS[o.id] : undefined;
-          c.add(this.add.rectangle(x, cy, cw, ch, 0x1a1c2c, 0.92).setOrigin(0));
+          const f = this.add.graphics();
+          drawFrame(f, x, cy, false);
+          c.add(f);
           const icon = this.add.image(x + cw / 2, cy + 40, b ? b.texture : it!.icon);
           icon.setScale(Math.min(64 / icon.width, 64 / icon.height, 4));
           c.add(icon);
           withItemArt(this, o.id, (k) => {
             if (!icon.scene) return;
-            c.addAt(placeArtCover(this.add.image(0, 0, k), x + 3, cy + 3, cw - 6, 80), c.getIndex(icon));
+            c.addAt(placeArtCover(this.add.image(0, 0, k), x + 4, cy + 4, cw - 8, 80, 0.2), c.getIndex(icon));
             icon.setVisible(false);
           });
-          c.add(txt(this, x + 8, cy + 86, b?.name ?? it!.name, 15, COLORS.gold));
-          c.add(txt(this, x + 8, cy + 106, o.pitch, 11, COLORS.text, { wordWrap: { width: cw - 14 } }));
-          c.add(txt(this, x + 8, cy + ch - 16, kind === 'base' ? '🎁 สร้างฟรี 1 หลัง (ไม่ใช้วัตถุดิบ)' : '⚔ ได้ถือในมือทันที', 11, COLORS.good, { wordWrap: { width: cw - 14 } }).setOrigin(0, 0.5));
-          const f = this.add.rectangle(x, cy, cw, ch).setOrigin(0).setStrokeStyle(2, 0x566c86, 1);
+          c.add(txt(this, x + 10, cy + 88, b?.name ?? it!.name, 16, COLORS.gold));
+          c.add(txt(this, x + 10, cy + 112, o.pitch, 13, COLORS.text, { wordWrap: { width: cw - 20 }, maxLines: 2, lineSpacing: 2 }));
+          c.add(txt(this, x + 10, cy + ch - 14, kind === 'base' ? '🎁 สร้างฟรี 1 หลัง' : '⚔ ถือในมือทันที', 12, COLORS.good).setOrigin(0, 0.5));
           frames[kind].push({ id: o.id, f });
           const hit = this.add.zone(x, cy, cw, ch).setOrigin(0).setInteractive({ useHandCursor: true });
           hit.on('pointerdown', () => {
             Sfx.play('click');
             pick[kind] = o.id;
-            for (const e of frames[kind]) e.f.setStrokeStyle(e.id === o.id ? 4 : 2, e.id === o.id ? 0xffcd75 : 0x566c86, 1);
+            for (const [j, e] of frames[kind].entries()) drawFrame(e.f, x0 + j * (cw + gap), cy, e.id === o.id);
             refresh();
           });
-          c.add([f, hit]);
+          c.add(hit);
         });
       };
-      row('base', 100, '🏠 ฐานที่มั่น', STARTER_BASES);
-      row('weapon', 290, '⚔ อาวุธ', STARTER_WEAPONS);
-      const ok = button(this, W / 2 + 90, H - 34, 240, 42, '', () => {
+      row('base', 80, '🏠 ฐานที่มั่น', STARTER_BASES);
+      row('weapon', 282, '⚔ อาวุธ', STARTER_WEAPONS);
+      const ok = button(this, W / 2 + 90, H - 32, 240, 42, '', () => {
         if (!pick.base || !pick.weapon) return;
         const bName = BUILD[pick.base].name;
         const wName = ITEMS[pick.weapon].name;
         this.gs.pickStarter(pick.base, pick.weapon);
         close();
-        this.banner(`ได้ ${wName} + สร้าง${bName}ฟรี!`, `อาวุธอยู่ในมือแล้ว · กด B → สิ่งก่อสร้าง → ${bName} → สร้างเลย (ฟรี 1 หลัง)`, '#a7f070');
+        this.banner(`ได้ ${wName} + ${bName}ฟรี!`, `กด B → สิ่งก่อสร้าง → ${bName} → สร้างเลย (ฟรี 1 หลัง)`, '#a7f070');
       }, true, 15);
-      const rnd = button(this, W / 2 - 140, H - 34, 160, 42, '🎲 สุ่มให้', () => {
+      const rnd = button(this, W / 2 - 140, H - 32, 160, 42, '🎲 สุ่มให้', () => {
         pick.base = Phaser.Utils.Array.GetRandom(STARTER_BASES).id;
         pick.weapon = Phaser.Utils.Array.GetRandom(STARTER_WEAPONS).id;
-        for (const k of ['base', 'weapon'] as const) for (const e of frames[k]) e.f.setStrokeStyle(e.id === pick[k] ? 4 : 2, e.id === pick[k] ? 0xffcd75 : 0x566c86, 1);
+        (['base', 'weapon'] as const).forEach((k, r) => {
+          for (const [j, e] of frames[k].entries()) drawFrame(e.f, x0 + j * (cw + gap), (r ? 282 : 80) + 24, e.id === pick[k]);
+        });
         refresh();
       }, true, 14);
       const refresh = () => ok.setLabel(pick.base && pick.weapon ? '✔ เริ่มเลย!' : `เลือก${!pick.base ? 'ฐาน' : ''}${!pick.base && !pick.weapon ? ' + ' : ''}${!pick.weapon ? 'อาวุธ' : ''}`);
@@ -2344,12 +2481,13 @@ export class UIScene extends Phaser.Scene {
       return t;
     };
     // ปุ่มโจมตีใหญ่ที่มุม · ใช้/หลบ ติดนิ้วโป้ง · สกิล/กิน/ออโต้ วงนอก (ไม่สูงเกินแผงเป้าหมายทางขวาบน)
+    // วงปุ่มไม่สูงเกิน ~H-205 (ใต้แผงเป้าหมายขวาบนที่ขยายบนจอเล็ก)
     btn(-84, -92, 48, 'โจมตี/วาง', 0xb13e53, () => ctl.touch.pressed.add('attack'), 'attack');
     btn(-188, -54, 32, 'ใช้', 0x38b764, () => ctl.touch.pressed.add('interact'));
-    btn(-180, -148, 29, 'หลบ', 0x3b5dc9, () => ctl.touch.pressed.add('dodge'));
-    const sk = btn(-76, -182, 27, 'สกิล', 0xffcd75, () => ctl.touch.pressed.add('skill'));
-    btn(-272, -118, 27, 'กิน/เปิด', 0xc28a50, () => ctl.touch.pressed.add('use'));
-    btn(-282, -188, 24, 'ออโต้', 0x38b764, () => this.autoWin.toggle());
+    btn(-180, -146, 29, 'หลบ', 0x3b5dc9, () => ctl.touch.pressed.add('dodge'));
+    const sk = btn(-76, -172, 27, 'สกิล', 0xffcd75, () => ctl.touch.pressed.add('skill'));
+    btn(-272, -116, 27, 'กิน/เปิด', 0xc28a50, () => ctl.touch.pressed.add('use'));
+    btn(-282, -176, 24, 'ออโต้', 0x38b764, () => this.autoWin.toggle());
     // คูลดาวน์สกิลบนปุ่ม
     this.skillCdT = txt(this, sk.x, sk.y + 17, '', 13, '#ffffff').setOrigin(0.5);
     btns.add(this.skillCdT);

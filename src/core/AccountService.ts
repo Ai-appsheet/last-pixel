@@ -1,10 +1,12 @@
 import { api, apiEnabled, setApiToken, setAuthLostHandler, type ApiFail } from './backend/Api';
+import { GOOGLE_CLIENT_ID } from './GoogleSignIn';
 
 /**
  * บัญชีผู้เล่น — สมัคร (อีเมล + รหัสผ่าน + ชื่อในเกม) / ยืนยันอีเมล / เข้าสู่ระบบ / ลืมรหัสผ่าน / ผูกอีเมล / ออกจากระบบ
  *
  * มี NEXT_PUBLIC_API_URL → RemoteAccountService (บัญชีอยู่บน Google Sheet ผ่าน Apps Script, ได้ token 30 วัน)
  *   สมัครแล้วต้องใส่รหัส 6 หลักที่ส่งทางอีเมลก่อนถึงจะได้ token · บัญชีเก่า (มีแต่ชื่อผู้ใช้) เข้าได้แล้วให้ผูกอีเมล
+ *   เข้าด้วย Google ได้ (ตั้ง NEXT_PUBLIC_GOOGLE_CLIENT_ID) — บัญชีใหม่จาก Google ได้ชื่อชั่วคราว → needName ให้ยืนยันชื่อครั้งเดียว
  * ไม่มี → LocalAccountService จำลองในเครื่อง (localStorage) — ใช้อีเมลเป็น key เข้าระบบ ไม่มีรหัสยืนยัน
  *   รหัสผ่านเก็บเป็นแฮช PBKDF2 + salt ไม่เก็บตัวจริง
  * ทุกบัญชีมีเซฟของตัวเอง (เกาะ ของ เลเวล) — ดู scopedKey()
@@ -17,6 +19,8 @@ export interface Account {
   email?: string;
   /** บัญชีเก่าที่ยังไม่ได้ผูกอีเมล (ออนไลน์เท่านั้น) */
   needEmail?: boolean;
+  /** บัญชีที่เพิ่งสร้างด้วย Google ยังไม่ได้ยืนยันชื่อในเกม (ออนไลน์เท่านั้น) */
+  needName?: boolean;
 }
 
 /** ผลของขั้นตอนบัญชี: เข้าระบบแล้ว / ต้องใส่รหัสจากอีเมล / ผิดพลาด (wait = ต้องรอกี่วินาทีก่อนขอรหัสใหม่) */
@@ -31,6 +35,12 @@ export type SendResult = { kind: 'sent'; message: string; wait: number } | { kin
 export interface AccountService {
   /** ต้องยืนยันด้วยรหัสทางอีเมล (ออนไลน์) — ออฟไลน์ข้ามขั้นนี้ */
   readonly emailCodes: boolean;
+  /** มีปุ่ม "Sign in with Google" (ออนไลน์ + ตั้ง client id แล้ว) */
+  readonly googleSignIn: boolean;
+  /** credential = ID token จาก Google Identity Services */
+  google(credential: string, remember: boolean): Promise<AuthResult>;
+  /** ยืนยัน/เปลี่ยนชื่อในเกมของบัญชี Google ใหม่ (ได้ครั้งเดียว) */
+  setName(name: string): Promise<AuthResult>;
   register(email: string, password: string, name: string, remember?: boolean): Promise<AuthResult>;
   verify(email: string, code: string, remember: boolean): Promise<AuthResult>;
   resend(email: string): Promise<SendResult>;
@@ -97,12 +107,13 @@ export function validateCode(c: string): string | null {
 }
 
 const fail = (error: string, code?: string, wait?: number): { kind: 'error'; error: string; code?: string; wait?: number } => ({ kind: 'error', error, code, wait });
-const pub = (a: Account): Account => ({ id: a.id, username: a.username, createdAt: a.createdAt, email: a.email, needEmail: a.needEmail });
+const pub = (a: Account): Account => ({ id: a.id, username: a.username, createdAt: a.createdAt, email: a.email, needEmail: a.needEmail, needName: a.needName });
 
 // ---------------------------------------------------------------- ออฟไลน์ (ในเครื่อง)
 
 class LocalAccountService implements AccountService {
   readonly emailCodes = false;
+  readonly googleSignIn = false;
   private session: string | null = null;
 
   constructor() {
@@ -217,6 +228,14 @@ class LocalAccountService implements AccountService {
     return this.noMail();
   }
 
+  async google(): Promise<AuthResult> {
+    return fail('เข้าสู่ระบบด้วย Google ต้องออนไลน์', 'offline');
+  }
+
+  async setName(): Promise<AuthResult> {
+    return fail('เข้าสู่ระบบด้วย Google ต้องออนไลน์', 'offline');
+  }
+
   logout() {
     this.setSession(null, false);
   }
@@ -242,6 +261,7 @@ type FailExtra = ApiFail & { wait?: number; email?: string; sent?: boolean };
 
 class RemoteAccountService implements AccountService {
   readonly emailCodes = true;
+  readonly googleSignIn = GOOGLE_CLIENT_ID.length > 0;
   private session: RemoteSession | null = null;
   private remember = true;
 
@@ -275,7 +295,7 @@ class RemoteAccountService implements AccountService {
 
   /** ได้ token จากเซิร์ฟเวอร์ → เก็บ session */
   private signedIn(r: { ok: true } & SessionReply, remember: boolean): AuthResult {
-    const acc: Account = { id: r.account.id, username: r.account.username, createdAt: r.account.createdAt, email: r.account.email || undefined, needEmail: !!r.account.needEmail };
+    const acc: Account = { id: r.account.id, username: r.account.username, createdAt: r.account.createdAt, email: r.account.email || undefined, needEmail: !!r.account.needEmail, needName: !!r.account.needName };
     this.setSession({ ...acc, token: r.token, expiresAt: r.expiresAt }, remember);
     return { kind: 'ok', account: acc };
   }
@@ -356,6 +376,25 @@ class RemoteAccountService implements AccountService {
     if (!r.ok) return this.err(r);
     const s = this.session;
     if (s) this.setSession({ ...s, email: r.account.email, needEmail: false }, this.remember);
+    const cur = this.current();
+    return cur ? { kind: 'ok', account: cur } : fail('เซสชันหมดอายุ — เข้าสู่ระบบใหม่', 'auth');
+  }
+
+  async google(credential: string, remember: boolean): Promise<AuthResult> {
+    if (!credential) return fail('เข้าสู่ระบบด้วย Google ไม่สำเร็จ — ลองใหม่อีกครั้ง', 'invalid');
+    const r = await api<SessionReply>('auth.google', { credential }, { timeout: 30000 });
+    return r.ok ? this.signedIn(r, remember) : this.err(r);
+  }
+
+  async setName(name: string): Promise<AuthResult> {
+    const n = name.trim();
+    const err = validateUsername(n);
+    if (err) return fail(err, 'invalid');
+    const r = await api<{ account: Account }>('account.setName', { name: n }, { timeout: 30000 });
+    // ตั้งไปแล้ว (จากเครื่องอื่น) → ไม่ต้องถามอีก
+    if (!r.ok && r.code !== 'name_set') return this.err(r);
+    const s = this.session;
+    if (s) this.setSession({ ...s, username: r.ok ? r.account.username : s.username, needName: false }, this.remember);
     const cur = this.current();
     return cur ? { kind: 'ok', account: cur } : fail('เซสชันหมดอายุ — เข้าสู่ระบบใหม่', 'auth');
   }

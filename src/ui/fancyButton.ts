@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { Sfx } from '../core/AudioManager';
 import { PALETTE } from '../data/palette';
-import { txt } from './widgets';
+import { pixelTxt, txt } from './widgets';
 
 /**
  * ปุ่มสวยๆ แบบ pixel art วาดด้วยโค้ด: ไล่สีแนวตั้ง + ขอบบนสว่าง + ขอบล่างเข้ม + เงาตก + มุมมนแบบพิกเซล
@@ -231,7 +231,9 @@ export function iconTexture(scene: Phaser.Scene, name: FancyIcon): string {
 
 /** ย่อข้อความให้พอดีความกว้าง */
 export function fitText(t: Phaser.GameObjects.Text, maxW: number) {
-  t.setScale(t.width > maxW ? maxW / t.width : 1);
+  // ตัวหนังสือพิกเซล (pixelTxt) มีสเกลพื้นฐาน ×2–3
+  const base = (t.getData('pxScale') as number | undefined) ?? 1;
+  t.setScale(t.width * base > maxW ? maxW / t.width : base);
   return t;
 }
 
@@ -244,6 +246,8 @@ export interface FancyButtonOptions {
   onClick: () => void;
   /** ข้อความบรรทัดรอง (ตัวเล็กใต้ชื่อปุ่ม) */
   sub?: string;
+  /** ชื่อปุ่มแบบพิกเซลอาร์ต (หน้าแรก) */
+  pixel?: boolean;
   icon?: FancyIcon;
   theme?: FancyTheme;
   /** ขนาดตัวอักษร (px) */
@@ -295,8 +299,10 @@ export class FancyButton extends Phaser.GameObjects.Container {
 
     // ไอคอน + ข้อความ (จัดกึ่งกลางเป็นกลุ่ม)
     const size = opts.size ?? 18;
-    this.label = txt(scene, 0, 0, opts.label, size, this.enabled ? '#ffffff' : '#a9bccb').setOrigin(0, 0.5);
-    this.label.setShadow(0, 2, '#0b0d1f', 0, true, true);
+    this.label = opts.pixel
+      ? pixelTxt(scene, 0, 0, opts.label, size + 2, this.enabled ? '#ffffff' : '#a9bccb').setOrigin(0, 0.5)
+      : txt(scene, 0, 0, opts.label, size, this.enabled ? '#ffffff' : '#a9bccb').setOrigin(0, 0.5);
+    if (!opts.pixel) this.label.setShadow(0, 2, '#0b0d1f', 0, true, true);
     if (opts.sub) {
       this.sub = txt(scene, 0, 0, opts.sub, Math.max(10, Math.round(size * 0.6)), this.enabled ? th.sub : '#a9bccb').setOrigin(0, 0.5);
       this.sub.setStroke('#0b0d1f', 3);

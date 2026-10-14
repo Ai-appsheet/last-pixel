@@ -189,9 +189,9 @@ export class CatalogScene extends Phaser.Scene {
   }
 
   private drawFrame() {
-    heading(this, 18, 6, '📖 คลังข้อมูล & ร้านค้า', 26).setDepth(10);
-    this.subtitle = txt(this, 20, 40, '', 12, COLORS.dim).setDepth(10);
-    const back = fancyButton(this, W - 76, 30, { w: 128, h: 40, label: '← กลับ', theme: 'crimson', size: 16, onClick: () => this.goBack() });
+    heading(this, 18, 4, '📖 คลัง & ร้านค้า', 26).setDepth(10);
+    this.subtitle = txt(this, 20, 42, '', 13, COLORS.dim).setDepth(10);
+    const back = fancyButton(this, W - 76, 30, { w: 128, h: 40, label: '← กลับ', icon: 'close', theme: 'crimson', size: 16, onClick: () => this.goBack() });
     back.setDepth(20);
     this.drawWallet();
     const p1 = fancyPanel(this, LIST.x, LIST.y, LIST.w, LIST.h, 'gold', 0.86).setDepth(2);
@@ -292,8 +292,8 @@ export class CatalogScene extends Phaser.Scene {
     this.shown = this.entries.filter((e) => f === 'all' || e.group === f || e.info);
     const def = TABS[this.tab];
     const n = this.shown.filter((e) => !e.info).length;
-    this.subtitle.setText(`${def.title} · ${n} รายการ — แตะการ์ดเพื่อดูรายละเอียด วิธีสร้าง และวัสดุที่ต้องใช้`);
-    fitText(this.subtitle, W - 200);
+    this.subtitle.setText(`${def.title} · ${n} รายการ — แตะการ์ดเพื่อดูรายละเอียด`);
+    fitText(this.subtitle, W - 360);
     const chipsH = this.drawChips();
     this.buildGrid(chipsH);
     this.select(0, true);
@@ -404,7 +404,7 @@ export class CatalogScene extends Phaser.Scene {
     const icon = this.makeSprite(e.sprite, w / 2, 58, false).setOrigin(0.5, 1);
     const base = pixelFit(icon.width, icon.height, w - 22, 50, 4);
     icon.setScale(base);
-    const name = txt(this, w / 2, 62, e.name, 12, e.info ? '#73eff7' : RARITY[e.rarity].color, { align: 'center', wordWrap: { callback: thaiWrap(w - 8) }, maxLines: 2 }).setOrigin(0.5, 0);
+    const name = txt(this, w / 2, 62, e.name, 13, e.info ? '#73eff7' : RARITY[e.rarity].color, { align: 'center', wordWrap: { callback: thaiWrap(w - 8) }, maxLines: 2 }).setOrigin(0.5, 0);
     parts.push(icon, name);
     if (e.badge || e.info) {
       const b = txt(this, 5, 3, e.info ? 'ℹ คู่มือ' : e.badge!, 10, e.info ? '#73eff7' : e.featured ? COLORS.gold : COLORS.dim).setOrigin(0, 0);
@@ -430,9 +430,10 @@ export class CatalogScene extends Phaser.Scene {
         icon.setVisible(false);
       }
     } else {
+      // ภาพ 1:1 ในกรอบกว้าง → โฟกัสส่วนบน ไม่ตัดหัวตัวละคร/มอน
       withItemThumb(this, e.art ?? e.id, (k) => {
         if (!box.active) return;
-        const art = placeArtCover(this.add.image(0, 0, k), 4, 4, w - 8, 54);
+        const art = placeArtCover(this.add.image(0, 0, k), 4, 4, w - 8, 54, 0.2);
         box.addAt(art, 1);
         icon.setVisible(false);
       });
@@ -618,7 +619,7 @@ export class CatalogScene extends Phaser.Scene {
     for (const q of e.quick) {
       const room = Math.floor((bottom - y) / 17);
       if (room < 1) break;
-      const line = this.head(txt(this, x, y, q, 12, '#d6e4ee', { wordWrap: { callback: thaiWrap(HEAD_W) }, maxLines: Math.min(3, room), lineSpacing: 1 }));
+      const line = this.head(txt(this, x, y, q, 13, '#d6e4ee', { wordWrap: { callback: thaiWrap(HEAD_W) }, maxLines: Math.min(3, room), lineSpacing: 2 }));
       y += line.height + 4;
     }
     // ค่าของไอเทม (ถ้าเป็นไอเทมจริง)
@@ -640,8 +641,8 @@ export class CatalogScene extends Phaser.Scene {
     };
     switch (b.k) {
       case 'text': {
-        const t = add(txt(this, 0, y, b.text, b.size ?? 13, b.color ?? COLORS.text, { wordWrap: { callback: thaiWrap(cw) }, lineSpacing: 2 }));
-        return y + t.height + 4;
+        const t = add(txt(this, 0, y, b.text, Math.max(14, b.size ?? 14), b.color ?? COLORS.text, { wordWrap: { callback: thaiWrap(cw) }, lineSpacing: 5 }));
+        return y + t.height + 6;
       }
       case 'section': {
         y += 6;
@@ -656,8 +657,8 @@ export class CatalogScene extends Phaser.Scene {
         let x = 0;
         const h = 24;
         for (const [label, value] of b.items) {
-          const lt = txt(this, 0, 0, label, 11, COLORS.dim).setOrigin(0, 0.5);
-          const vt = txt(this, 0, 0, value, 13, '#ffffff').setOrigin(0, 0.5);
+          const lt = txt(this, 0, 0, label, 12, COLORS.dim).setOrigin(0, 0.5);
+          const vt = txt(this, 0, 0, value, 14, COLORS.cream).setOrigin(0, 0.5);
           const w = Math.ceil(lt.width + vt.width) + 18;
           if (x + w > cw && x > 0) {
             x = 0;
@@ -679,7 +680,7 @@ export class CatalogScene extends Phaser.Scene {
         const t = add(txt(this, iconW + 8, y + 5, `🛠 ${b.station}`, 14, COLORS.gold, { wordWrap: { callback: thaiWrap(cw - iconW - 14) }, maxLines: 2 }));
         let hh = t.height + 8;
         if (b.note) {
-          const n = add(txt(this, iconW + 8, y + 5 + t.height, b.note, 11, COLORS.dim, { wordWrap: { callback: thaiWrap(cw - iconW - 14) }, maxLines: 3 }));
+          const n = add(txt(this, iconW + 8, y + 5 + t.height, b.note, 12, COLORS.dim, { wordWrap: { callback: thaiWrap(cw - iconW - 14) }, maxLines: 3, lineSpacing: 2 }));
           hh += n.height;
         }
         hh = Math.max(hh, b.icon ? 42 : 0);
@@ -700,8 +701,8 @@ export class CatalogScene extends Phaser.Scene {
         q.setDepth(1);
         const nm = add(txt(this, 46, y + 1, `${d?.name ?? b.item} ×${b.qty}`, 14, RARITY[d?.rarity ?? 'common'].color));
         fitText(nm, cw - 46);
-        const src = add(txt(this, 46, y + 20, `หาได้จาก: ${b.src}`, 11, COLORS.dim, { wordWrap: { callback: thaiWrap(cw - 46) }, maxLines: 2 }));
-        return y + Math.max(40, 20 + src.height + 2) + 4;
+        const src = add(txt(this, 46, y + 21, `หาได้จาก: ${b.src}`, 12, COLORS.dim, { wordWrap: { callback: thaiWrap(cw - 46) }, maxLines: 2, lineSpacing: 2 }));
+        return y + Math.max(42, 21 + src.height + 2) + 4;
       }
       case 'row': {
         const ix = b.icon ? 34 : 0;
@@ -718,10 +719,10 @@ export class CatalogScene extends Phaser.Scene {
             rw += ri.displayWidth + 4;
           }
         }
-        const t = add(txt(this, ix, y + 2, b.text, 13, b.color ?? COLORS.text, { wordWrap: { callback: thaiWrap(cw - ix - rw) }, maxLines: 2 }));
+        const t = add(txt(this, ix, y + 2, b.text, 14, b.color ?? COLORS.text, { wordWrap: { callback: thaiWrap(cw - ix - rw) }, maxLines: 2, lineSpacing: 2 }));
         let hh = t.height + 2;
         if (b.sub) {
-          const s = add(txt(this, ix, y + 2 + t.height, b.sub, 11, COLORS.dim, { wordWrap: { callback: thaiWrap(cw - ix) }, maxLines: 3 }));
+          const s = add(txt(this, ix, y + 2 + t.height, b.sub, 12, COLORS.dim, { wordWrap: { callback: thaiWrap(cw - ix) }, maxLines: 3, lineSpacing: 2 }));
           hh += s.height;
         }
         return y + Math.max(hh, b.icon ? 26 : 0) + 5;

@@ -56,6 +56,11 @@ export function anchorGroup(scene: Phaser.Scene, ax: number, ay: number, k: numb
   return scene.add.container(ax * (1 - k), ay * (1 - k)).setScale(k).setDepth(depth);
 }
 
+/** ผู้ใช้ตั้งระบบให้ลดการเคลื่อนไหว (prefers-reduced-motion) → งดแฟลช/กระพริบ */
+export function reducedMotion() {
+  return typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 /** แปลงพิกัดในกลุ่ม → พิกัดจอ */
 export function groupPoint(c: Phaser.GameObjects.Container, x: number, y: number) {
   return { x: c.x + x * c.scaleX, y: c.y + y * c.scaleY };

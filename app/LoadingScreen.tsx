@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import './loading.css';
+import PixelText from './PixelText';
 
 /**
  * หน้าโหลด (HTML ล้วน — โผล่ทันทีตั้งแต่เปิดเว็บ ก่อนโค้ดเกมโหลดเสร็จ)
@@ -48,6 +49,8 @@ export default function LoadingScreen() {
   const [step, setStep] = useState(0);
   const [prog, setProg] = useState(0.04);
   const [gone, setGone] = useState(false);
+  // ขนาดพิกเซลของตัวหนังสือ: จอเล็ก/เตี้ย (มือถือแนวนอน) = 2 เท่า, จอคอม = 3 เท่า
+  const [px3, setPx3] = useState(3);
   const [hidden, setHidden] = useState(false);
 
   useEffect(() => {
@@ -63,6 +66,9 @@ export default function LoadingScreen() {
       setTimeout(() => setGone(true), 250);
       setTimeout(() => setHidden(true), 1100);
     };
+    const fit = () => setPx3(window.innerWidth < 900 || window.innerHeight < 500 ? 2 : 3);
+    fit();
+    window.addEventListener('resize', fit);
     window.addEventListener('si:progress', onProg);
     window.addEventListener('si:ready', onReady);
     const s = setInterval(() => setSlide((i) => (i + 1) % SLIDES.length), 3200);
@@ -76,6 +82,7 @@ export default function LoadingScreen() {
       clearInterval(st);
       window.removeEventListener('si:progress', onProg);
       window.removeEventListener('si:ready', onReady);
+      window.removeEventListener('resize', fit);
     };
   }, []);
 
@@ -118,12 +125,20 @@ export default function LoadingScreen() {
             ))}
           </span>
         </h1>
-        <p className="si-sub">เอาชีวิตรอดบนหมู่เกาะ · สร้างฐาน · ล่องเรือ · ล้มบอส</p>
+        <p className="si-sub">
+          <PixelText text="เอาชีวิตรอดบนหมู่เกาะ" px={16} scale={px3} color="#fff6d8" color2="#ffcd75" />
+          <br />
+          <PixelText text="สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า" px={12} scale={2} color="#e8ecff" color2="#8ee6ff" shadow="#1a2a5a" />
+        </p>
       </div>
 
       <div className="si-caption" key={cur.img}>
-        <span className="si-tag">{cur.tag}</span>
-        <span className="si-title">{cur.title}</span>
+        <span className="si-tag">
+          <PixelText text={cur.tag} px={12} scale={2} color="#ffffff" outline="#5a1f2b" shadow="#5a1f2b" />
+        </span>
+        <span className="si-title">
+          <PixelText text={cur.title} px={14} scale={2} color="#ffffff" color2="#ffe08a" />
+        </span>
         <span className="si-dots">
           {SLIDES.map((s, i) => (
             <em key={s.img} className={i === slide ? 'on' : ''} />
@@ -143,7 +158,9 @@ export default function LoadingScreen() {
           </div>
           <span className="si-pct">{pct}%</span>
         </div>
-        <div className="si-step">{pct >= 100 ? 'พร้อมแล้ว! ออกเดินทางกัน ⛵' : STEPS[step]}</div>
+        <div className="si-step">
+          <PixelText text={pct >= 100 ? 'พร้อมแล้ว! ออกเดินทางกัน' : STEPS[step]} px={12} scale={2} color="#ffe9a8" />
+        </div>
         <div className="si-tip" key={tip}>
           💡 <b>เคล็ดลับ</b> {TIPS[tip]}
         </div>

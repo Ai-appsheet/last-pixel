@@ -209,6 +209,25 @@ RECIPES.push(
   R('cooked_meat', 'kitchen', [['raw_meat', 2]], ['cooked_meat', 2]),
 );
 
+// ---------- สมดุลร่างกาย + วัตถุดิบจากการเก็บทุกอย่าง (กิจกรรมตามเวลาจริง) ----------
+RECIPES.push(
+  R('clean_water', 'campfire', [['dirty_water', 1]]),
+  R('clean_water', 'campfire', [['ice_shard', 2]]),
+  R('baked_potato', 'campfire', [['wild_potato', 1]]),
+  R('flatbread', 'campfire', [['wild_grain', 3]]),
+  R('flower_tea', 'campfire', [['petals', 3], ['clean_water', 1]]),
+  R('herbal_medicine', 'none', [['herb', 3], ['fiber', 1]]),
+  R('bandage', 'none', [['cloth', 1], ['herb', 1]], ['bandage', 2]),
+  R('rope', 'none', [['cloth', 1]], ['rope', 2]),
+  R('iron_ingot', 'furnace', [['scrap_metal', 3], ['coal', 1]]),
+  R('glass', 'furnace', [['obsidian', 1]], ['glass', 3]),
+  R('arrow', 'workbench', [['wood', 1], ['obsidian', 1]], ['arrow', 10]),
+  R('torch', 'none', [['wood', 1], ['crystal_shard', 1]], ['torch', 2]),
+  R('shell_necklace', 'workbench', [['shell', 6], ['rope', 1]]),
+  R('fruit_juice', 'kitchen', [['mango', 1], ['dragonfruit', 1]], ['fruit_juice', 3]),
+  R('tom_yum', 'kitchen', [['fish', 1], ['seaweed', 2], ['herb', 1]]),
+);
+
 // สูตรทางเลือก (ไอเทมเดียวกัน สถานีเดียวกัน แต่ใช้วัตถุดิบต่างกัน) → id ไม่ซ้ำ: xxx@station#2
 {
   const seen = new Map<string, number>();

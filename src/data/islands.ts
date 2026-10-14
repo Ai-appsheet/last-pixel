@@ -27,8 +27,8 @@ export const BIOMES: Record<Biome, BiomeDef> = {
   desert: { id: 'desert', name: 'เกาะทะเลทราย', desc: 'ร้อนจัด — ทอง กำมะถัน กระบองเพชร', temp: [40, 14], danger: 1.2, color: '#ef7d57', wildlife: ['crab', 'scorpion', 'cobra', 'hermit_crab'], nightMobs: ['mummy', 'skeleton'] },
   jungle: { id: 'jungle', name: 'เกาะป่าดิบ', desc: 'พืชป่า เมล็ดหายาก และสไลม์', temp: [30, 22], danger: 1.1, color: '#257179', wildlife: ['boar', 'slime', 'monkey', 'parrot', 'cobra', 'firefly_swarm'], nightMobs: ['slime', 'bat'] },
   volcanic: { id: 'volcanic', name: 'เกาะภูเขาไฟ', desc: 'ถ่านหิน กำมะถัน คริสตัล — อิมป์และโกเลม', temp: [38, 28], danger: 1.5, color: '#b13e53', wildlife: ['imp'], nightMobs: ['imp', 'golem'] },
-  central: { id: 'central', name: 'เกาะกลาง (ตลาดแลกเปลี่ยน)', desc: 'เขตปลอดภัย — ห้ามต่อสู้ วางขาย/ซื้อของกับผู้เล่นอื่น', temp: [27, 20], danger: 0, color: '#ffcd75', wildlife: [], nightMobs: [] },
-  special: { id: 'special', name: 'เกาะมหาสมบัติ', desc: 'แร่หายาก หีบสมบัติ · มอนดรอปกล่อง ×2 · เปิด 1 ชม. ทุก 4 ชม.', temp: [25, 16], danger: 1.8, color: '#ffcd75', wildlife: ['golem', 'skeleton', 'mummy'], nightMobs: ['golem', 'shade', 'skeleton'] },
+  central: { id: 'central', name: 'เกาะกลาง (ตลาดแลกเปลี่ยน)', desc: 'เขตปลอดภัย — ห้ามต่อสู้ วางขาย/ซื้อของกับผู้เล่นอื่น · เปิดวันละ 2 รอบ รอบละ 60 นาที', temp: [27, 20], danger: 0, color: '#ffcd75', wildlife: [], nightMobs: [] },
+  special: { id: 'special', name: 'เกาะมหาสมบัติ', desc: 'แร่หายาก หีบสมบัติ · มอนดรอปกล่อง ×2 · เปิดวันละ 2 รอบ รอบละ 60 นาที (เวลาสุ่มทุกวัน)', temp: [25, 16], danger: 1.8, color: '#ffcd75', wildlife: ['golem', 'skeleton', 'mummy'], nightMobs: ['golem', 'shade', 'skeleton'] },
   dungeon: { id: 'dungeon', name: 'ดันเจี้ยน', desc: 'มืดมิด อันตราย — มอนสเตอร์ หีบสมบัติ บอส', temp: [16, 14], danger: 0, color: '#a77bdb', wildlife: [], nightMobs: [] },
   ruins: { id: 'ruins', name: 'เกาะซากโบราณ', desc: 'ซากอารยธรรม หีบสมบัติ และโครงกระดูก', temp: [24, 14], danger: 1.4, color: '#a77bdb', wildlife: ['skeleton', 'cobra'], nightMobs: ['skeleton', 'mummy'] },
   // ---------- ไบโอมชุดใหม่ ----------
@@ -48,31 +48,31 @@ export function nodeTable(biome: Biome, tile: string): [NodeType, number][] {
   if (tile === 'sand') return [['tree', 0.025], ['rock', 0.012], ['grass', 0.012]];
   switch (biome) {
     case 'snow':
-      return tile === 'stone' ? [['rock', 0.06], ['ore_iron', 0.05], ['ore_coal', 0.02], ['crystal', 0.004]] : [['tree', 0.12], ['rock', 0.025], ['ore_iron', 0.012], ['grass', 0.01]];
+      return tile === 'stone' ? [['rock', 0.06], ['ore_iron', 0.05], ['ore_coal', 0.02], ['crystal', 0.004], ['ice', 0.015]] : [['tree', 0.12], ['rock', 0.025], ['ore_iron', 0.012], ['grass', 0.01], ['ice', 0.012]];
     case 'desert':
       return tile === 'stone' ? [['rock', 0.05], ['ore_gold', 0.025], ['ore_sulfur', 0.03]] : [['cactus', 0.035], ['rock', 0.02], ['grass', 0.008]];
     case 'jungle':
-      return [['tree', 0.28], ['bush', 0.06], ['wild_crop', 0.025], ['grass', 0.06], ['rock', 0.01]];
+      return [['tree', 0.28], ['bush', 0.06], ['wild_crop', 0.025], ['grass', 0.06], ['rock', 0.01], ['vine', 0.03], ['herb', 0.008]];
     case 'volcanic':
       return [['rock', 0.05], ['ore_coal', 0.05], ['ore_sulfur', 0.04], ['crystal', 0.012], ['ore_gold', 0.01]];
     case 'ruins':
       return tile === 'brick' ? [['ruin_chest', 0.006], ['rock', 0.02]] : [['tree', 0.05], ['rock', 0.04], ['ore_iron', 0.015], ['bush', 0.02], ['grass', 0.05]];
     case 'forest':
-      return tile === 'forest' ? [['tree', 0.26], ['bush', 0.03], ['grass', 0.05], ['rock', 0.02]] : [['tree', 0.07], ['bush', 0.04], ['grass', 0.07], ['rock', 0.03], ['ore_coal', 0.006]];
+      return tile === 'forest' ? [['tree', 0.26], ['bush', 0.03], ['grass', 0.05], ['rock', 0.02], ['herb', 0.006]] : [['tree', 0.07], ['bush', 0.04], ['grass', 0.07], ['rock', 0.03], ['ore_coal', 0.006], ['flower', 0.01]];
     case 'swamp':
-      return tile === 'forest' ? [['tree', 0.2], ['bush', 0.03], ['grass', 0.06], ['wild_crop', 0.02]] : [['tree', 0.05], ['grass', 0.1], ['bush', 0.03], ['wild_crop', 0.025], ['shroom', 0.006], ['rock', 0.008]];
+      return tile === 'forest' ? [['tree', 0.2], ['bush', 0.03], ['grass', 0.06], ['wild_crop', 0.02]] : [['tree', 0.05], ['grass', 0.1], ['bush', 0.03], ['wild_crop', 0.025], ['shroom', 0.006], ['rock', 0.008], ['herb', 0.012]];
     case 'mushroom':
       return tile === 'stone' ? [['rock', 0.05], ['crystal', 0.012], ['ore_iron', 0.02]] : tile === 'forest' ? [['tree', 0.22], ['shroom', 0.05], ['grass', 0.03]] : [['tree', 0.07], ['shroom', 0.04], ['bush', 0.02], ['grass', 0.04], ['rock', 0.015]];
     case 'crystal':
       return tile === 'stone' ? [['crystal', 0.06], ['rock', 0.04], ['ore_iron', 0.02], ['ore_gold', 0.008]] : [['crystal', 0.025], ['rock', 0.03], ['tree', 0.015], ['grass', 0.02]];
     case 'bamboo':
-      return tile === 'forest' ? [['bamboo', 0.3], ['tree', 0.04], ['grass', 0.04]] : [['bamboo', 0.08], ['tree', 0.05], ['bush', 0.04], ['grass', 0.07], ['wild_crop', 0.012], ['rock', 0.015]];
+      return tile === 'forest' ? [['bamboo', 0.3], ['tree', 0.04], ['grass', 0.04]] : [['bamboo', 0.08], ['tree', 0.05], ['bush', 0.04], ['grass', 0.07], ['wild_crop', 0.012], ['rock', 0.015], ['flower', 0.02], ['herb', 0.008]];
     case 'savanna':
       return tile === 'stone' ? [['rock', 0.07], ['ore_gold', 0.012], ['ore_iron', 0.02]] : [['tree', 0.018], ['grass', 0.12], ['bush', 0.015], ['rock', 0.01], ['wild_crop', 0.008]];
     case 'glacier':
-      return tile === 'stone' ? [['rock', 0.05], ['ore_iron', 0.04], ['crystal', 0.02]] : [['tree', 0.03], ['rock', 0.02], ['crystal', 0.004]];
+      return tile === 'stone' ? [['rock', 0.05], ['ore_iron', 0.04], ['crystal', 0.02], ['ice', 0.03]] : [['tree', 0.03], ['rock', 0.02], ['crystal', 0.004], ['ice', 0.03]];
     case 'atoll':
-      return [['tree', 0.05], ['grass', 0.04], ['bush', 0.02], ['rock', 0.008]];
+      return [['tree', 0.05], ['grass', 0.04], ['bush', 0.02], ['rock', 0.008], ['clam', 0.012]];
     case 'haunted':
       return tile === 'brick' ? [['ruin_chest', 0.009], ['rock', 0.02]] : tile === 'forest' ? [['tree', 0.16], ['shroom', 0.01], ['grass', 0.03]] : [['tree', 0.05], ['rock', 0.03], ['grass', 0.04], ['ore_coal', 0.008]];
     case 'central':

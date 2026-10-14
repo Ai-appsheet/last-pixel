@@ -4,9 +4,14 @@ import type { Slot } from '../components/Inventory';
 import { Sfx } from '../core/AudioManager';
 import { BAND_INFO, bandOf, itemDurMult, levelOfSlot } from '../data/upgrade';
 import { variantKey } from '../gfx/UpgradeLook';
+import { textResolution } from './crispText';
 
-/** ฟอนต์เกม: Chakra Petch (รองรับไทย ทรงเหลี่ยมแบบเกม) + Press Start 2P สำหรับโลโก้/ตัวเลข */
-export const FONT = '"Chakra Petch", Kanit, Thonburi, Tahoma, sans-serif';
+/**
+ * ฟอนต์เกม (โหลดใน app/layout.tsx · BootScene รอโหลดเสร็จก่อนวาด)
+ * FONT = Mitr (ไทย+ละติน ทรงมน อ่านง่าย) ใช้กับข้อความ/ปุ่ม · HEAD_FONT = Mali 700 (ลายมือน่ารัก) ใช้กับหัวข้อ · PIXEL_FONT สำหรับโลโก้/ตัวเลขพิกเซล
+ */
+export const FONT = '"Mitr", "Itim", Kanit, Thonburi, Tahoma, sans-serif';
+export const HEAD_FONT = '"Mali", "Mitr", Kanit, Thonburi, Tahoma, sans-serif';
 export const PIXEL_FONT = '"Press Start 2P", monospace';
 
 export const COLORS = {
@@ -17,11 +22,39 @@ export const COLORS = {
   text: '#f4f4f4',
   dim: '#a9bccb',
   gold: '#ffcd75',
+  cream: '#fff2b0',
+  sea: '#73eff7',
+  /** ตัวหนังสือเข้มบนแถบหัวสีทอง */
+  ink: '#2a2340',
   good: '#a7f070',
   bad: '#ef7d57',
 };
 
 type Style = Phaser.Types.GameObjects.Text.TextStyle;
+
+/**
+ * ระยะบน/ล่างของบรรทัดสำหรับภาษาไทย — Phaser วัดจาก "|MÉqgy" ซึ่งเตี้ยกว่าสระ/วรรณยุกต์ซ้อน (เช่น ที่ ปู้ ญ ฎ)
+ * จึงวัดเองด้วยข้อความไทยที่สูง/ต่ำสุด แล้วส่งเป็น metrics ให้ Text (ไม่ตัดวรรณยุกต์ + บรรทัดสูงพอดีกับไทย)
+ */
+const metricCache = new Map<string, Phaser.Types.GameObjects.Text.TextMetrics>();
+let measureCtx: CanvasRenderingContext2D | null = null;
+if (typeof document !== 'undefined' && document.fonts) document.fonts.addEventListener('loadingdone', () => metricCache.clear());
+export function thaiMetrics(size: number, family = FONT, weight = '600'): Phaser.Types.GameObjects.Text.TextMetrics | undefined {
+  if (typeof document === 'undefined') return undefined;
+  const key = `${weight}|${size}|${family}`;
+  const hit = metricCache.get(key);
+  if (hit) return hit;
+  measureCtx ??= document.createElement('canvas').getContext('2d');
+  if (!measureCtx) return undefined;
+  measureCtx.font = `${weight} ${size}px ${family}`;
+  const m = measureCtx.measureText('ที่ปู้ญฎฐ์|MÉqgy');
+  if (!('actualBoundingBoxAscent' in m)) return undefined;
+  const ascent = Math.ceil(m.actualBoundingBoxAscent) + 1;
+  const descent = Math.ceil(m.actualBoundingBoxDescent) + 1;
+  const out = { ascent, descent, fontSize: ascent + descent };
+  metricCache.set(key, out);
+  return out;
+}
 
 /** จอเล็ก (มือถือ): ซีนที่ขยายตัวหนังสือที่เล็กกว่า 14px ให้อ่านออก — ตั้งจาก ui/layout.ts applyUiScale()
  *  (แยกต่อซีน: ตัวหนังสือในโลกเกม เช่น ป้ายชื่อคู่แข่ง ไม่โดนขยาย) */
@@ -35,32 +68,72 @@ export function boosted(scene: Phaser.Scene, size: number) {
   return size < 14 && boostScenes.has(scene) ? Math.round((size + (14 - size) * 0.4) * 2) / 2 : size;
 }
 
-/** ข้อความคมชัด มีเส้นขอบ + เงา แบบเกม */
+/** ข้อความคมชัด มีเส้นขอบ + เงา แบบเกม (บรรทัดสูงพอสำหรับสระ/วรรณยุกต์ไทย) */
 export function txt(scene: Phaser.Scene, x: number, y: number, text: string, size0 = 16, color = COLORS.text, extra: Style = {}) {
   const size = boosted(scene, size0);
+  const family = extra.fontFamily ?? FONT;
+  const weight = extra.fontStyle ?? '600';
   const t = scene.add.text(x, y, text, {
-    fontFamily: FONT,
+    fontFamily: family,
     fontSize: `${size}px`,
-    fontStyle: '700',
+    fontStyle: weight,
     color,
     stroke: '#0b0d1f',
-    strokeThickness: Math.max(3, Math.round(size / 5)),
-    resolution: 2,
+    strokeThickness: Math.max(2, Math.round(size / 6)),
+    resolution: textResolution(),
+    metrics: family === PIXEL_FONT ? undefined : thaiMetrics(size, family, weight),
     ...extra,
   });
-  t.setShadow(0, Math.max(2, Math.round(size / 10)), '#0b0d1f', 0, true, true);
+  t.setShadow(0, Math.max(1, Math.round(size / 12)), '#0b0d1f', 0, true, true);
   t.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
   return t;
 }
 
-/** หัวข้อไล่สีทอง → ส้ม */
+/**
+ * ตัวหนังสือแบบพิกเซลอาร์ต (เฉพาะข้อความโชว์บนหน้าแรก/หัวหน้าเลือกตัวละคร — ข้อความอธิบายใช้ txt() ที่คมชัด)
+ * วาดฟอนต์ไทยตัวหนาขนาดเล็ก (≈1/3) ความละเอียด 1 · ขอบแข็ง (crispText.hardEdges) · NEAREST แล้วขยาย ×2–3 → ตัวอักษรเป็นก้อนพิกเซล
+ * ขอบดำ 1px + เงาตก 1px (หน่วยพิกเซลเล็ก) · ขนาดบนจอ ≈ size
+ */
+export function pixelTxt(scene: Phaser.Scene, x: number, y: number, text: string, size = 24, color = COLORS.text, extra: Style = {}) {
+  // ตัวเล็กกว่า ~26px: ฟอนต์ไทยย่อเหลือ <13px แล้วขยาย จะเละอ่านไม่ออก → ใช้ตัวหนาคมชัดแบบเกม (ขอบหนา + เงา) แทน
+  if (size < 26) {
+    const c = txt(scene, x, y, text, size, color, { fontStyle: '700', ...extra });
+    c.setStroke('#1a1c2c', Math.max(3, Math.round(size / 5)));
+    c.setShadow(0, 2, '#1a1c2c', 0, true, true);
+    return c;
+  }
+  // ฟอนต์ไทยต้องมีอย่างน้อย ~10px ถึงจะอ่านออก → ขยาย ×2 (ตัวใหญ่มาก ×3)
+  const k = size >= 36 ? 3 : 2;
+  const fs = Math.max(9, Math.round(size / k));
+  const family = extra.fontFamily ?? FONT;
+  const t = scene.add.text(x, y, '', {
+    fontFamily: family, fontSize: `${fs}px`, fontStyle: '700', color, stroke: '#1a1c2c', strokeThickness: 2, resolution: 1,
+    metrics: thaiMetrics(fs, family, '700'), ...extra,
+  }) as Phaser.GameObjects.Text & { __pixel?: boolean };
+  t.__pixel = true;
+  t.setShadow(1, 1, '#1a1c2c', 0, true, true);
+  t.setText(text).setScale(k).setData('pxScale', k);
+  return t;
+}
+
+/** หัวข้อ: ฟอนต์ลายมือ Mali ไล่สีครีม → ทอง → ส้ม + เงาตกน่ารัก · pixel = แบบพิกเซลอาร์ต (pixelTxt) */
 export function heading(scene: Phaser.Scene, x: number, y: number, text: string, size = 32, pixel = false) {
-  const t = txt(scene, x, y, text, size, COLORS.gold, pixel ? { fontFamily: PIXEL_FONT, fontStyle: 'normal' } : {});
+  if (pixel) {
+    const p = pixelTxt(scene, x, y, text, size, COLORS.gold);
+    const g = p.context.createLinearGradient(0, 0, 0, p.height);
+    g.addColorStop(0, '#fff2b0');
+    g.addColorStop(0.5, '#ffcd75');
+    g.addColorStop(1, '#ef7d57');
+    return p.setFill(g);
+  }
+  const t = txt(scene, x, y, text, size, COLORS.gold, { fontFamily: HEAD_FONT, fontStyle: '700' });
   const grad = t.context.createLinearGradient(0, 0, 0, t.height);
   grad.addColorStop(0, '#fff2b0');
   grad.addColorStop(0.5, '#ffcd75');
   grad.addColorStop(1, '#ef7d57');
   t.setFill(grad);
+  t.setStroke('#3a2440', Math.max(3, Math.round(size / 6)));
+  t.setShadow(0, Math.max(2, Math.round(size / 9)), '#3a2440', 0, true, true);
   return t;
 }
 
@@ -77,7 +150,7 @@ export interface Button {
   setLabel(s: string): void;
 }
 
-/** ปุ่ม pixel: ไม้ปกติ / ส้มตอนชี้ / เทาตอนกดไม่ได้ */
+/** ปุ่มมน: ฟ้าทะเลปกติ / ทองตอนชี้ / เทาตอนกดไม่ได้ · กดแล้วเด้งนิดหน่อย */
 export function button(
   scene: Phaser.Scene, x: number, y: number, w: number, h: number,
   label: string, onClick: () => void, enabled = true, size = 18,
@@ -85,7 +158,11 @@ export function button(
   const bg = scene.add.nineslice(x, y, enabled ? 'ui_btn' : 'ui_btn_off', undefined, w, h, 8, 8, 8, 8);
   const hover = scene.add.nineslice(x, y, 'ui_btn_hover', undefined, w, h, 8, 8, 8, 8).setVisible(false);
   const t = txt(scene, x, y - 1, label, size, enabled ? COLORS.text : '#8a95a8').setOrigin(0.5);
+  // ข้อความยาวเกินปุ่ม → ย่อให้พอดี
+  const fit = () => t.setScale(t.width > w - 10 ? (w - 10) / t.width : 1);
+  fit();
   if (enabled) {
+    const all = [bg, hover, t];
     bg.setInteractive({ useHandCursor: true })
       .on('pointerover', () => {
         hover.setVisible(true);
@@ -99,10 +176,14 @@ export function button(
       .on('pointerdown', () => {
         Sfx.unlock();
         Sfx.play('click');
+        scene.tweens.killTweensOf(all);
+        all.forEach((o) => o.setScale(o === t ? t.scaleX * 0.94 : 0.94));
+        scene.tweens.add({ targets: [bg, hover], scale: 1, duration: 180, ease: 'Back.easeOut' });
+        scene.tweens.add({ targets: t, scale: t.scaleX / 0.94, duration: 180, ease: 'Back.easeOut' });
         onClick();
       });
   }
-  return { bg, hover, t, objects: [bg, hover, t], setLabel: (s) => t.setText(s) };
+  return { bg, hover, t, objects: [bg, hover, t], setLabel: (s) => (t.setText(s), fit()) };
 }
 
 /** แถบค่าสถานะแบบ pixel (กรอบ + สี + เงาสะท้อน) */

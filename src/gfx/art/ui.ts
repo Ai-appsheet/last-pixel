@@ -11,63 +11,119 @@ function addScaled(scene: Phaser.Scene, key: string, pc: PixelCanvas, scale = UI
   tex.refresh();
 }
 
-/** กรอบหน้าต่าง: ขอบไม้ + หมุดทอง + พื้นมืด */
-function panel(fill: string, fill2: string, wood: [string, string, string]): PixelCanvas {
-  const c = new PixelCanvas(16, 16);
-  for (let y = 0; y < 16; y++) {
-    for (let x = 0; x < 16; x++) {
-      const edge = Math.min(x, y, 15 - x, 15 - y);
-      let col: string;
-      if (edge === 0) col = 'O';
-      else if (edge === 1) col = x === 1 || y === 1 ? wood[0] : wood[2];
-      else if (edge === 2) col = wood[1];
-      else if (edge === 3) col = 'O';
-      else col = dither(x, y) > 0.3 ? fill2 : fill;
-      c.set(x, y, col);
-    }
-  }
-  for (const [x, y] of [[2, 2], [13, 2], [2, 13], [13, 13]]) c.set(x, y, 'Y');
-  return c;
-}
-
-function button(top: string, mid: string, bottom: string, border: string): PixelCanvas {
-  const c = new PixelCanvas(12, 12);
-  for (let y = 0; y < 12; y++) {
-    for (let x = 0; x < 12; x++) {
-      const edge = Math.min(x, y, 11 - x, 11 - y);
-      if (edge === 0) {
-        if ((x === 0 || x === 11) && (y === 0 || y === 11)) continue; // มุมมน
-        c.set(x, y, 'O');
-      } else if (edge === 1) c.set(x, y, y === 1 ? top : y === 10 ? bottom : border);
-      else c.set(x, y, y < 5 ? mid : y > 8 ? bottom : mid);
+/**
+ * วาดสี่เหลี่ยมมุมมน w×h รัศมี r — เรียก color(level, x, y) โดย level = ความลึกจากขอบ (0 = เส้นนอกสุด) · คืน null = โปร่ง
+ * ใช้ทำกรอบ/ปุ่ม/ช่องให้มุมมนนุ่มๆ แบบชิบิ (ขยาย ×2 แล้วยังเป็นพิกเซล)
+ */
+function rounded(w: number, h: number, r: number, color: (level: number, x: number, y: number) => string | null): PixelCanvas {
+  const c = new PixelCanvas(w, h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const qx = Math.abs(x + 0.5 - w / 2) - (w / 2 - r);
+      const qy = Math.abs(y + 0.5 - h / 2) - (h / 2 - r);
+      const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
+      const depth = -outside;
+      if (depth <= 0.2) continue;
+      const col = color(Math.floor(depth - 0.2), x, y);
+      if (col) c.set(x, y, col);
     }
   }
   return c;
 }
 
-function slot(border: string, light: string): PixelCanvas {
-  const c = new PixelCanvas(12, 12);
-  for (let y = 0; y < 12; y++) {
-    for (let x = 0; x < 12; x++) {
-      const edge = Math.min(x, y, 11 - x, 11 - y);
-      if (edge === 0) c.set(x, y, border);
-      else if (edge === 1) c.set(x, y, x === 1 || y === 1 ? 'rgba(0,0,0,0.55)' : light);
-      else c.set(x, y, 'rgba(14,16,30,0.82)');
-    }
-  }
-  return c;
+/** กรอบหน้าต่าง: เส้นนอกเข้ม + ขอบสองโทน (สว่างบน-ซ้าย / เข้มล่าง-ขวา) + แสงในจางๆ + พื้นมืด */
+function panel(fill: string, fill2: string, light: string, dark: string, outline = 'O'): PixelCanvas {
+  const S = 16;
+  return rounded(S, S, 4.5, (lv, x, y) => {
+    if (lv === 0) return outline;
+    if (lv === 1) return y < 4 || x < 4 ? light : dark;
+    if (lv === 2) return y < 4 ? light : outline;
+    if (lv === 3) return y < 5 ? 'rgba(255,255,255,0.14)' : dither(x, y) > 0.3 ? fill2 : fill;
+    return dither(x, y) > 0.3 ? fill2 : fill;
+  });
+}
+
+/** ปุ่ม: ไล่สีบน→ล่าง + ขอบบนสว่าง + ริมล่างหนา (3D) + เส้นนอกเข้ม */
+function button(top: string, mid: string, bottom: string, lip: string): PixelCanvas {
+  const S = 12;
+  return rounded(S, S, 3.5, (lv, _x, y) => {
+    if (lv === 0) return 'O';
+    if (y >= S - 3) return lip;
+    if (lv === 1 && y <= 2) return 'y';
+    if (y <= 3) return top;
+    if (y <= 6) return mid;
+    return bottom;
+  });
+}
+
+function slot(border: string, light: string, fill: string): PixelCanvas {
+  return rounded(12, 12, 3, (lv, x, y) => {
+    if (lv === 0) return border;
+    if (lv === 1) return x <= 1 || y <= 1 ? light : 'rgba(0,0,0,0.4)';
+    return fill;
+  });
 }
 
 function barFrame(): PixelCanvas {
-  const c = new PixelCanvas(8, 8);
-  for (let y = 0; y < 8; y++) {
-    for (let x = 0; x < 8; x++) {
-      const edge = Math.min(x, y, 7 - x, 7 - y);
-      c.set(x, y, edge === 0 ? 'O' : edge === 1 ? 'F' : '#0b0d1f');
-    }
-  }
-  return c;
+  return rounded(8, 8, 3.2, (lv) => (lv === 0 ? 'O' : lv === 1 ? 'F' : '#0b0d1f'));
 }
+
+/** ไอคอนแถบเครื่องมือ 14×14 (เส้นขอบ 1px + ประกาย 1px) → ขยาย ×2 */
+const TOOL_ICONS: Record<string, string[]> = {
+  bag: [
+    '....MMMM......', '...M....M.....', '..MNNNNNNM....', '.MNNNNNNNNM...', '.MNrrrrrrNM...', '.MNNNYYNNNM...', '.MNNNYYNNNM...',
+    '.MNNNNNNNNM...', '.MMNNNNNNMM...', '.MmmmmmmmmM...', '..MMMMMMMM....', '..............', '..............', '..............',
+  ],
+  blueprint: [
+    '..............', '.BBBBBBBBBBB..', '.BUUUUUUUUUB..', '.BUCUUUUUCUB..', '.BUUCCCCCUUB..', '.BUUCUUUCUUB..', '.BUUCUUUCUUB..',
+    '.BUUCCCCCUUB..', '.BUUUUUUUUUB..', '.BUCUCUCUCUB..', '.BBBBBBBBBBB..', '..............', '..............', '..............',
+  ],
+  upgrade: [
+    '......YY......', '.....YyyY.....', '....YyyyyY....', '...YyyyyyyY...', '..YyyyyyyyyY..', '.YYYYyyyyYYYY.', '....YyyyyY....',
+    '....YyyyyY....', '....YyyyyY....', '....YYYYYY....', '....GggggG....', '....GGGGGG....', '..............', '..............',
+  ],
+  book: [
+    '..............', '.RRRRR.RRRRR..', '.RWWWWRWWWWR..', '.RWLLWRWLLWR..', '.RWWWWRWWWWR..', '.RWLLWRWLLWR..', '.RWWWWRWWWWR..',
+    '.RWLLWRWLLWR..', '.RWWWWRWWWWR..', '.RWWWWRWWWWR..', '.RRRRRRRRRRR..', '..RRRRRRRRR...', '..............', '..............',
+  ],
+  map: [
+    '..............', '.SSSS.SSSS.SS.', '.SsSSSSSsSSSS.', '.SSSGGSSSSsSS.', '.SSGGGGSSSSSS.', '.SSSGGSbbSSSS.', '.SSSSSbbbbSSS.',
+    '.SSSSSSbbSSSS.', '.SsSSSSSSSSsS.', '.SSSSSRSSSSSS.', '.SSSSSSSSSSSS.', '.SS.SSSS.SSSS.', '..............', '..............',
+  ],
+  shirt: [
+    '..............', '..CC.....CC...', '.CCCC...CCCC..', 'CCCCCCCCCCCCC.', 'CCCCCCCCCCCCC.', 'CCCwCCCCCwCCC.', '.CCCCCCCCCCC..',
+    '..CCCCCCCCC...', '..CCCCCCCCC...', '..CCCCCCCCC...', '..CCCCCCCCC...', '..CCCCCCCCC...', '..............', '..............',
+  ],
+  robot: [
+    '......W.......', '.....LLL......', '..LLLLLLLLL...', '.LLLLLLLLLLL..', '.LLCCLLLCCLL..', '.LLCCLLLCCLL..', '.LLLLLLLLLLL..',
+    '.LLLRRRRRLLL..', '.LLLLLLLLLLL..', '..LLLLLLLLL...', '....DD.DD.....', '....DD.DD.....', '..............', '..............',
+  ],
+  camera: [
+    '..............', '...LLLL.......', '.DDDDDDDDDD...', '.DLDDDDDDDD...', '.DDDWWWDDDD...', '.DDWCCCWDDD...', '.DDWCCCWDDD...',
+    '.DDDWWWDDDD...', '.DDDDDDDDDD...', '.DDDDDDDDDDLL.', '.DDDDDDDDDDLL.', '..............', '..............', '..............',
+  ],
+  zoomIn: [
+    '..............', '...WWWWW......', '..WwwwwwW.....', '.WwwwgwwwW....', '.Wwwwgwwww....', '.WwgggggwW....', '.Wwwwgwwww....',
+    '.WwwwgwwwW....', '..WwwwwwWW....', '...WWWWW.WW...', '..........WW..', '...........W..', '..............', '..............',
+  ],
+  zoomOut: [
+    '..............', '...WWWWW......', '..WwwwwwW.....', '.WwwwwwwwW....', '.Wwwwwwwww....', '.WwRRRRRwW....', '.Wwwwwwwww....',
+    '.WwwwwwwwW....', '..WwwwwwWW....', '...WWWWW.WW...', '..........WW..', '...........W..', '..............', '..............',
+  ],
+  sound: [
+    '..............', '.....LL.......', '....LLL..C....', '.LLLLLL.C.C...', '.LLLLLLC.C.C..', '.LLLLLLC.C.C..', '.LLLLLLC.C.C..',
+    '.LLLLLL.C.C...', '....LLL..C....', '.....LL.......', '..............', '..............', '..............', '..............',
+  ],
+  mute: [
+    '..............', '.....LL.......', '....LLL.......', '.LLLLLL.R..R..', '.LLLLLL..RR...', '.LLLLLL..RR...', '.LLLLLL.R..R..',
+    '.LLLLLL.......', '....LLL.......', '.....LL.......', '..............', '..............', '..............', '..............',
+  ],
+  gear: [
+    '.....LLL......', '..L..LwL..L...', '.LLLLLLLLLL...', '..LLwwwwLL....', '.LLwLLLLwLL...', 'LLLwL..LwLLL..', 'LwLwL..LwLwL..',
+    'LLLwL..LwLLL..', '.LLwLLLLwLL...', '..LLwwwwLL....', '.LLLLLLLLLL...', '..L..LLL..L...', '.....LLL......', '..............',
+  ],
+};
+export const TOOL_ICON_KEYS = Object.keys(TOOL_ICONS);
 
 function paper(): PixelCanvas {
   const c = new PixelCanvas(12, 12);
@@ -163,14 +219,18 @@ const DIGITS: Record<string, string[]> = {
 };
 
 export function buildUiTextures(scene: Phaser.Scene) {
-  addScaled(scene, 'ui_panel', panel('#1c1f33', '#22263d', ['N', 'M', 'm']));
-  addScaled(scene, 'ui_panel_dark', panel('#121426', '#171a2e', ['D', 'F', 'O']));
-  addScaled(scene, 'ui_btn', button('N', 'M', 'm', 'N'));
-  addScaled(scene, 'ui_btn_hover', button('y', 'r', 'R', 'Y'));
-  addScaled(scene, 'ui_btn_off', button('D', 'F', 'O', 'D'));
-  addScaled(scene, 'ui_slot', slot('F', 'D'));
-  addScaled(scene, 'ui_slot_sel', slot('Y', 'y'));
+  // หน้าต่าง = ขอบครีม/ทอง · HUD = ขอบฟ้าทะเล (พื้นมืดอมน้ำเงินทั้งคู่ ให้ตัวหนังสือสว่างอ่านง่าย)
+  addScaled(scene, 'ui_panel', panel('#1d2242', '#222850', 'y', 'N', '#2a1f3a'));
+  addScaled(scene, 'ui_panel_dark', panel('rgba(16,22,46,0.93)', 'rgba(20,27,54,0.93)', 'C', 'B', '#0b0d1f'));
+  addScaled(scene, 'ui_btn', button('C', 'b', 'B', 'U'));
+  addScaled(scene, 'ui_btn_hover', button('y', 'Y', '#f0a050', '#c2602e'));
+  addScaled(scene, 'ui_btn_off', button('L', 'D', 'F', '#1d2238'));
+  addScaled(scene, 'ui_slot', slot('#0b0d1f', 'L', 'rgba(14,16,30,0.82)'));
+  addScaled(scene, 'ui_slot_sel', slot('Y', 'y', 'rgba(70,52,24,0.7)'));
   addScaled(scene, 'ui_bar', barFrame());
+  for (const [name, rows] of Object.entries(TOOL_ICONS)) {
+    addScaled(scene, `tb_${name}`, new PixelCanvas(16, 16).rows(rows, 1, 1).outline('O', true));
+  }
   addScaled(scene, 'ui_paper', paper());
   addScaled(scene, 'moon', moon(), 3);
   addScaled(scene, 'title_island', titleIsland(), 3);

@@ -16,6 +16,7 @@ import type { ResourceNode } from '../entities/ResourceNode';
 import { RAIN_WATER_CAP, type Structure } from '../entities/Structure';
 import type { GameScene } from '../scenes/GameScene';
 import { MATERIAL_NAME, materialOf, shelterTiles } from './ShelterSystem';
+import { nutriLine } from './BodySystem';
 
 /** การ์ดข้อมูลของสิ่งที่ "จิ้ม/ชี้" หรือ "เดินเข้าใกล้" */
 export interface InspectInfo {
@@ -146,7 +147,8 @@ export class InspectSystem {
       case 'drop': {
         const def = ITEMS[t.o.itemId];
         const r = RARITY[def.rarity ?? 'common'];
-        return { key: `d${t.o.itemId}`, title: `${def.name}  ·  ${r.name}`, color: r.color, lines: [def.desc, 'เดินทับเพื่อเก็บ'] };
+        const nl = nutriLine(def);
+        return { key: `d${t.o.itemId}`, title: `${def.name}  ·  ${r.name}`, color: r.color, lines: [def.desc, ...(nl ? [nl] : []), 'เดินทับเพื่อเก็บ'] };
       }
       case 'boat': return this.vehicle(t.o);
     }

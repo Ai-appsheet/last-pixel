@@ -4,13 +4,15 @@ import { Sfx } from '../core/AudioManager';
 import { EventBus } from '../core/EventBus';
 import { MetaSave, todayKey } from '../core/MetaSave';
 import { SaveManager } from '../core/SaveManager';
+import { nextOpenText } from '../core/SpecialIsland';
 import { ACHIEVEMENTS } from '../data/achievements';
-import { getCharacter } from '../data/characters';
+import { CHARACTERS, HERO_CARDS, getCharacter } from '../data/characters';
 import { CONTROL_MODES, getControlMode, setControlMode } from '../core/ControlMode';
 import { getSettings, setSettings } from '../core/Settings';
 import { CLASS_LOOKS, buildHeroTexture, heroKey } from '../gfx/art/heroes';
-import { COLORS, FONT, heading, PIXEL_FONT, txt } from '../ui/widgets';
+import { COLORS, FONT, heading, PIXEL_FONT, pixelTxt, txt } from '../ui/widgets';
 import { getAccounts, type AuthResult, type SendResult } from '../core/AccountService';
+import { cancelGoogle, promptGoogleOneTap, renderGoogleButton } from '../core/GoogleSignIn';
 import { apiEnabled, netStatus, onNetStatus } from '../core/backend/Api';
 import { Sync, fetchLeaderboard } from '../core/backend/Sync';
 import { WORLD_ROOM, getRoomService, localPlayerId } from '../core/RoomService';
@@ -18,9 +20,11 @@ import { ART, coverCrop, coverImage, queueArt } from '../ui/art';
 import { queueItemArtIndex } from '../ui/itemArt';
 import { fancyButton, fancyPanel, fitText, iconTexture } from '../ui/fancyButton';
 import { fadeIn, fadeTo, popIn } from '../ui/transition';
+import { heroStrip } from '../ui/heroStrip';
 import { applyUiScale } from '../ui/layout';
 import { fmtMoney } from '../ui/money';
-import { QUALITY_PREFS, qualityName, qualityPref, setQualityPref } from '../core/Quality';
+import { QUALITY_PREFS, quality, qualityName, qualityPref, setQualityPref } from '../core/Quality';
+import { reducedMotion } from '../ui/layout';
 
 const W = 960;
 const H = 540;
@@ -352,12 +356,10 @@ export class TitleScene extends Phaser.Scene {
 
     // ตัวละครยืนล้อมกองไฟ หันหน้าสู้ฝูงมอนสเตอร์ทางขวา
     const hero = (id: keyof typeof CLASS_LOOKS) => buildHeroTexture(this, heroKey(CLASS_LOOKS[id]), CLASS_LOOKS[id]);
-    const heroes: [keyof typeof CLASS_LOOKS, number, number, number][] = [
-      ['mechanic', 548, 482, 6],
-      ['medic', 606, 506, 0],
-      ['hunter', 662, 482, 6],
-      ['robot', 714, 474, 6],
-    ];
+    // ฮีโร่ทั้งหมดตามลำดับการ์ด (HERO_CARDS) ยืนเรียงสองแถวสลับ
+    const heroes: [keyof typeof CLASS_LOOKS, number, number, number][] = HERO_CARDS
+      .filter((h) => h.id in CLASS_LOOKS)
+      .map((h, i) => [h.id, 470 + i * 34, i % 2 ? 504 : 484, i % 2 ? 0 : 6]);
     heroes.forEach(([id, x, y, frame], i) => {
       const h = this.add.sprite(x, y, hero(id), frame).setOrigin(0.5, 1).setScale(S);
       near.add(h);
@@ -404,27 +406,48 @@ export class TitleScene extends Phaser.Scene {
     const art = coverImage(this, 'cover', W, H) ?? coverImage(this, 'keyart', W, H);
     if (art) {
       this.keyArt = art.setScale(art.scale * 1.05);
+      this.keyScale = art.scale;
       for (const o of [this.far, this.mid, this.near, this.sea, back]) o?.setVisible(false);
       for (const c of this.clouds) c.img.setVisible(false);
       this.clouds = [];
       // แสงอาทิตย์ตกกระพริบ + เงาเมฆเลื่อน
       const sun = this.softGlow(198, 178, 0xffcd75, 2.4, 2.4, 0.35);
       this.tweens.add({ targets: sun, alpha: 0.15, scale: 2.1, duration: 2600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-      // ประกายไฟ/หิ่งห้อยลอยขึ้น
-      this.time.addEvent({
-        delay: 260, loop: true, callback: () => {
-          const e = this.add.image(R(380, W), H + 6, Phaser.Math.RND.pick(['ember', 'firefly', 'sparkle'])).setScale(R(1, 2)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.8);
-          this.tweens.add({ targets: e, y: R(220, 420), x: e.x + R(-60, 60), alpha: 0, duration: R(2600, 4200), onComplete: () => e.destroy() });
-        },
-      });
+      const low = quality() === 'low' || reducedMotion();
+      if (!low) {
+        // Ken Burns: ซูมเข้า-ออก 1.04↔1.10 + ลอยช้าๆ ~12 วิ (ใช้ใน update ร่วมกับ parallax)
+        this.tweens.add({ targets: this.kb, s: 1.1, dx: 10, dy: -6, duration: 12000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        // หมอกบางๆ ลอยผ่านแนวขอบฟ้า (ภาพแสงฟุ้งยืดกว้าง)
+        for (let i = 0; i < 3; i++) {
+          const m = this.softGlow(R(0, W), 250 + i * 40, 0xd6e4ee, 5.5, 0.6, 0.07);
+          this.tweens.add({ targets: m, x: m.x + W * 0.6, duration: R(28000, 40000), repeat: -1, yoyo: true, ease: 'Sine.easeInOut' });
+        }
+        // ประกายน้ำแวววาวริมฝั่งซ้ายล่าง
+        for (let i = 0; i < 7; i++) {
+          const sp = this.add.rectangle(R(40, 320), R(468, 524), R(8, 22), 2, i % 2 ? 0xfff2b0 : 0x73eff7, 0.45);
+          this.tweens.add({ targets: sp, alpha: 0.05, scaleX: 0.4, duration: R(700, 1500), yoyo: true, repeat: -1, delay: R(0, 1200) });
+        }
+        // ประกายไฟ/หิ่งห้อยลอยขึ้น (จำนวนตามคุณภาพ)
+        this.time.addEvent({
+          delay: quality() === 'high' ? 260 : 420, loop: true, callback: () => {
+            const e = this.add.image(R(380, W), H + 6, Phaser.Math.RND.pick(['ember', 'firefly', 'sparkle'])).setScale(R(1, 2)).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0.8);
+            this.tweens.add({ targets: e, y: R(220, 420), x: e.x + R(-60, 60), alpha: 0, duration: R(2600, 4200), onComplete: () => e.destroy() });
+          },
+        });
+      }
     }
 
     // แฟลชฟ้าผ่า + ขอบมืด + เงาด้านซ้ายหลังเมนู
     this.flash = this.add.rectangle(0, 0, W, H, 0xd6e4ee, 0).setOrigin(0);
     this.add.image(0, 0, 'vignette').setOrigin(0);
     this.add.image(0, 0, 'tt_leftshade').setOrigin(0);
-    this.time.delayedCall(1800, () => this.lightning());
+    // ฟ้าผ่า: ไม่เกิน 1 ครั้ง/6 วิ แฟลชสูงสุด 0.25 · ลดการเคลื่อนไหว = ไม่มีแฟลช
+    if (!reducedMotion()) this.time.delayedCall(1800, () => this.lightning());
   }
+
+  /** Ken Burns ของภาพปก (ตัวคูณซูม + ระยะลอย) และสเกลพื้นฐาน */
+  private kb = { s: 1.04, dx: 0, dy: 0 };
+  private keyScale = 1;
 
   /** เรือแล่นไป-กลับ + โยกตามคลื่น + คลื่นท้ายเรือ */
   private sailBoat(boat: Phaser.GameObjects.Image, toX: number, dur: number, wakeEvery: number, startLeft: boolean) {
@@ -498,16 +521,16 @@ export class TitleScene extends Phaser.Scene {
     g.lineStyle(2, 0xd6e4ee, 0.9).lineBetween(b.x, b.y, b.x + R(-40, 40), b.y + R(24, 50));
     this.far.addAt(g, 0);
     this.tweens.add({ targets: g, alpha: 0, duration: 380, delay: 90, onComplete: () => g.destroy() });
-    this.flash.setAlpha(0.3);
+    this.flash.setAlpha(0.25);
     this.tweens.add({ targets: this.flash, alpha: 0, duration: 120 });
     this.time.delayedCall(170, () => {
-      this.flash.setAlpha(0.16);
+      this.flash.setAlpha(0.12);
       this.tweens.add({ targets: this.flash, alpha: 0, duration: 260 });
     });
     this.demon.setTint(0xffffff);
     this.aura.setAlpha(1);
     this.time.delayedCall(220, () => this.demon.active && this.demon.setTint(0xc8a8d0));
-    this.time.delayedCall(R(3500, 7500), () => this.lightning());
+    this.time.delayedCall(R(6000, 10000), () => this.lightning());
   }
 
   // ---------------------------------------------------------------- โลโก้
@@ -633,16 +656,35 @@ export class TitleScene extends Phaser.Scene {
     const cy = 64;
     const logo = this.add.container(cx, cy);
     const glow = this.softGlow(0, 4, 0xef7d57, (w * LOGO_PX) / 100, (h * LOGO_PX) / 70, 0.45);
-    const img = this.add.image(0, 0, 'tt_logo').setScale(LOGO_PX);
     const shine = this.add.sprite(0, 0, 'tt_logo_shine', 0).setScale(LOGO_PX).setBlendMode(Phaser.BlendModes.ADD).setVisible(false);
-    logo.add([glow, img, shine]);
+    // แยกโลโก้เป็นตัวอักษร (คอลัมน์ที่ไม่มีพิกเซลหน้า = ช่องว่าง) → แต่ละตัวหล่นจากบนแบบยุบ-เด้ง แล้วโยกเป็นคลื่นทีละตัว
+    const cols = new Set(face.map(([px]) => px));
+    const glyphs: Phaser.GameObjects.Image[] = [];
+    let x0 = -1;
+    for (let x = 0; x <= w + 1; x++) {
+      const on = cols.has(x);
+      if (on && x0 < 0) x0 = x;
+      if (!on && x0 >= 0) {
+        const img = this.add.image(0, 0, 'tt_logo').setScale(LOGO_PX).setCrop(x0 - 3, 0, x - x0 + 6, h + 1);
+        glyphs.push(img);
+        x0 = -1;
+      }
+    }
+    logo.add([glow, ...glyphs, shine]);
     this.tweens.add({ targets: glow, alpha: 0.75, duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-    // เข้าฉากแบบเด้ง แล้วลอยขึ้นลงเบาๆ
-    logo.setScale(0.3).setAlpha(0);
-    this.tweens.add({
-      targets: logo, scale: 1, alpha: 1, duration: 650, ease: 'Back.easeOut',
-      onComplete: () => this.tweens.add({ targets: logo, y: cy - 5, duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }),
+    const still = reducedMotion();
+    glyphs.forEach((l, k) => {
+      if (still) return;
+      l.setY(-120).setAlpha(0).setScale(LOGO_PX * 0.8, LOGO_PX * 1.25);
+      this.tweens.add({ targets: l, y: 0, alpha: 1, duration: 520, delay: 80 + k * 70, ease: 'Bounce.easeOut' });
+      this.tweens.add({ targets: l, scaleX: LOGO_PX, scaleY: LOGO_PX, duration: 420, delay: 420 + k * 70, ease: 'Back.easeOut' });
     });
+    // โยกเป็นคลื่นทุก ~4.5 วิ (เหมือนหน้าโหลด) + ลอยขึ้นลงเบาๆ ทั้งโลโก้
+    if (!still) {
+      const wave = () => glyphs.forEach((l, k) => this.tweens.add({ targets: l, y: -7, angle: -3, duration: 260, yoyo: true, delay: k * 70, ease: 'Sine.easeInOut' }));
+      this.time.addEvent({ delay: 4500, loop: true, startAt: 2500, callback: wave });
+      this.tweens.add({ targets: logo, y: cy - 5, duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: 1200 });
+    }
     const playShine = () => {
       if (!shine.active) return;
       shine.setVisible(true).play('tt_logo_shine_a');
@@ -661,16 +703,30 @@ export class TitleScene extends Phaser.Scene {
       },
     });
 
-    // ชื่อรอง: ไล่สีขาว→ฟ้า + เรืองฟ้า + เส้นประดับสองข้าง
-    const sub = txt(this, cx, 116, 'เอาชีวิตรอดบนหมู่เกาะ', 26, '#ffffff').setOrigin(0.5).setStroke('#1a1c2c', 6);
-    const grad = sub.context.createLinearGradient(0, 0, 0, sub.height);
-    grad.addColorStop(0.2, '#ffffff');
-    grad.addColorStop(0.6, '#d6e4ee');
-    grad.addColorStop(1, '#73eff7');
-    sub.setFill(grad);
-    sub.setShadow(0, 0, '#41a6f6', 12, true, true);
+    // ชื่อรอง: ตัวหนังสือพิกเซลอาร์ต (pixelTxt) ไล่สีขาว→ฟ้า + เส้นประดับสองข้าง · แยกทีละตัวอักษรให้เด้งเป็นคลื่นเบาๆ
+    const subText = 'เอาชีวิตรอดบนหมู่เกาะ';
+    const seg = typeof Intl !== 'undefined' && 'Segmenter' in Intl ? [...new Intl.Segmenter('th', { granularity: 'grapheme' }).segment(subText)].map((s) => s.segment) : [...subText];
+    const probe = pixelTxt(this, 0, 0, subText, 27, '#ffffff').setVisible(false);
+    const pk = probe.scaleX;
+    const subW = (probe.width - probe.style.strokeThickness) * pk;
+    probe.destroy();
+    const sub = this.add.container(cx, 116);
+    let sx = -subW / 2;
+    const letters: Phaser.GameObjects.Text[] = [];
+    for (const ch of seg) {
+      const l = pixelTxt(this, sx, 0, ch, 27, '#ffffff').setOrigin(0, 0.5);
+      const grad = l.context.createLinearGradient(0, 0, 0, l.height);
+      grad.addColorStop(0.2, '#ffffff');
+      grad.addColorStop(0.6, '#d6e4ee');
+      grad.addColorStop(1, '#73eff7');
+      l.setFill(grad);
+      sub.add(l);
+      letters.push(l);
+      sx += (l.width - l.style.strokeThickness) * pk;
+    }
+    letters.forEach((l, i) => this.tweens.add({ targets: l, y: -3, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: 1200 + i * 90 }));
     const deco = this.add.graphics();
-    const half = sub.width / 2 + 16;
+    const half = subW / 2 + 16;
     for (const dir of [-1, 1]) {
       const x0 = cx + dir * half;
       deco.fillStyle(0x1a1c2c, 1).fillRect(Math.min(x0, x0 + dir * 70), 114, 70, 6);
@@ -680,11 +736,22 @@ export class TitleScene extends Phaser.Scene {
       deco.fillStyle(0xffcd75, 1).fillRect(gx - 3, 114, 6, 6);
       deco.fillStyle(0xfff2b0, 1).fillRect(gx - 3, 114, 2, 2);
     }
-    const tag = txt(this, cx, 142, 'สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า', 13, COLORS.gold).setOrigin(0.5);
+    // ชื่อรองเต้นเบาๆ · คำโปรยพิมพ์ทีละตัว
+    const tagText = 'สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า';
+    const tag = pixelTxt(this, cx, 142, tagText, 20, COLORS.gold).setOrigin(0.5);
+    // ไม่ให้ซ้อนกล่องเมนูซ้าย (ขอบขวา x≈336)
+    tag.setX(Math.max(cx, 348 + tag.displayWidth / 2));
     [sub, deco, tag].forEach((o, i) => {
       o.setAlpha(0);
       this.tweens.add({ targets: o, alpha: 1, duration: 500, delay: 450 + i * 150 });
     });
+    if (!reducedMotion()) {
+      this.tweens.add({ targets: sub, scale: 1.03, duration: 1600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: 1400 });
+      const chars = seg.length ? [...new Intl.Segmenter('th', { granularity: 'grapheme' }).segment(tagText)].map((s) => s.segment) : [...tagText];
+      let n = 0;
+      tag.setText('');
+      this.time.addEvent({ delay: 38, repeat: chars.length - 1, startAt: -700, callback: () => tag.active && tag.setText(chars.slice(0, ++n).join('')) });
+    }
   }
 
   // ---------------------------------------------------------------- เมนู
@@ -692,7 +759,7 @@ export class TitleScene extends Phaser.Scene {
   private drawMenu() {
     const acc = getAccounts().current();
     // ยังไม่เข้าระบบ / บัญชีเก่ายังไม่ผูกอีเมล → ฟอร์มบัญชี
-    if (!acc || (acc.needEmail && !this.attachSkipped)) return this.drawAuth();
+    if (!acc || acc.needName || (acc.needEmail && !this.attachSkipped)) return this.drawAuth();
     const meta = MetaSave.load();
     const save = SaveManager.load();
     /** ของที่มีอยู่ก่อนวาดเมนู — ที่เพิ่มหลังจากนี้คือคอลัมน์ซ้าย (ไว้ขยายบนจอเล็ก) */
@@ -718,28 +785,28 @@ export class TitleScene extends Phaser.Scene {
       const ch = getCharacter(save.character);
       const info = [ch.name, `Lv.${save.player.level ?? 1}`, `วันที่ ${save.day}`].join(' · ');
       fancyButton(this, bx, next(52), {
-        w: bw, h: 52, label: 'ไปเกาะของฉัน', sub: info, icon: 'play', theme: 'emerald', size: 21, pulse: true, shine: true,
+        w: bw, h: 52, label: 'ไปเกาะของฉัน', pixel: true, sub: info, icon: 'play', theme: 'emerald', size: 21, pulse: true, shine: true,
         onClick: () => void this.enterIsland(),
       });
     } else {
       fancyButton(this, bx, next(52), {
-        w: bw, h: 52, label: 'เริ่มผจญภัย', sub: 'เลือกตัวละคร → สุ่มเกาะของคุณ', icon: 'sword', theme: 'gold', size: 21, pulse: true, shine: true,
+        w: bw, h: 52, label: 'เริ่มผจญภัย', pixel: true, sub: 'เลือกตัวละคร · สุ่มเกาะ', icon: 'sword', theme: 'gold', size: 21, pulse: true, shine: true,
         onClick: () => void this.enterIsland(),
       });
     }
     fancyButton(this, bx, next(40), {
-      w: bw, h: 40, label: 'คลังอุปกรณ์ & ร้านค้า', icon: 'book', theme: 'teal', size: 16,
+      w: bw, h: 40, label: 'คลัง & ร้านค้า', pixel: true, icon: 'book', theme: 'teal', size: 16,
       onClick: () => fadeTo(this, 'CatalogScene'),
     });
     fancyButton(this, bx, next(40), {
-      w: bw, h: 40, label: 'ดูตัวละครทั้งหมด', icon: 'shield', theme: 'sky', size: 16,
+      w: bw, h: 40, label: 'ตัวละคร', pixel: true, icon: 'shield', theme: 'sky', size: 16,
       onClick: () => fadeTo(this, 'CharacterSelectScene', {}),
     });
     const sy = next(34);
     fancyButton(this, bx - 68, sy, { w: 128, h: 34, label: 'ความสำเร็จ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showAchievements() });
     fancyButton(this, bx + 68, sy, { w: 128, h: 34, label: 'วิธีเล่น', icon: 'help', theme: 'steel', size: 14, onClick: () => this.showHelp() });
     // การตั้งค่าทั้งหมด (ควบคุม/เสียง/กล้อง/การแสดงผล) รวมอยู่ในปุ่มนี้
-    fancyButton(this, bx, next(34), { w: bw, h: 34, label: 'ตั้งค่า  (ควบคุม · เสียง · กล้อง)', icon: 'pad', theme: 'steel', size: 14, onClick: () => this.showSettings() });
+    fancyButton(this, bx, next(34), { w: bw, h: 34, label: 'ตั้งค่า', icon: 'pad', theme: 'steel', size: 14, onClick: () => this.showSettings() });
 
     this.drawStats(meta, save?.wallet);
     fancyButton(this, 114, 123, { w: 200, h: 28, label: 'อันดับ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showLeaderboard() });
@@ -753,7 +820,7 @@ export class TitleScene extends Phaser.Scene {
     }
     // บัญชี (มุมขวาบน) + ออกจากระบบ
     fancyButton(this, W - 104, 32, {
-      w: 188, h: 42, label: acc.username, sub: 'แตะเพื่อออกจากระบบ', icon: 'shield', theme: 'steel', size: 14,
+      w: 188, h: 42, label: acc.username, sub: 'ออกจากระบบ', icon: 'shield', theme: 'steel', size: 14,
       onClick: async () => {
         if (this.entering) return;
         // ออนไลน์: ส่งเซฟที่ค้างขึ้นเซิร์ฟเวอร์ก่อนออก
@@ -772,49 +839,57 @@ export class TitleScene extends Phaser.Scene {
     const onAudio = (m: boolean) => muteBtn.setLabel(m ? '🔇' : '🔊');
     EventBus.on('audio:changed', onAudio);
     this.events.once('shutdown', () => EventBus.off('audio:changed', onAudio));
-    txt(this, W - 12, H - 6, 'Survivor Isles v0.5 · PC & Mobile · 2.5D', 11, '#8a95a8').setOrigin(1, 1);
+    // เวอร์ชัน: มุมขวาบนใต้ปุ่มเสียง (ด้านล่างมีกล่องไฮไลต์ + แถวตัวละคร)
+    txt(this, W - 12, 118, 'Survivor Isles v0.5 · PC & Mobile · 2.5D', 11, '#8a95a8').setOrigin(1, 0);
   }
 
   // ---------------------------------------------------------------- ไฮไลต์บนหน้าปก
 
-  /** การ์ดไฮไลต์มุมขวาล่าง: วนโชว์ด่าน บอส เกาะพิเศษ ภัยพิบัติ (แตะเพื่อดูภาพถัดไป) */
+  /** การ์ดไฮไลต์ใต้เมนู: วนโชว์ตัวละคร ด่าน บอส เกาะพิเศษ ภัยพิบัติ (แตะเพื่อดูภาพถัดไป) — หน้าฟอร์มบัญชีไม่แสดง (ไม่บังทีมฮีโร่บนภาพปก) */
   private drawShowcase() {
-    const slides: { art: string; tag: string; title: string; sub: string; color: string }[] = [
+    const scenes: { art: string; tag: string; title: string; sub: string; color: string; focus?: number }[] = [
       { art: 'dungeon_1', tag: 'ด่าน 1', title: 'ถ้ำหินมืด', sub: 'ค้างคาว สไลม์ โครงกระดูก · Lv.1–10', color: '#a77bdb' },
       { art: 'boss_golem', tag: 'บอส', title: 'โกเลมหินยักษ์', sub: 'ผู้เฝ้าถ้ำหินมืด', color: '#ef7d57' },
+      { art: 'intro_5', tag: 'เรื่องราว', title: 'ขึ้นเกาะร้าง', sub: 'ผู้รอดชีวิตเริ่มต้นจากศูนย์', color: '#73eff7' },
       { art: 'dungeon_2', tag: 'ด่าน 2', title: 'เหมืองร้าง', sub: 'มัมมี่ เงาหลอน · Lv.10–25', color: '#a77bdb' },
       { art: 'boss_crab', tag: 'บอส', title: 'ราชาปูยักษ์', sub: 'ขึ้นฝั่งในคืนภัยพิบัติ', color: '#ef7d57' },
       { art: 'dungeon_3', tag: 'ด่าน 3', title: 'สุสานโบราณ', sub: 'อิมป์ไฟ ปีศาจ · Lv.25+', color: '#a77bdb' },
       { art: 'boss_demon', tag: 'บอสใหญ่', title: 'ราชาปีศาจ', sub: 'มาเยือนทุก 5 คืน', color: '#ef7d57' },
-      { art: 'special_island', tag: 'เกาะพิเศษ', title: 'เกาะมหาสมบัติ', sub: 'เปิด 1 ชม. ทุก 4 ชม. · กล่องทอง/เพชร', color: '#ffcd75' },
+      { art: 'special_island', tag: 'เกาะพิเศษ', title: 'เกาะมหาสมบัติ', sub: `เปิดวันละ 2 รอบ · รอบหน้า ${nextOpenText()}`, color: '#ffcd75' },
       { art: 'market_island', tag: 'เกาะกลาง', title: 'ตลาดผู้รอดชีวิต', sub: 'ซื้อขายกับผู้เล่นคนอื่น · ห้ามต่อสู้', color: '#ffcd75' },
       { art: 'hz_tsunami', tag: 'ภัยพิบัติ', title: 'คลื่นยักษ์ & อีก 7 ภัย', sub: 'ยิ่งรอดนาน ยิ่งถี่และแรง', color: '#41a6f6' },
       { art: 'conquest', tag: 'เป้าหมาย', title: 'พิชิตเกาะร้าง', sub: 'ล้มบอสดันเจี้ยนครบ 3 ด่าน', color: '#a7f070' },
-    ].filter((s) => this.textures.exists(`art_${s.art}`));
-    if (!slides.length) return;
-    // จอเล็ก + เข้าระบบแล้ว: เมนูขยายจนเต็มคอลัมน์ ไม่มีที่ให้กล่องไฮไลต์
-    if (this.compact && this.menuBottom > 0) return;
-    // เข้าระบบแล้ว: ใต้กล่องเมนูทางซ้าย · ยังไม่เข้า (ฟอร์มสูง): มุมขวาล่าง
-    const under = this.menuBottom > 0;
-    const cw = under ? 288 : 292;
-    const y = under ? this.menuBottom + 14 : H - 150 - 40;
-    const ch = under ? H - y - 36 : 150;
-    const x = under ? 42 : W - cw - 18;
+    ];
+    // สลับสไลด์ตัวละคร (ภาพเต็มตัว โฟกัสส่วนบนไม่ตัดหัว) แทรกระหว่างฉาก
+    const heroes = CHARACTERS.map((c) => ({ art: `char_${c.id}`, tag: 'ตัวละคร', title: c.name, sub: c.desc, color: '#73eff7', focus: 0.22 }));
+    const slides: typeof scenes = [];
+    for (let i = 0; i < Math.max(scenes.length, heroes.length); i++) {
+      if (scenes[i]) slides.push(scenes[i]);
+      if (heroes[i]) slides.push(heroes[i]);
+    }
+    const list = slides.filter((s) => this.textures.exists(`art_${s.art}`));
+    if (!list.length) return;
+    // ยังไม่เข้าระบบ (ฟอร์มบัญชี) หรือจอเล็ก: ไม่แสดง — ให้เห็นทีมฮีโร่บนภาพปกเต็มๆ
+    if (this.menuBottom === 0 || this.compact) return;
+    const cw = 288;
+    const y = this.menuBottom + 14;
+    const ch = H - y - 36;
+    const x = 42;
     const box = this.add.container(0, 0).setDepth(5);
     const frame = this.add.graphics();
     frame.fillStyle(0x0b0d1f, 0.7).fillRoundedRect(x - 6, y - 6, cw + 12, ch + 34, 10);
     frame.lineStyle(2, 0xffcd75, 0.85).strokeRoundedRect(x - 6, y - 6, cw + 12, ch + 34, 10);
     box.add(frame);
-    const label = txt(this, x + 2, y + ch + 6, '', 14, COLORS.text).setOrigin(0, 0);
+    const label = pixelTxt(this, x + 2, y + ch + 3, '', 20, COLORS.text).setOrigin(0, 0);
     const sub = txt(this, x + cw, y + ch + 8, '', 10, COLORS.dim).setOrigin(1, 0);
-    const tag = txt(this, x + 8, y + 8, '', 12, '#ffffff').setPadding(8, 3, 8, 3).setStroke('#0b0d1f', 3);
-    const dots = slides.map((_, i) => this.add.circle(x + cw / 2 - (slides.length - 1) * 5 + i * 10, y + ch - 10, 2.5, 0xffffff, 0.5));
+    const tag = pixelTxt(this, x + 8, y + 8, '', 18, '#ffffff').setPadding(4, 1, 4, 1);
+    const dots = list.map((_, i) => this.add.circle(x + cw / 2 - (list.length - 1) * 4 + i * 8, y + ch - 10, 2.5, 0xffffff, 0.5));
     let cur: Phaser.GameObjects.Image | null = null;
     let i = -1;
     const show = (n: number) => {
-      i = (n + slides.length) % slides.length;
-      const s = slides[i];
-      const img = coverCrop(this, s.art, cw, ch, x, y, 0.45);
+      i = (n + list.length) % list.length;
+      const s = list[i];
+      const img = coverCrop(this, s.art, cw, ch, x, y, s.focus ?? 0.45);
       if (!img) return;
       box.addAt(img, 1);
       img.setAlpha(0);
@@ -828,7 +903,7 @@ export class TitleScene extends Phaser.Scene {
       fitText(label, cw - 120);
       sub.setText(s.sub);
       fitText(sub, cw - label.displayWidth - 12);
-      tag.setText(s.tag).setBackgroundColor(s.color === '#ffcd75' ? '#b86f50' : s.color === '#a7f070' ? '#257179' : s.color === '#41a6f6' ? '#3b5dc9' : s.color === '#ef7d57' ? '#b13e53' : '#5d275d');
+      tag.setText(s.tag).setBackgroundColor(s.color === '#ffcd75' ? '#b86f50' : s.color === '#a7f070' ? '#257179' : s.color === '#41a6f6' ? '#3b5dc9' : s.color === '#ef7d57' ? '#b13e53' : s.color === '#73eff7' ? '#2a9d96' : '#5d275d');
       dots.forEach((d, k) => d.setFillStyle(k === i ? 0xffcd75 : 0xffffff, k === i ? 1 : 0.45).setRadius(k === i ? 3.5 : 2.5));
     };
     box.add([label, sub, tag, ...dots]);
@@ -845,33 +920,15 @@ export class TitleScene extends Phaser.Scene {
     this.tweens.add({ targets: box, alpha: 1, duration: 600, delay: 300 });
   }
 
-  /** แถบหน้าตัวละคร 7 คน (แตะ = ไปหน้าตัวละคร) */
+  /**
+   * แถวหน้าตัวละครกลม 7 คน (หน้าตาเดียวกับหน้าโหลด — ui/heroStrip.ts) กลางล่างของจอ เหนือเลขเวอร์ชัน
+   * เข้าระบบแล้วมีกล่องไฮไลต์มุมซ้ายล่าง → เลื่อนกึ่งกลางไปทางขวา ไม่ทับกัน · แตะ = ไปหน้าตัวละคร
+   */
   private drawHeroStrip() {
-    const ids = ['mechanic', 'medic', 'hunter', 'farmer', 'scout', 'shaman', 'robot'].filter((id) => this.textures.exists(`art_char_${id}`));
-    if (!ids.length) return;
-    const s = 38;
-    const gap = 6;
-    const total = ids.length * s + (ids.length - 1) * gap;
-    const x0 = this.menuBottom > 0 ? W - 18 - total : W - 18 - 292 - 24 - total;
-    const y = H - 40 - s + 2;
-    txt(this, x0, y - 18, 'ตัวละคร 7 แบบ · เริ่มเท่ากัน ไม่มีสายอาชีพ', 11, '#fff2b0').setStroke('#0b0d1f', 4).setDepth(5);
-    ids.forEach((id, k) => {
-      const x = x0 + k * (s + gap);
-      const bg = this.add.rectangle(x - 2, y - 2, s + 4, s + 4, 0x0b0d1f, 0.75).setOrigin(0).setStrokeStyle(2, 0xffcd75, 0.8).setDepth(5);
-      // ครอปเฉพาะช่วงหัว (ภาพเต็มตัว: หัวอยู่กลาง ช่วงบน ~10–40% ของภาพ)
-      const face = this.add.image(0, 0, `art_char_${id}`).setOrigin(0).setDepth(5);
-      const cs = face.width * 0.3;
-      const cx = (face.width - cs) / 2;
-      const cy = face.height * 0.1;
-      face.setScale(s / cs).setCrop(cx, cy, cs, cs).setPosition(x - cx * (s / cs), y - cy * (s / cs));
-      const hit = this.add.zone(x, y, s, s).setOrigin(0).setInteractive({ useHandCursor: true }).setDepth(6);
-      hit.on('pointerover', () => bg.setStrokeStyle(3, 0xffffff, 1));
-      hit.on('pointerout', () => bg.setStrokeStyle(2, 0xffcd75, 0.8));
-      hit.on('pointerdown', () => fadeTo(this, 'CharacterSelectScene', {}));
-      bg.setAlpha(0);
-      face.setAlpha(0);
-      this.tweens.add({ targets: [bg, face], alpha: 1, duration: 300, delay: 400 + k * 80 });
-    });
+    // ขวาของคอลัมน์ซ้าย (เมนู/ฟอร์มบัญชี/กล่องไฮไลต์ กว้างถึง x≈344 · จอเล็กขยาย ×1.18)
+    const left = this.compact ? 344 * MENU_K : 344;
+    const cx = (left + W) / 2;
+    heroStrip(this, { cx, cy: H - 46, size: 48, gap: 8, caption: `ตัวละคร ${CHARACTERS.length} แบบ · เริ่มเท่ากัน`, onPick: () => fadeTo(this, 'CharacterSelectScene', {}) });
   }
 
   /** แผงสถิติมุมซ้ายบน: พลังสูงสุด / รอดนานสุด / เงินในเกาะ (เหรียญ·เพชร) / โบนัสล็อกอิน */
@@ -964,9 +1021,9 @@ export class TitleScene extends Phaser.Scene {
 
   /** ไฟสถานะการเชื่อมต่อ (มุมซ้ายล่าง เหนือเลขเวอร์ชัน) */
   private drawNet() {
-    // กล่องตัวอย่างด่านอยู่ซ้ายล่าง → ไฟสถานะย้ายไปขวาล่าง (เหนือเลขเวอร์ชัน)
+    // เข้าระบบแล้ว: มุมขวาบนเหนือเลขเวอร์ชัน · ฟอร์มบัญชี: มุมซ้ายล่างเหนือเลขเวอร์ชัน
     const right = this.menuBottom > 0;
-    const t = txt(this, right ? W - 12 : 12, right ? H - 20 : H - 32, '', 11, COLORS.dim).setOrigin(right ? 1 : 0, 1).setStroke('#0b0d1f', 3).setDepth(5);
+    const t = txt(this, right ? W - 12 : 12, right ? 102 : H - 26, '', 11, COLORS.dim).setOrigin(right ? 1 : 0, right ? 0 : 1).setStroke('#0b0d1f', 3).setDepth(5);
     const show = () => {
       const s = netStatus();
       t.setText(s === 'online' ? '🟢 ออนไลน์' : s === 'unknown' ? '🟡 กำลังเชื่อมต่อ…' : '⚪ ออฟไลน์ (บันทึกในเครื่อง)');
@@ -1028,22 +1085,28 @@ export class TitleScene extends Phaser.Scene {
     this.authTimer?.remove();
     this.authTimer = null;
     const svc = getAccounts();
-    // เข้าระบบอยู่แล้ว = บัญชีเก่าที่ยังไม่ผูกอีเมล → มีแค่หน้าผูกอีเมล
+    // เข้าระบบอยู่แล้ว = บัญชีเก่าที่ยังไม่ผูกอีเมล → หน้าผูกอีเมล · บัญชี Google ใหม่ → หน้าตั้งชื่อในเกม
     const signed = !!svc.current();
-    const attachStep = this.authMode === 'attach' || this.authMode === 'attachCode';
-    if (signed !== attachStep) this.authMode = signed ? 'attach' : 'login';
+    const signedStep = this.authMode === 'attach' || this.authMode === 'attachCode' || this.authMode === 'name';
+    if (signed !== signedStep) this.authMode = signed ? (svc.current()?.needName ? 'name' : 'attach') : 'login';
     const mode = this.authMode;
     const keep = <T extends Phaser.GameObjects.GameObject>(o: T): T => {
       this.authObjs.push(o);
       return o;
     };
-    // กล่องอยู่คอลัมน์ซ้าย (x 36–336) ใต้โลโก้ (y ≥ 156) · สูงสุด 290 → ขอบล่าง ≤ 446 ไม่ทับไฟสถานะ/แถบตัวละคร
+    // ปุ่ม Google (เข้าสู่ระบบ/สมัคร) เพิ่มแถวบนสุด 48px แล้วบีบระยะระหว่างแถว — ขอบล่าง ≤ 490 ไม่ทับไฟสถานะ
+    const gOn = svc.googleSignIn && (mode === 'login' || mode === 'register');
+    const at = (normal: number, tight: number) => y + (gOn ? 48 + tight : normal);
+    this.events.off('shutdown', cancelGoogle);
+    if (gOn) this.events.once('shutdown', cancelGoogle);
+    else cancelGoogle();
+    // กล่องอยู่คอลัมน์ซ้าย (x 36–336) ใต้โลโก้ (y ≥ 156) · สูงสุด 290 → ขอบล่าง ≤ 446 ไม่ทับไฟสถานะ/แถบตัวละคร (มีปุ่ม Google สูงสุด 334)
     const x = 36;
     const y = 156;
     const pw = 300;
     const bx = x + pw / 2;
     const iw = 236;
-    const ph = { login: 282, register: 290, verify: 282, forgot: 266, reset: 290, attach: 290, attachCode: 282 }[mode];
+    const ph = { login: gOn ? 324 : 282, register: gOn ? 334 : 290, verify: 282, forgot: 266, reset: 290, attach: 290, attachCode: 282, name: 266 }[mode];
     keep(fancyPanel(this, x, y, pw, ph, 'gold'));
     const msg = keep(txt(this, bx, y + ph - 38, '', 12, COLORS.bad, { align: 'center', wordWrap: { width: 260 } }).setOrigin(0.5, 0));
     const say = (t: string, color: string = COLORS.bad) => msg.setText(t).setColor(color);
@@ -1068,7 +1131,8 @@ export class TitleScene extends Phaser.Scene {
         if (this.sys.isActive()) inputs.forEach((e) => (e.disabled = false));
       }
     };
-    const label = (yy: number, t: string) => keep(txt(this, x + 32, yy, t, 12, COLORS.dim));
+    // ป้ายช่องกรอก: ยกขึ้น 9px ไม่ให้ช่อง DOM (สูง 34) ทับ (ฟอนต์ไทยบรรทัดสูงกว่าเดิม)
+    const label = (yy: number, t: string) => keep(txt(this, x + 32, yy - 9, t, 12, COLORS.dim));
     const title = (t: string) => keep(txt(this, bx, y + 30, t, 16, COLORS.gold).setOrigin(0.5));
     const info = (yy: number, t: string, color: string = COLORS.dim, size = 12) =>
       keep(txt(this, bx, yy, t, size, color, { align: 'center', wordWrap: { width: 260 } }).setOrigin(0.5, 0));
@@ -1091,8 +1155,8 @@ export class TitleScene extends Phaser.Scene {
       }
       Object.assign(el.style, {
         width: `${o.w ?? iw}px`, height: o.code ? '40px' : '34px', fontSize: o.code ? '22px' : '16px', letterSpacing: o.code ? '6px' : 'normal',
-        textAlign: o.code ? 'center' : 'left', fontFamily: FONT, padding: '0 10px', borderRadius: '6px',
-        border: '3px solid #8a5a35', background: '#1a1c2c', color: '#f4f4f4', outline: 'none', boxSizing: 'border-box',
+        textAlign: o.code ? 'center' : 'left', fontFamily: FONT, fontWeight: '500', padding: '0 10px', borderRadius: '8px',
+        border: '2px solid #41a6f6', background: '#1a1c2c', color: '#f4f4f4', outline: 'none', boxSizing: 'border-box',
       });
       el.addEventListener('keydown', (e) => e.key === 'Enter' && submit());
       keep(this.add.dom(cx, cy, el));
@@ -1145,32 +1209,58 @@ export class TitleScene extends Phaser.Scene {
       const reg = mode === 'register';
       keep(fancyButton(this, bx - 68, y + 30, { w: 128, h: 34, label: 'เข้าสู่ระบบ', theme: reg ? 'steel' : 'gold', size: 14, onClick: () => !busy && this.switchAuth('login') }));
       keep(fancyButton(this, bx + 68, y + 30, { w: 128, h: 34, label: 'สมัครสมาชิก', theme: reg ? 'gold' : 'steel', size: 14, onClick: () => !busy && this.switchAuth('register') }));
-      label(y + 54, 'อีเมล');
-      const email = input(bx, y + 82, { type: 'email', ph: reg ? 'you@example.com' : 'อีเมล (บัญชีเก่าใส่ชื่อผู้ใช้ได้)', auto: reg ? 'email' : 'username', max: 254, value: this.authEmail });
+      /** "จำฉันไว้" ของหน้าเข้าสู่ระบบ (สมัคร = จำไว้เสมอ) — ปุ่ม Google ใช้ค่าเดียวกัน */
+      let rememberNow = () => true;
+      if (gOn) {
+        // ปุ่มทางการของ Google (iframe) ใน DOM ซ้อนบนกล่อง วางแบบเดียวกับช่องกรอก + เส้นคั่น "หรือ"
+        const box = document.createElement('div');
+        Object.assign(box.style, { width: `${iw}px`, height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', colorScheme: 'normal' });
+        keep(this.add.dom(bx, y + 67, box));
+        const line = keep(this.add.graphics());
+        line.lineStyle(1, 0x8a95a8, 0.6).lineBetween(x + 32, y + 93, bx - 22, y + 93).lineBetween(bx + 22, y + 93, x + pw - 32, y + 93);
+        keep(txt(this, bx, y + 93, 'หรือ', 12, COLORS.dim).setOrigin(0.5));
+        const onCredential = (credential: string) => {
+          if (!this.sys.isActive() || !box.isConnected) return;
+          void run(async () => {
+            this.authRemember = rememberNow();
+            await this.authResult(await svc.google(credential, this.authRemember), say);
+          });
+        };
+        void renderGoogleButton(box, { text: reg ? 'signup_with' : 'signin_with', width: iw }, onCredential).then((ok) => {
+          if (!box.isConnected) return;
+          if (!ok) {
+            Object.assign(box.style, { color: '#8a95a8', fontFamily: FONT, fontSize: '13px' });
+            box.textContent = 'โหลดปุ่ม Google ไม่ได้ — ใช้อีเมลแทน';
+          } else if (!reg) promptGoogleOneTap();
+        });
+      }
+      label(at(54, 54), 'อีเมล');
+      const email = input(bx, at(82, 82), { type: 'email', ph: reg ? 'you@example.com' : 'อีเมล (บัญชีเก่าใส่ชื่อผู้ใช้ได้)', auto: reg ? 'email' : 'username', max: 254, value: this.authEmail });
       if (reg) {
-        label(y + 104, 'ชื่อในเกม (คนอื่นเห็นชื่อนี้)');
-        const name = input(bx, y + 132, { ph: '3–16 ตัว ไทย/อังกฤษ/ตัวเลข/_', auto: 'nickname', max: 16 });
-        label(y + 154, 'รหัสผ่าน (8 ตัวขึ้นไป มีตัวอักษร + ตัวเลข)');
-        const [pass, pass2] = passPair(y + 182);
-        mainBtn(y + 226, 'สมัครสมาชิก', async () => {
+        label(at(104, 102), 'ชื่อในเกม (คนอื่นเห็นชื่อนี้)');
+        const name = input(bx, at(132, 130), { ph: '3–16 ตัว ไทย/อังกฤษ/ตัวเลข/_', auto: 'nickname', max: 16 });
+        label(at(154, 150), 'รหัสผ่าน (8 ตัวขึ้นไป มีตัวอักษร + ตัวเลข)');
+        const [pass, pass2] = passPair(at(182, 178));
+        mainBtn(at(226, 220), 'สมัครสมาชิก', async () => {
           if (mismatch(pass, pass2)) return;
           this.authEmail = email.value.trim();
           this.authRemember = true;
           await this.authResult(await svc.register(email.value, pass.value, name.value, true), say);
         });
       } else {
-        label(y + 104, 'รหัสผ่าน');
-        const pass = input(bx, y + 132, { type: 'password', ph: 'รหัสผ่าน', auto: 'current-password', max: 64 });
+        label(at(104, 102), 'รหัสผ่าน');
+        const pass = input(bx, at(132, 130), { type: 'password', ph: 'รหัสผ่าน', auto: 'current-password', max: 64 });
         const wrap = document.createElement('label');
         Object.assign(wrap.style, { color: '#d6e4ee', fontFamily: FONT, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' });
         const remember = document.createElement('input');
         remember.type = 'checkbox';
         remember.checked = this.authRemember;
         wrap.append(remember, 'จำฉันไว้');
-        keep(this.add.dom(x + 30, y + 166, wrap).setOrigin(0, 0.5));
+        keep(this.add.dom(x + 30, at(166, 160), wrap).setOrigin(0, 0.5));
         inputs.push(remember);
+        rememberNow = () => remember.checked;
         if (svc.emailCodes) {
-          const forgot = keep(txt(this, x + pw - 30, y + 166, 'ลืมรหัสผ่าน?', 13, '#73eff7').setOrigin(1, 0.5).setStroke('#0b0d1f', 3));
+          const forgot = keep(txt(this, x + pw - 30, at(166, 160), 'ลืมรหัสผ่าน?', 13, '#73eff7').setOrigin(1, 0.5).setStroke('#0b0d1f', 3));
           forgot.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
             if (busy) return;
             Sfx.play('click');
@@ -1178,7 +1268,7 @@ export class TitleScene extends Phaser.Scene {
             this.switchAuth('forgot');
           });
         }
-        mainBtn(y + 206, 'เข้าสู่ระบบ', async () => {
+        mainBtn(at(206, 198), 'เข้าสู่ระบบ', async () => {
           this.authRemember = remember.checked;
           if (email.value.includes('@')) this.authEmail = email.value.trim();
           await this.authResult(await svc.login(email.value, pass.value, remember.checked), say);
@@ -1225,6 +1315,15 @@ export class TitleScene extends Phaser.Scene {
       });
       resendBtn(bx - 56, y + 228, 150, async () => void sent(await svc.forgot(this.authEmail)));
       smallBtn(bx + 79, y + 228, 104, 'กลับ', () => this.switchAuth('login'));
+    } else if (mode === 'name') {
+      // บัญชีที่เพิ่งสร้างด้วย Google: ยืนยัน/เปลี่ยนชื่อในเกมชั่วคราว (ได้ครั้งเดียว)
+      title('ตั้งชื่อในเกม');
+      info(y + 48, 'ชื่อนี้คนอื่นเห็นบนแผนที่โลก อันดับ และแชท — ใช้ชื่อที่ตั้งให้ หรือแก้ก็ได้ (ตั้งได้ครั้งเดียว)');
+      label(y + 104, 'ชื่อในเกม');
+      const name = input(bx, y + 132, { ph: '3–16 ตัว ไทย/อังกฤษ/ตัวเลข/_', auto: 'nickname', max: 16, value: svc.current()?.username ?? '' });
+      mainBtn(y + 178, 'ยืนยันชื่อ', async () => {
+        await this.authResult(await svc.setName(name.value), say);
+      });
     } else {
       // attach: บัญชีเก่า (เข้าด้วยชื่อผู้ใช้) → ผูกอีเมล
       title('ผูกอีเมลกับบัญชี');
@@ -1271,21 +1370,27 @@ export class TitleScene extends Phaser.Scene {
       return;
     }
     const attached = this.authMode === 'attachCode' || this.authMode === 'attach';
-    // ออนไลน์: โหลดเซฟ/ข้อมูลถาวรจากเซิร์ฟเวอร์ลงเครื่องก่อนเข้าเกม (ผูกอีเมล = เข้าระบบอยู่แล้ว โหลดไปแล้ว)
-    if (apiEnabled() && !attached) {
+    const named = this.authMode === 'name';
+    // ออนไลน์: โหลดเซฟ/ข้อมูลถาวรจากเซิร์ฟเวอร์ลงเครื่องก่อนเข้าเกม (ผูกอีเมล/ตั้งชื่อ = เข้าระบบอยู่แล้ว โหลดไปแล้ว)
+    if (apiEnabled() && !attached && !named) {
       say('กำลังโหลดเซฟ…', COLORS.dim);
       await Sync.afterLogin();
       if (!this.sys.isActive()) return;
     }
     Sfx.play('levelUp');
     if (!attached) this.attachSkipped = false;
+    if (r.account.needName) {
+      this.authNotice = { text: 'สร้างบัญชีด้วย Google แล้ว — ยืนยันชื่อในเกม' };
+      this.switchAuth('name');
+      return;
+    }
     if (r.account.needEmail && !this.attachSkipped) {
       this.authNotice = { text: 'เข้าสู่ระบบแล้ว — ผูกอีเมลก่อน (หรือกด "ไว้ทีหลัง")' };
       this.authEmail = '';
       this.switchAuth('attach');
       return;
     }
-    say(attached ? 'ผูกอีเมลเรียบร้อย — กำลังเข้าเกาะ…' : apiEnabled() ? 'กำลังเข้าเกาะ…' : '', COLORS.good);
+    say(attached ? 'ผูกอีเมลเรียบร้อย — กำลังเข้าเกาะ…' : named ? 'ตั้งชื่อเรียบร้อย — กำลังเข้าเกาะ…' : apiEnabled() ? 'กำลังเข้าเกาะ…' : '', COLORS.good);
     void this.enterIsland();
   }
 
@@ -1398,19 +1503,19 @@ export class TitleScene extends Phaser.Scene {
     this.modal('วิธีเล่น', (c) => {
       const lines = [
         '🏝  ทุกคนมีเกาะของตัวเอง — สร้างฐาน ปลูกผัก เลี้ยงชีพ',
-        '⚔  พลังมาจาก เลเวล + อุปกรณ์ + ฐาน · ตายแล้วเลเวลลด 1 ขั้น',
-        '🌉  เกาะกลางเป็นเขตค้าขาย: ตลาด ซื้อ/ขาย — ห้ามต่อสู้',
-        '⛵  สร้างเรือ (แพ → เรือใบ → เรือยนต์) เพื่อล่องไปเกาะอื่น',
-        '📦  ทุกเช้ามีกล่องร่มชูชีพ + ของขวัญในตู้จดหมาย + แร่หายากเกิดใหม่',
-        '🔨  คราฟต์: มือเปล่า → โต๊ะช่าง → เตาหลอม (เหล็ก/ทอง) → ดาบคริสตัล',
-        '🌡  ดูแลความหิว น้ำ อุณหภูมิ และสติ (ความมืด)',
-        '🌙  ทุกคืนมีภัยพิบัติ/มอนสเตอร์บุกแต่ละเกาะ · ทุก 5 วันคือคืนปีศาจ — อยู่ใกล้กองไฟ',
+        '⚔  พลัง = เลเวล + อุปกรณ์ + ฐาน · ตายแล้วเลเวลลด 1',
+        '🌉  เกาะกลาง = ตลาดซื้อ/ขาย — ห้ามต่อสู้',
+        '⛵  สร้างเรือ (แพ → เรือใบ → เรือยนต์) ไปเกาะอื่น',
+        '📦  ทุกเช้า: กล่องร่มชูชีพ + ของขวัญในตู้จดหมาย + แร่เกิดใหม่',
+        '🔨  คราฟต์: มือเปล่า → โต๊ะช่าง → เตาหลอม → ดาบคริสตัล',
+        '🌡  ดูแลความหิว น้ำ อุณหภูมิ และสติ',
+        '🌙  ทุกคืนมีภัย/มอนบุก · ทุก 5 วันคืนปีศาจ — อยู่ใกล้กองไฟ',
         '',
-        'คอม: WASD เดิน · Shift วิ่ง · Space หลบ · คลิก ตี/วาง · E ใช้ · F กิน · Q สกิล',
-        '        Tab กระเป๋า+คราฟต์ · M แผนที่ · N เสียง · Esc หยุด',
-        'มือถือ: จอยซ้ายเดิน (ดันสุด = วิ่ง) · ปุ่มขวา โจมตี/ใช้/หลบ/สกิล/กิน (เล็งอัตโนมัติ)',
+        'คอม: WASD เดิน · Shift วิ่ง · Space หลบ · คลิก ตี · E ใช้ · F กิน · Q สกิล',
+        '         Tab กระเป๋า · B แปลน · M แผนที่ · N เสียง · Esc เมนู',
+        'มือถือ: จอยซ้ายเดิน (ดันสุด = วิ่ง) · ปุ่มขวา โจมตี/ใช้/หลบ/สกิล/กิน',
       ];
-      c.add(txt(this, 104, 88, lines.join('\n'), 14, COLORS.text, { lineSpacing: 7 }));
+      c.add(txt(this, 104, 84, lines.join('\n'), 14, COLORS.text, { lineSpacing: 5 }));
     });
   }
 
@@ -1432,7 +1537,7 @@ export class TitleScene extends Phaser.Scene {
     this.far?.setPosition(-this.par.x * 4, -this.par.y * 2);
     this.mid?.setPosition(-this.par.x * 8, -this.par.y * 3);
     this.near?.setPosition(-this.par.x * 14, -this.par.y * 4);
-    this.keyArt?.setPosition(W / 2 - this.par.x * 12, H / 2 - this.par.y * 6);
+    if (this.keyArt) this.keyArt.setPosition(W / 2 - this.par.x * 12 + this.kb.dx, H / 2 - this.par.y * 6 + this.kb.dy).setScale(this.keyScale * this.kb.s);
     // งูทะเล: ตัดส่วนที่อยู่ใต้ผิวน้ำออก
     const s = this.serpent;
     if (s?.active) {
@@ -1444,4 +1549,4 @@ export class TitleScene extends Phaser.Scene {
 }
 
 /** หน้าของฟอร์มบัญชีบนหน้าแรก (attach/attachCode = บัญชีเก่าผูกอีเมลหลังเข้าระบบ) */
-type AuthMode = 'login' | 'register' | 'verify' | 'forgot' | 'reset' | 'attach' | 'attachCode';
+type AuthMode = 'login' | 'register' | 'verify' | 'forgot' | 'reset' | 'attach' | 'attachCode' | 'name';

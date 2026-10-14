@@ -5,6 +5,27 @@ import { MetaSave } from '../core/MetaSave';
 import type { GameScene } from '../scenes/GameScene';
 import { isLand } from '../world/tiles';
 import { GOLD_BOX_GEMS } from '../data/loot';
+import { ITEMS } from '../data/items';
+import { bkkDayKey, msToMidnight, shiftDayKey } from '../core/WorldClock';
+
+/**
+ * 🎁 กล่องฟรีรายวัน (วันจริง เวลาไทย · 1 ครั้ง/วัน/บัญชี) — ข้อยกเว้นของกฎ "เกาะเราได้แค่กล่องไม้" (ไม่ผ่าน capBox)
+ *  วันปกติ: ไม้ 55% / เหล็ก 30% / ทอง 12% / เพชร 3%
+ *  ต่อเนื่อง 3 วันขึ้นไป: ไม้ 43% / เหล็ก 32% / ทอง 20% / เพชร 5%
+ *  ทุกวันที่ 7, 14, 21 … ต่อเนื่อง: การันตีทอง — ทอง 90% / เพชร 10%
+ *  ขาด 1 วัน = เริ่มนับวันที่ 1 ใหม่
+ */
+export function dailyBoxOdds(streak: number): [string, number][] {
+  if (streak > 0 && streak % 7 === 0) return [['box_gold', 0.9], ['box_legend', 0.1]];
+  if (streak >= 3) return [['box_wood', 0.43], ['box_iron', 0.32], ['box_gold', 0.2], ['box_legend', 0.05]];
+  return [['box_wood', 0.55], ['box_iron', 0.3], ['box_gold', 0.12], ['box_legend', 0.03]];
+}
+
+export function rollDailyBox(streak: number, r = Math.random()): string {
+  const odds = dailyBoxOdds(streak);
+  for (const [tier, p] of odds) if ((r -= p) < 0) return tier;
+  return odds[odds.length - 1][0];
+}
 
 /**
  * ระบบรายวัน (ทุกเช้า):
@@ -26,7 +47,7 @@ export class DailySystem {
       a.sprite.destroy();
       return false;
     });
-    const islands = [s.world.home, ...s.world.slots.filter((x) => x && x.biome !== 'central' && x.biome !== 'dungeon' && x.biome !== 'special' && x.index !== s.world.home).map((x) => x!.index)];
+    const islands = [s.world.home, ...s.world.slots.filter((x) => x && x.biome !== 'central' && x.biome !== 'dungeon' && x.biome !== 'special' && !x.event && x.index !== s.world.home).map((x) => x!.index)];
     const other = islands.length > 1 ? Phaser.Utils.Array.GetRandom(islands.slice(1)) : s.world.home;
     for (const idx of [s.world.home, other]) {
       const p = this.randomLand(idx);
@@ -108,8 +129,49 @@ export class DailySystem {
     if (note) EventBus.emit('toast', note, '#ffcd75');
   }
 
+  private boxCache = { at: 0, ok: false };
+  /** รับกล่องฟรีวันนี้ได้ไหม (แคช 1 วิ — ใช้ทุกเฟรมได้) */
+  get boxAvailable(): boolean {
+    const now = Date.now();
+    if (now - this.boxCache.at > 1000) this.boxCache = { at: now, ok: this.dailyBoxStatus().available };
+    return this.boxCache.ok;
+  }
+
+  /** สถานะกล่องฟรีวันนี้ (HUD/ตู้จดหมาย) */
+  dailyBoxStatus() {
+    const today = bkkDayKey();
+    const st = MetaSave.dailyBoxStatus(today, shiftDayKey(today, -1));
+    return { ...st, msToReset: msToMidnight(), odds: dailyBoxOdds(st.streak) };
+  }
+
+  /** รับกล่องฟรีวันนี้ (ปุ่ม HUD หรือตู้จดหมาย) → tier ที่ได้ หรือ null ถ้ารับไปแล้ว */
+  claimDailyBox(x?: number, y?: number): string | null {
+    const s = this.scene;
+    const today = bkkDayKey();
+    const streak = MetaSave.claimDailyBox(today, shiftDayKey(today, -1));
+    this.boxCache.at = 0;
+    if (!streak) {
+      EventBus.emit('toast', '🎁 รับกล่องฟรีของวันนี้ไปแล้ว — มาใหม่หลังเที่ยงคืน (เวลาไทย)', '#94b0c2');
+      return null;
+    }
+    const tier = rollDailyBox(streak);
+    s.spawnDrop(x ?? s.player.x, (y ?? s.player.y) + 6, tier, 1);
+    Sfx.play('levelUp');
+    s.fx.sparks(x ?? s.player.x, (y ?? s.player.y) - 6, 0xffcd75, 14, 22);
+    const next = streak % 7 === 6 ? ' · พรุ่งนี้การันตีกล่องทอง!' : streak < 3 ? ` · ต่อเนื่องครบ 3 วันโอกาสกล่องทองเพิ่ม` : '';
+    EventBus.emit('banner', `🎁 กล่องฟรีวันนี้: ${ITEMS[tier].name}!`, `รับต่อเนื่อง ${streak} วัน${next}`, tier === 'box_legend' ? '#73eff7' : tier === 'box_gold' ? '#ffcd75' : '#a7f070');
+    EventBus.emit('dailybox:claimed', tier, streak);
+    return tier;
+  }
+
   claim() {
-    if (!this.mailboxReady) return;
+    if (!this.mailboxReady && !this.dailyBoxStatus().available) return;
+    // ตู้จดหมาย = ที่รับกล่องฟรีรายวันอีกทางหนึ่ง
+    if (this.dailyBoxStatus().available) {
+      const b = this.scene.mailboxSprite;
+      this.claimDailyBox(b?.x, b?.y);
+      if (!this.mailboxReady) return;
+    }
     const streak = MetaSave.claimLogin();
     if (streak > 0) {
       this.mailbox.push(['coin', Math.min(200, 25 * streak)]);
