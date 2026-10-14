@@ -1,13 +1,19 @@
 import type Phaser from 'phaser';
 import { RNG } from '../../core/RNG';
-import { PixelCanvas, dither } from '../PixelCanvas';
-import { anim, bigEye, clearFrom, cuteEye, groundShadow, isShadow, part, shadeEdges, strip } from './monsters';
+import { PixelCanvas, withRes } from '../PixelCanvas';
+import { SPRITE_RES } from '../hd';
+import { anim, bigEye, clearFrom, cuteEye, furStrokes, groundShadow, part, scaleTexture, shadeEdges, speckle, strip, waterRing } from './monsters';
 
 // สัตว์ชุดใหม่ (สัตว์ป่า · สัตว์ในน้ำ · สัตว์ในตำนาน) วาดด้วยโค้ดแบบเดียวกับ monsters.ts — สไตล์จิบิ: หัวโต ตาโตมีประกาย
 // ด้านข้างหันขวาเสมอ (เกม flipX เมื่อหันซ้าย) · ขอบ 'O' · แสงจากซ้ายบน · สัตว์น้ำมีวงน้ำรอบตัว
 
 const GOLD = ['#a0662a', '#e0a040', 'Y', 'y'];
 const pc = (w: number, h: number) => new PixelCanvas(w, h);
+
+/** HD: ขีดขนทั่วตัว (map สีพื้น → สีขีด) — ผืนปกติไม่ทำอะไร */
+function fur(c: PixelCanvas, map: Record<string, string>, seed: number, density = 0.5) {
+  if (c.res > 1) furStrokes(c, map, new RNG(seed), Math.round(c.w * c.h * density), 0, 0, c.w - 1, c.h - 1);
+}
 
 /** ขา 4 ข้าง (ก้าวสลับ): xs = [หลังไกล, หลังใกล้, หน้าไกล, หน้าใกล้] · ขาไกลสีเข้ม */
 function legs(c: PixelCanvas, xs: number[], top: number, len: number, f: number, col: string, far: string, o: { thick?: number; foot?: string; swing?: number } = {}) {
@@ -18,30 +24,6 @@ function legs(c: PixelCanvas, xs: number[], top: number, len: number, f: number,
     c.line(x, top, x + sw, top + len, near ? col : far, o.thick ?? 1);
     if (o.foot) for (let t = 0; t < (o.thick ?? 1); t++) c.set(x + sw + t - Math.floor((o.thick ?? 1) / 2), top + len, o.foot);
   });
-}
-
-/** วงน้ำรอบตัว (สัตว์ที่ว่ายอยู่ผิวน้ำ) — ตัดส่วนใต้น้ำทิ้งก่อนเรียก */
-function waterRing(c: PixelCanvas, cx: number, cy: number, rx: number, ry: number, f: number, seed: number) {
-  const rng = new RNG(seed + f * 7);
-  for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) {
-    for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
-      const nx = (x + 0.5 - cx) / rx;
-      const ny = (y + 0.5 - cy) / ry;
-      const d = Math.sqrt(nx * nx + ny * ny);
-      if (d > 1) continue;
-      const p = c.get(x, y);
-      const free = !p || isShadow(p);
-      const front = y + 0.5 >= cy;
-      if (d > 0.8) {
-        if (front || free) c.set(x, y, dither(x, y) > 0.2 ? 'C' : 'b');
-      } else if (Math.abs(d - (0.5 + f * 0.06)) < 0.07 && front && free) c.set(x, y, 'C');
-      else if (free) c.set(x, y, 'rgba(65,166,246,0.35)');
-    }
-  }
-  for (let i = 0; i < 4; i++) {
-    const a = rng.range(0, Math.PI * 2);
-    c.set(cx + Math.cos(a) * rx * 0.9, cy + Math.sin(a) * ry * 0.9, 'W');
-  }
 }
 
 /**
@@ -83,6 +65,7 @@ function deer(f: number) {
   c.set(15, 1, 'N');
   bigEye(c, 14, 4, 'O', 3, 3);
   c.set(17, 7, 'p');
+  fur(c, { M: 'm', N: 'M' }, 11);
   c.outline();
   groundShadow(c, 9.5, 16.6, 7, 1.2);
   return c;
@@ -105,6 +88,7 @@ function buffalo(f: number) {
   c.line(21, 5, 23, 3, 'L');
   c.set(23, 2, 'W');
   bigEye(c, 18, 6, 'r', 3, 3, 1);
+  fur(c, { F: '#1d2033', D: 'F', L: 'D' }, 12, 0.6);
   c.outline();
   groundShadow(c, 12, 16.6, 9, 1.3);
   return c;
@@ -131,6 +115,7 @@ function fox(f: number) {
   });
   bigEye(c, 12, 4, 'O', 3, 3);
   c.set(11, 7, 'p');
+  fur(c, { r: 'R', Y: 'r' }, 13);
   c.outline();
   groundShadow(c, 9, 12.6, 6, 1);
   return c;
@@ -152,6 +137,7 @@ function monkey(f: number) {
   bigEye(c, 10, 4, 'O', 3, 3);
   c.set(13, 8, 'O');
   c.set(10, 8, 'p');
+  fur(c, { M: 'm', N: 'M' }, 14);
   c.outline();
   groundShadow(c, 7.5, 14.6, 5.5, 1);
   return c;
@@ -198,6 +184,7 @@ function cobra(f: number) {
   });
   cuteEye(c, 13 + sx, 2, 'Y');
   if (f) c.line(16 + sx, 5, 17 + sx, 5, 'R');
+  scaleTexture(c, { M: 'm' }, { M: 'N' });
   c.outline();
   groundShadow(c, 8, 14.6, 6.5, 1);
   return c;
@@ -231,6 +218,7 @@ function scorpion(f: number) {
     for (const x of [8, 10, 12]) p.set(x, 7, 'r');
   });
   cuteEye(c, 15, 7, 'r');
+  speckle(c, { D: ['F', 'L'], F: ['#1d2033', 'D'] }, new RNG(15), 0.05);
   c.outline();
   groundShadow(c, 10, 12.6, 8, 1);
   return c;
@@ -295,6 +283,7 @@ function boar(f: number) {
   c.set(9, 9, 'p');
   c.set(2, 7 + f, 'm');
   c.set(1, 6 + f, 'n');
+  fur(c, { M: 'm', N: 'M', m: 'n' }, 16, 0.6);
   c.outline();
   groundShadow(c, 8, 14.6, 6, 1);
   return c;
@@ -319,6 +308,7 @@ function wolf(f: number) {
     p.set(12, 2, 'F');
   });
   bigEye(c, 10, 5, 'Y', 3, 3, 1);
+  fur(c, { D: 'F', L: 'D', w: 'L' }, 17, 0.6);
   c.outline();
   groundShadow(c, 8, 14.6, 6, 1);
   return c;
@@ -342,6 +332,7 @@ function rabbit(f: number) {
   cuteEye(c, 10, 5, 'O');
   c.set(13, 7, 'p');
   c.set(12, 8, 'R');
+  fur(c, { W: 'w', w: 'L' }, 18, 0.35);
   c.outline();
   groundShadow(c, 7, 10.6, 5, 0.9);
   return c;
@@ -366,6 +357,7 @@ function shark(f: number) {
   bigEye(c, 17, 5, 'O', 3, 3, 1);
   c.set(20, 9, 'R');
   clearFrom(c, 11);
+  speckle(c, { D: ['F', 'L'] }, new RNG(19), 0.03);
   c.outline();
   waterRing(c, 12, 11, 11, 2.6, f, 311);
   return c;
@@ -437,6 +429,7 @@ function seaTurtle(f: number) {
   });
   bigEye(c, 16, 5, 'O', 3, 3);
   clearFrom(c, 10);
+  scaleTexture(c, { Z: 'H' }, { Z: 'g' });
   c.outline();
   waterRing(c, 10, 10, 9.5, 2.6, f, 344);
   return c;
@@ -533,6 +526,7 @@ function hermitCrab(f: number) {
     c.rect(ex, 2, 2, 2, 'W');
     c.set(ex + 1, 3, 'O');
   }
+  speckle(c, { S: ['s', 'W'], s: ['N', 'S'] }, new RNG(20), 0.05);
   c.outline();
   groundShadow(c, 8, 12.6, 6.5, 1);
   return c;
@@ -616,6 +610,7 @@ function naga(f: number) {
     bigEye(c, hx - 1, hy - 2, 'Y', 3, 4, 1);
     if (f) c.line(hx + r * 2.1, hy + 1, hx + r * 2.1 + 2, hy + 2, 'R');
   }
+  scaleTexture(c, { G: 'H' }, { G: 'g' });
   c.outline();
   groundShadow(c, 18, 35.8, 17, 1.8, 0.32);
   return c;
@@ -658,6 +653,7 @@ function garuda(f: number) {
   c.set(20, 13, 'p');
   // ปีกหน้า (ใกล้)
   part(c, (p) => wing(p, 21, 19, 16, up, feathers, 8));
+  fur(c, { '#e0a040': '#a0662a', Y: '#e0a040' }, 24, 0.3);
   c.outline();
   groundShadow(c, 20, 38.6, 9, 1.4, 0.18);
   return c;
@@ -691,6 +687,7 @@ function qilin(f: number) {
   c.set(30, 12, 'p');
   c.set(34, 11, 'O');
   c.line(35, 12, 35, 15, 'C');
+  scaleTexture(c, { '#e0a040': '#a0662a' }, { '#e0a040': 'Y' });
   c.outline();
   // ประกายสายฟ้าที่กีบ
   for (const [x, y] of f ? [[7, 27], [21, 26], [12, 25]] : [[10, 27], [19, 27], [4, 25]]) {
@@ -820,6 +817,8 @@ function kochasi(f: number) {
   c.set(38, 18, 'W');
   bigEye(c, 29, 9, 'O', 4, 4, 1);
   c.set(33, 14, 'p');
+  fur(c, { N: 'M', S: 'N', M: 'm' }, 21, 0.4);
+  speckle(c, { D: ['F', 'L'], L: ['D', 'w'] }, new RNG(22), 0.03);
   c.outline();
   groundShadow(c, 17, 31.6, 13, 1.8, 0.32);
   return c;
@@ -857,6 +856,7 @@ function frostDragon(f: number) {
   bigEye(c, 31, 8, 'O', 4, 4, 1);
   c.set(36, 13, 'p');
   part(c, (p) => wing(p, 21, 19, 17, up, ['W', 'C', 'b', 'B'], 8));
+  scaleTexture(c, { B: 'U' }, { B: 'b' });
   c.outline('U');
   // ลมหายใจเย็น
   if (f !== 1) for (const [x, y] of [[42, 12], [43, 14], [43, 10]]) c.set(x, y, 'w');
@@ -907,6 +907,7 @@ function stoneTurtle(f: number) {
   }
   c.line(11, 11, 11, 6, 'm');
   part(c, (p) => p.blob(11, 4.5, 2.6, 2.2, ['V', 'H', 'G', 'g']));
+  speckle(c, { D: ['F', 'L'], L: ['D', 'w'], F: ['#1d2033', 'D'] }, new RNG(23), 0.06);
   c.outline();
   groundShadow(c, 23, 29.6, 19, 2, 0.34);
   return c;
@@ -1081,8 +1082,10 @@ export function creatureIcons(): Record<string, PixelCanvas> {
 
 /** สร้าง texture + anim ของสัตว์ชุดใหม่ทั้งหมด (เรียกจาก TextureFactory) */
 export function buildCreatureTextures(scene: Phaser.Scene) {
-  for (const [key, a] of Object.entries(CREATURE_ART)) {
-    strip(scene, key, a.frames());
-    anim(scene, `${key}_walk`, key, a.anim, a.rate);
-  }
+  withRes(SPRITE_RES, () => {
+    for (const [key, a] of Object.entries(CREATURE_ART)) {
+      strip(scene, key, a.frames());
+      anim(scene, `${key}_walk`, key, a.anim, a.rate);
+    }
+  });
 }

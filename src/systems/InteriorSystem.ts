@@ -278,7 +278,7 @@ export class InteriorSystem {
   }
 
   private label(x: number, y: number, text: string, color: string) {
-    return txt(this.s, x, y, text, 9, color, { align: 'center' }).setOrigin(0.5, 1).setStroke('#0b0d1f', 3).setResolution(4).setDepth(y + 2000);
+    return txt(this.s, x, y, text, 9, color, { align: 'center', fontStyle: '600' }).setOrigin(0.5, 1).setStroke('#0b0d1f', 3).setResolution(4).setDepth(y + 2000);
   }
 
   // ------------------------------------------------------------------

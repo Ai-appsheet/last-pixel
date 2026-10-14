@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { Sfx } from '../core/AudioManager';
-import { COLORS, HEAD_FONT, panel, txt } from './widgets';
+import { COLORS, fitPixel, panel, pixelTxt, txt } from './widgets';
 
 /** ปุ่มกลมเล็กบนแถบหัว (พับ/ปิด) — พื้นที่กดกว้างกว่าตัวปุ่ม ให้นิ้วกดง่าย */
 export function roundButton(scene: Phaser.Scene, x: number, y: number, r: number, color: number, label: string, onClick: () => void) {
@@ -70,9 +70,9 @@ export class UIWindow {
     bar.fillStyle(0xffffff, 0.35).fillRoundedRect(12, 8, w - 24, 5, 3);
     bar.lineStyle(2, 0xc28a50, 1).strokeRoundedRect(8, 6, w - 16, HEAD - 8, 8);
     this.header = scene.add.zone(8, 6, w - 16, HEAD - 8).setOrigin(0).setInteractive({ useHandCursor: true, draggable: true });
-    const t = txt(scene, 20, 6 + (HEAD - 8) / 2, title, 17, COLORS.ink, { fontFamily: HEAD_FONT, fontStyle: '700', stroke: '#fff2b0', strokeThickness: 2 }).setOrigin(0, 0.5);
-    t.setShadow(0, 1, '#c28a50', 0, false, true);
-    if (t.width > w - 110) t.setScale((w - 110) / t.width);
+    // ชื่อหน้าต่าง = ฟอนต์พิกเซลไทย สีเข้ม + เงาทองเข้ม 1 พิกเซล (ไม่มีขอบ)
+    const t = pixelTxt(scene, 20, 6 + (HEAD - 8) / 2, title, 18, COLORS.ink, {}, { outline: null, shadow: '#c28a50' }).setOrigin(0, 0.5);
+    fitPixel(t, w - 110);
     this.titleT = t;
     const cy = 6 + (HEAD - 8) / 2;
     // แสงวิ้งพาดแถบหัวทุก ~5 วิ (แถบเฉียงเล็กๆ วิ่งในแถบ ไม่ต้องใช้ mask)
@@ -104,8 +104,8 @@ export class UIWindow {
   /** เปลี่ยนชื่อบนแถบหัว (เช่น ตลาด ↔ ร้านค้าทางไกล) */
   setTitle(s: string) {
     if (this.titleT.text === s) return this;
-    this.titleT.setText(s).setScale(1);
-    if (this.titleT.width > this.w - 110) this.titleT.setScale((this.w - 110) / this.titleT.width);
+    this.titleT.setText(s);
+    fitPixel(this.titleT, this.w - 110);
     return this;
   }
 

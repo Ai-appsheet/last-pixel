@@ -3,7 +3,7 @@ import { Sfx } from '../core/AudioManager';
 import { quality } from '../core/Quality';
 import { PALETTE } from '../data/palette';
 import { reducedMotion } from './layout';
-import { pixelTxt, txt } from './widgets';
+import { fitPixel, txt } from './widgets';
 
 /**
  * ปุ่มสวยๆ แบบ pixel art วาดด้วยโค้ด: ไล่สีแนวตั้ง + ขอบบนสว่าง + ขอบล่างเข้ม + เงาตก + มุมมนแบบพิกเซล
@@ -233,9 +233,9 @@ export function iconTexture(scene: Phaser.Scene, name: FancyIcon): string {
 
 /** ย่อข้อความให้พอดีความกว้าง */
 export function fitText(t: Phaser.GameObjects.Text, maxW: number) {
-  // ตัวหนังสือพิกเซล (pixelTxt) มีสเกลพื้นฐาน ×2–3
-  const base = (t.getData('pxScale') as number | undefined) ?? 1;
-  t.setScale(t.width * base > maxW ? maxW / t.width : base);
+  // ตัวหนังสือพิกเซล (pixelTxt): ลดตัวคูณเลขเต็ม/สลับฟอนต์ ไม่ย่อเศษส่วน
+  if (t.getData('pxScale') !== undefined) return fitPixel(t, maxW);
+  t.setScale(t.width > maxW ? maxW / t.width : 1);
   return t;
 }
 
@@ -305,10 +305,9 @@ export class FancyButton extends Phaser.GameObjects.Container {
 
     // ไอคอน + ข้อความ (จัดกึ่งกลางเป็นกลุ่ม)
     const size = opts.size ?? 18;
-    this.label = opts.pixel
-      ? pixelTxt(scene, 0, 0, opts.label, size + 2, this.enabled ? '#ffffff' : '#a9bccb').setOrigin(0, 0.5)
-      : txt(scene, 0, 0, opts.label, size, this.enabled ? '#ffffff' : '#a9bccb').setOrigin(0, 0.5);
-    if (!opts.pixel) this.label.setShadow(0, 2, '#0b0d1f', 0, true, true);
+    // ชื่อปุ่ม = Noto Sans Thai 600 (14–15 · ปุ่มหลักใหญ่ได้ถึง 18) + เงาตกบาง
+    this.label = txt(scene, 0, 0, opts.label, Math.max(14, Math.min(size, 18)), this.enabled ? '#ffffff' : '#a9bccb', { fontStyle: '600' }).setOrigin(0, 0.5);
+    this.label.setShadow(0, 2, '#0b0d1f', 0, false, true);
     if (opts.sub) {
       this.sub = txt(scene, 0, 0, opts.sub, Math.max(10, Math.round(size * 0.6)), this.enabled ? th.sub : '#a9bccb').setOrigin(0, 0.5);
       this.sub.setStroke('#0b0d1f', 3);
@@ -354,7 +353,7 @@ export class FancyButton extends Phaser.GameObjects.Container {
 
   /** วางไอคอน + ชื่อปุ่ม + บรรทัดรองให้อยู่กลางปุ่ม */
   private layoutContent(dy = 0) {
-    const maxW = this.cw * P - 28;
+    const maxW = this.cw * P - 20;
     const iconW = this.icon ? this.icon.displayWidth + 8 : 0;
     fitText(this.label, maxW - iconW);
     if (this.sub) fitText(this.sub, maxW - iconW);

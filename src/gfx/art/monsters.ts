@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { RNG } from '../../core/RNG';
-import { PixelCanvas, dither } from '../PixelCanvas';
+import { PixelCanvas, dither, mixHex, withRes } from '../PixelCanvas';
+import { markHd, SPRITE_RES } from '../hd';
 
 // มอนสเตอร์ + กระสุน: วาดด้วยโค้ดทั้งหมด (ขอบ 'O', แสงจากซ้ายบน, เงาวงรีที่ฐาน)
 // ด้านข้างหันขวาเสมอ (เกมจะ flipX เมื่อหันซ้าย)
@@ -86,13 +87,127 @@ export const CHIBI_HUMANOID: Record<View, string[][]> = {
   side: [0, 1, 0].map((i) => [...CH_HEAD_SIDE, ...CH_BODY_SIDE, ...CH_LEGS_SIDE[i]]),
 };
 
+// ---------------------------------------------------------------- มนุษย์จิบิ HD 32×36
+// ขยายลายช่องสีด้วย Scale2x (มุมเฉียงมน) → เส้นขอบด้านรับแสงบาง 1 พิกเซลจริง → วาดหน้า (ตา/ปาก/แก้ม) ใหม่ที่ความละเอียดจริง
+
+function scale2xRows(rows: string[]): string[][] {
+  const w = Math.max(...rows.map((r) => r.length));
+  const at = (x: number, y: number) => (y < 0 || y >= rows.length || x < 0 || x >= w ? '.' : rows[y][x] ?? '.');
+  const out: string[][] = Array.from({ length: rows.length * 2 }, () => new Array(w * 2).fill('.'));
+  for (let y = 0; y < rows.length; y++) {
+    for (let x = 0; x < w; x++) {
+      const E = at(x, y);
+      const A = at(x, y - 1);
+      const B = at(x + 1, y);
+      const C = at(x - 1, y);
+      const D = at(x, y + 1);
+      out[y * 2][x * 2] = C === A && C !== D && A !== B ? A : E;
+      out[y * 2][x * 2 + 1] = A === B && A !== C && B !== D ? B : E;
+      out[y * 2 + 1][x * 2] = D === C && D !== B && C !== A ? C : E;
+      out[y * 2 + 1][x * 2 + 1] = B === D && B !== A && D !== C ? D : E;
+    }
+  }
+  return out;
+}
+
+/** เส้นขอบ 'O' ด้านนอกฝั่งรับแสง (ซ้าย/บน) เหลือ 1 พิกเซลจริง (ด้านเงายังหนา 2 แบบเดียวกับ PixelCanvas.outline) */
+function thinLitOutline(g: string[][]): string[] {
+  const at = (x: number, y: number) => g[y]?.[x] ?? '.';
+  const del: [number, number][] = [];
+  for (let y = 0; y < g.length; y++) {
+    for (let x = 0; x < g[y].length; x++) {
+      if (g[y][x] !== 'O') continue;
+      if ((at(x - 1, y) === '.' && at(x + 1, y) === 'O' && at(x + 2, y) !== '.') || (at(x, y - 1) === '.' && at(x, y + 1) === 'O' && at(x, y + 2) !== '.')) del.push([x, y]);
+    }
+  }
+  for (const [x, y] of del) g[y][x] = '.';
+  return g.map((r) => r.join(''));
+}
+
+/** เฟรมมนุษย์จิบิ HD (ลายช่องสีที่ความละเอียดจริง 32×36) */
+export const CHIBI_HUMANOID_HD: Record<View, string[][]> = {
+  down: CHIBI_HUMANOID.down.map((f) => thinLitOutline(scale2xRows(f))),
+  up: CHIBI_HUMANOID.up.map((f) => thinLitOutline(scale2xRows(f))),
+  side: CHIBI_HUMANOID.side.map((f) => thinLitOutline(scale2xRows(f))),
+};
+
+/** รายละเอียด HD ตัว/ผมของมนุษย์จิบิ: วงแสงบนผม + ร่องผมด้านหลัง · คอเสื้อ · หัวเข็มขัด · ประกายรองเท้า */
+function humanoidHd(c: PixelCanvas, view: View, colors: Record<string, string>) {
+  const col = (k: string) => colors[k] ?? k;
+  const hair = col('1');
+  const shine = col('8');
+  const strand = mixHex(hair, '#1a1c2c', 0.35);
+  // วงแสงบนผม (ซ้าย 2/3 ของหัว เว้นช่องเป็นช่อ)
+  for (let X = 4; X < 28; X++) {
+    if (X % 4 === 3 || X > 20) continue;
+    let top = -1;
+    for (let Y = 0; Y < 12; Y++) if (c.hget(X, Y) === hair) {
+      top = Y;
+      break;
+    }
+    if (top < 0) continue;
+    const Y = top + 3 + (X < 10 ? 1 : 0);
+    for (const yy of [Y, Y + 1]) if (c.hget(X, yy) === hair) c.hset(X, yy, shine);
+  }
+  if (view === 'up') {
+    for (let X = 6; X < 27; X += 5) for (let Y = 8; Y < 19; Y++) if ((X + Y) % 7 && c.hget(X, Y) === hair) c.hset(X, Y, strand);
+    for (let Y = 22; Y < 26; Y++) if (c.hget(15, Y) === col('4')) c.hset(15, Y, col('5')); // ตะเข็บหลังเสื้อ
+  } else if (view === 'down') {
+    // คอเสื้อ V + หัวเข็มขัด
+    for (const [X, Y, k] of [[14, 22, '5'], [17, 22, '5'], [15, 22, '2'], [16, 22, '2'], [15, 23, '5'], [16, 23, '5']] as [number, number, string][]) {
+      if (c.hget(X, Y) === col('4')) c.hset(X, Y, col(k));
+    }
+    const belt = col('n');
+    if (c.hget(15, 26) === belt) {
+      c.hset(15, 26, mixHex(belt, '#ffcd75', 0.75));
+      c.hset(16, 26, mixHex(belt, '#ffcd75', 0.55));
+    }
+  }
+  // ประกายหัวรองเท้า
+  const shoe = col('7');
+  for (let Y = 30; Y < c.H; Y++) for (let X = 0; X < c.W; X++) {
+    if (c.hget(X, Y) === shoe && c.hget(X, Y - 1) !== shoe && c.hget(X - 1, Y) !== shoe) c.hset(X, Y, mixHex(shoe, '#ffffff', 0.35));
+  }
+}
+
+/** หน้า HD ของมนุษย์จิบิ: ตาอนิเมะ + ปากยิ้ม + แก้มระเรื่อ (สีจากช่อง 3=ตา 9=เงาผิว p=แก้ม) */
+export function humanoidFace(c: PixelCanvas, view: View, colors: Record<string, string>, eyes = true) {
+  if (c.res < 2) return;
+  humanoidHd(c, view, colors);
+  if (view === 'up') return;
+  const iris = colors[3] ?? '3';
+  const shade = colors[9] ?? '9';
+  const blush = colors.p ?? 'p';
+  const mouth = mixHex(shade, '#5a1e2e', 0.35);
+  if (view === 'down') {
+    if (eyes) {
+      bigEye(c, 3, 5, iris, 3, 3);
+      bigEye(c, 10, 5, iris, 3, 3);
+    }
+    for (const [x, y] of [[14, 18], [17, 18], [15, 19], [16, 19]]) c.hset(x, y, mouth);
+    for (const bx of [6, 24]) {
+      c.hset(bx, 17, mixHex(blush, '#ffffff', 0.35));
+      c.hset(bx + 1, 16, mixHex(blush, '#ffffff', 0.35));
+    }
+  } else {
+    if (eyes) bigEye(c, 9, 5, iris, 3, 3);
+    c.hset(26, 18, mouth);
+    c.hset(25, 19, mouth);
+  }
+}
+
 /**
  * ตาโตแบบอนิเมะ w×h: แถวบน = ขนตา 'O', ประกายใหญ่ 'W' ซ้ายบน, ประกายจิ๋วขวาล่าง (ถ้าสูง ≥4)
  * angry = คิ้วขมวด (1 = เฉียงลงไปทางขวา, -1 = ไปทางซ้าย) สำหรับบอส/ตัวดุ
+ * ผืน HD: ม่านตาไล่ 3 เฉด + รูม่านตา + ประกาย 2 จุด + ขนตามุมโค้ง
  */
 export function bigEye(c: PixelCanvas, x: number, y: number, iris = 'O', w = 3, h = 3, angry = 0) {
   x = Math.round(x);
   y = Math.round(y);
+  if (c.res > 1) {
+    hdEye(c, x, y, iris, w, h, angry);
+    return;
+  }
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) c.set(x + i, y + j, j === 0 ? 'O' : iris);
   c.set(x, y + 1, 'W');
   if (w >= 3 && h >= 4) c.set(x + 1, y + 1, 'W');
@@ -102,7 +217,77 @@ export function bigEye(c: PixelCanvas, x: number, y: number, iris = 'O', w = 3, 
   else if (angry < 0) for (const [dx, dy] of [[w, -2], [w - 1, -2], [w - 2, -1], [w - 3, -1]]) c.set(x + dx, y + dy, 'O');
 }
 
+/** โทนม่านตา: [เข้ม, กลาง, สว่าง] (ตาดำ = น้ำเงินหมึกอ่อน ๆ ที่ขอบล่าง) */
+function irisTones(iris: string): [string, string, string] {
+  if (iris === 'O') return ['O', 'O', '#3a4466'];
+  return [mixHex(iris, '#1a1c2c', 0.5), iris, mixHex(iris, '#fff6e0', 0.38)];
+}
+
+function hdEye(c: PixelCanvas, x: number, y: number, iris: string, w: number, h: number, angry: number) {
+  const r = c.res;
+  const X = x * r;
+  const Y = y * r;
+  const EW = w * r;
+  const EH = h * r;
+  const [dk, md, lt] = irisTones(iris);
+  for (let j = 0; j < EH; j++) {
+    for (let i = 0; i < EW; i++) {
+      // ขอบมนมุมล่าง (เติมสีผิวข้าง ๆ ทับลายตาเดิม)
+      if (j === EH - 1 && (i === 0 || i === EW - 1)) {
+        const side = c.hget(i === 0 ? X - 1 : X + EW, Y + j);
+        if (side && side !== 'O') c.hset(X + i, Y + j, side);
+        continue;
+      }
+      const t = j / (EH - 1);
+      const col = j < r ? 'O' : t < 0.36 ? dk : t < 0.78 ? md : lt;
+      c.hset(X + i, Y + j, col);
+    }
+  }
+  // ขนตาหนาโค้งลงที่หัว/หางตา
+  c.hset(X - 1, Y + 1, 'O');
+  c.hset(X + EW, Y + 1, 'O');
+  c.hset(X, Y + r, 'O');
+  c.hset(X + EW - 1, Y + r, 'O');
+  // รูม่านตา (ตาสี)
+  if (iris !== 'O') {
+    const pw = Math.max(2, Math.round(EW / 3));
+    const px0 = X + Math.floor((EW - pw) / 2);
+    for (let j = Math.round(EH * 0.35); j < Math.round(EH * 0.72); j++) for (let i = 0; i < pw; i++) c.hset(px0 + i, Y + j, mixHex(dk, '#1a1c2c', 0.55));
+  }
+  // ประกายใหญ่ซ้ายบน + ประกายจิ๋วขวาล่าง
+  const big = w >= 3 && h >= 4 ? 3 : 2;
+  for (let j = 0; j < 2; j++) for (let i = 0; i < big; i++) if (!(j === 1 && i === big - 1 && big === 3)) c.hset(X + 1 + i, Y + r + j, 'W');
+  if (h >= 3) c.hset(X + EW - 2, Y + EH - 2, 'W');
+  if (h >= 4) c.hset(X + EW - 3, Y + EH - 2, lt === 'W' ? 'W' : mixHex(lt, '#ffffff', 0.5));
+  // คิ้วขมวด (เส้นเฉียงหนา 2 พิกเซลจริง)
+  if (angry) {
+    const len = 4 * r;
+    for (let i = 0; i < len; i++) {
+      const bx = angry > 0 ? X - r + i : X + EW + r - 1 - i;
+      const by = Y - 2 * r + Math.round((i * r) / (len - 1));
+      c.hset(bx, by, 'O');
+      c.hset(bx, by + 1, 'O');
+    }
+  }
+}
+
 export function cuteEye(c: PixelCanvas, x: number, y: number, iris = 'O', tall = 2) {
+  if (c.res > 1) {
+    const r = c.res;
+    const [dk, md, lt] = irisTones(iris);
+    const EH = tall * r;
+    for (let j = 0; j < EH; j++) {
+      for (let i = 0; i < 2 * r; i++) {
+        if ((j === 0 || j === EH - 1) && (i === 0 || i === 2 * r - 1)) continue; // มุมมน
+        c.hset(x * r + i, y * r + j, j < EH * 0.4 ? dk : j < EH - 1 ? md : lt);
+      }
+    }
+    c.hset(x * r + 1, y * r + 1, 'W');
+    c.hset(x * r + 1, y * r + 2, 'W');
+    c.hset(x * r + 2, y * r + 1, 'W');
+    c.hset(x * r + 2 * r - 2, y * r + EH - 2, iris === 'O' ? '#3a4466' : 'W');
+    return;
+  }
   for (let j = 0; j < tall; j++) {
     c.set(x, y + j, iris);
     c.set(x + 1, y + j, iris);
@@ -122,17 +307,22 @@ export function groundShadow(c: PixelCanvas, cx: number, cy: number, rx: number,
   for (let i = 0; i < s.px.length; i++) if (s.px[i] && !c.px[i]) c.px[i] = s.px[i];
 }
 
-/** แรเงาแบบขอบ: ขอบซ้าย/บน = สว่าง, ขอบขวา/ล่าง = มืด (สำหรับรูปทรงท่อ) */
+/** แรเงาแบบขอบ: ขอบซ้าย/บน = สว่าง, ขอบขวา/ล่าง = มืด (สำหรับรูปทรงท่อ) — ผืน HD ไล่ที่พิกเซลจริง (ขอบบาง ละเอียดขึ้น) */
 export function shadeEdges(c: PixelCanvas, base: string, light: string, dark: string) {
+  const solid = (x: number, y: number) => {
+    const p = c.hget(x, y);
+    return !!p && !isShadow(p);
+  };
   const ops: [number, number, string][] = [];
-  for (let y = 0; y < c.h; y++) {
-    for (let x = 0; x < c.w; x++) {
-      if (c.get(x, y) !== base) continue;
-      if (!solidAt(c, x - 1, y) || !solidAt(c, x, y - 1)) ops.push([x, y, light]);
-      else if (!solidAt(c, x + 1, y) || !solidAt(c, x, y + 1) || (!solidAt(c, x + 1, y + 1) && dither(x, y) > 0)) ops.push([x, y, dark]);
+  for (let y = 0; y < c.H; y++) {
+    for (let x = 0; x < c.W; x++) {
+      if (c.hget(x, y) !== base) continue;
+      if (!solid(x - 1, y) || !solid(x, y - 1)) ops.push([x, y, light]);
+      else if (!solid(x + 1, y) || !solid(x, y + 1) || (!solid(x + 1, y + 1) && dither(x, y) > 0)) ops.push([x, y, dark]);
+      else if (c.res > 1 && (!solid(x + 2, y) || !solid(x, y + 2)) && dither(x, y) > 0.2) ops.push([x, y, dark]);
     }
   }
-  for (const [x, y, col] of ops) c.set(x, y, col);
+  for (const [x, y, col] of ops) c.hset(x, y, col);
 }
 
 /** ตีขอบ 'O' รอบจุดที่ระบุ (เฉพาะช่องว่าง) — ใช้กับของที่แปะเพิ่มบน sprite ที่มีขอบแล้ว */
@@ -159,21 +349,27 @@ export function part(c: PixelCanvas, draw: (p: PixelCanvas) => void) {
 
 /** ลบพิกเซลทึบตั้งแต่แถว y ลงไป */
 export function clearFrom(c: PixelCanvas, y0: number) {
-  for (let y = y0; y < c.h; y++) for (let x = 0; x < c.w; x++) if (solidAt(c, x, y)) c.set(x, y, null);
+  for (let y = Math.round(y0) * c.res; y < c.H; y++) {
+    for (let x = 0; x < c.W; x++) {
+      const p = c.hget(x, y);
+      if (p && !isShadow(p)) c.hset(x, y, null);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- texture helpers
 
 export function strip(scene: Phaser.Scene, key: string, frames: PixelCanvas[]) {
   if (scene.textures.exists(key)) return;
-  const w = frames[0].w;
-  const h = frames[0].h;
+  const w = frames[0].W;
+  const h = frames[0].H;
   const tex = scene.textures.createCanvas(key, w * frames.length, h)!;
   frames.forEach((pc, i) => {
-    pc.draw(tex.getContext(), i * w, 0);
+    pc.blit(tex.getContext(), i * w, 0);
     tex.add(i, 0, i * w, 0, w, h);
   });
   tex.refresh();
+  if (frames[0].res > 1) markHd(tex, frames[0].res);
 }
 
 export function anim(scene: Phaser.Scene, key: string, tex: string, frames: number[], frameRate: number) {
@@ -181,16 +377,24 @@ export function anim(scene: Phaser.Scene, key: string, tex: string, frames: numb
   scene.anims.create({ key, frames: scene.anims.generateFrameNumbers(tex, { frames }), frameRate, repeat: -1 });
 }
 
+/** เฟรม HD หนึ่งเฟรมของมนุษย์จิบิ (ผืน 16×18 ตรรกะ · res 2) */
+export function humanoidFrame(rows: string[], view: View, colors: Record<string, string>, eyes = true): PixelCanvas {
+  const c = new PixelCanvas(16, 18, SPRITE_RES).hrows(rows, 0, 0, colors);
+  humanoidFace(c, view, colors, eyes);
+  return c;
+}
+
 function humanoidMonster(
   scene: Phaser.Scene,
   key: string,
   colors: Record<string, string>,
   overlay?: (c: PixelCanvas, view: View, frame: number) => void,
+  eyes = true,
 ) {
   const frames: PixelCanvas[] = [];
   for (const v of ['down', 'up', 'side'] as View[]) {
-    CHIBI_HUMANOID[v].forEach((rows, i) => {
-      const c = new PixelCanvas(16, 18).rows(rows, 0, 0, colors);
+    CHIBI_HUMANOID_HD[v].forEach((rows, i) => {
+      const c = humanoidFrame(rows, v, colors, eyes);
       overlay?.(c, v, i);
       frames.push(c);
     });
@@ -213,11 +417,10 @@ function slime(squash: boolean): PixelCanvas {
   c.blob(8, cy, rx, ry, ['T', 'G', 'g']);
   clearFrom(c, 12);
   // แกนใสด้านใน + ฟองอากาศ
-  for (let y = 0; y < 12; y++) {
-    for (let x = 0; x < 16; x++) {
-      if (c.get(x, y) === 'G' && y > cy + 1 && Math.abs(x + 0.5 - 8) < rx * 0.5 && dither(x, y) > 0.1) c.set(x, y, 'H');
-    }
-  }
+  const hh = 0.5 / c.res;
+  c.eachHi(0, 0, 15, 11, (x, y, X, Y) =>
+    c.hget(X, Y) === 'G' && y > cy + 1 && Math.abs(x + hh - 8) < rx * 0.5 && dither(X, Y) > 0.1 ? 'H' : undefined,
+  );
   for (let i = 0; i < 3; i++) {
     const x = rng.int(5, 11);
     const y = Math.round(cy + rng.range(0.5, ry - 1.5));
@@ -225,6 +428,15 @@ function slime(squash: boolean): PixelCanvas {
   }
   // ขอบล่างสะท้อนแสง
   for (let x = 0; x < 16; x++) if (c.get(x, 11) && c.get(x - 1, 11) && c.get(x + 1, 11)) c.set(x, 11, x % 2 ? 'T' : 'H');
+  if (c.res > 1) {
+    // HD: ประกายโค้งตามผิวเจล + จุดสะท้อนเล็ก ๆ
+    c.eachHi(0, 0, 15, 11, (x, y, X, Y) => {
+      const nx = (x + hh - 8) / rx;
+      const ny = (y + hh - cy) / ry;
+      const d = Math.sqrt(nx * nx + ny * ny);
+      return c.hget(X, Y) && d > 0.72 && d < 0.84 && nx < -0.25 && ny < -0.1 ? 'g' : undefined;
+    });
+  }
   // ไฮไลต์มันวาว
   const hx = Math.round(8 - rx * 0.5);
   const hy = Math.round(cy - ry * 0.55);
@@ -253,14 +465,18 @@ function bat(up: boolean): PixelCanvas {
   const shY = 4 + oy;
   for (const s of [0, 1]) {
     const X = (x: number) => (s ? 15 - x : x);
-    for (let x = 1; x <= 6; x++) {
-      const t = (x - 1) / 5;
-      const top = Math.round(tipY + (shY - tipY) * t);
-      const depth = Math.round(1 + t * (up ? 3 : 2)) - (x % 2 === 0 ? 1 : 0);
-      for (let y = top; y <= top + depth; y++) {
-        c.set(X(x), y, y === top ? 'U' : dither(x, y) > 0.3 ? 'U' : 'P');
-      }
-    }
+    // ปีกพังผืด (ไล่ที่พิกเซลจริง: ขอบปีกโค้งต่อเนื่อง ขอบล่างหยักเป็นซี่)
+    const r = c.res;
+    c.eachHi(1, 0, 6, 11, (x, y, Xh, Yh) => {
+      const t = Math.max(0, (x - 1) / 5);
+      const top = tipY + (shY - tipY) * t;
+      const depth = Math.round(1 + t * (up ? 3 : 2)) - (Math.floor(x) % 2 === 0 ? 1 : 0);
+      if (y < Math.round(top * r) / r || y >= Math.round(top) + depth + 1) return undefined;
+      const hx = s ? c.W - 1 - Xh : Xh;
+      const col = y < Math.round(top * r) / r + 1 / r || dither(Xh, Yh) > 0.3 ? 'U' : 'P';
+      c.hset(hx, Yh, col);
+      return undefined;
+    });
     // นิ้วปีก
     c.set(X(3), Math.round(tipY + (shY - tipY) * 0.4) + 1, 'U');
     c.set(X(1), tipY - 1 < 0 ? 0 : tipY, 'F');
@@ -340,9 +556,33 @@ function crab(f: number): PixelCanvas {
     p.set(6, 9, 'p');
     p.set(11, 9, 'p');
   });
+  speckle(c, { r: ['R', 'Y'], R: ['P', 'r'] }, new RNG(290), 0.04);
   c.outline();
   groundShadow(c, 9, 12.7, 8, 1.3);
   return c;
+}
+
+/** วงน้ำรอบตัว (สัตว์ที่ว่ายอยู่ผิวน้ำ) — ตัดส่วนใต้น้ำทิ้งก่อนเรียก · ผืน HD: ขอบคลื่นบาง + ฟองน้ำละเอียด */
+export function waterRing(c: PixelCanvas, cx: number, cy: number, rx: number, ry: number, f: number, seed: number) {
+  const rng = new RNG(seed + f * 7);
+  const hr = 0.5 / c.res;
+  const ring = c.res > 1 ? 0.86 : 0.8;
+  c.eachHi(Math.floor(cx - rx), Math.floor(cy - ry), Math.ceil(cx + rx), Math.ceil(cy + ry), (x, y, X, Y) => {
+    const nx = (x + hr - cx) / rx;
+    const ny = (y + hr - cy) / ry;
+    const d = Math.sqrt(nx * nx + ny * ny);
+    if (d > 1) return undefined;
+    const p = c.hget(X, Y);
+    const free = !p || isShadow(p);
+    const front = y + hr >= cy;
+    if (d > ring) return front || free ? (dither(X, Y) > 0.2 ? 'C' : d > 0.95 && c.res > 1 ? 'W' : 'b') : undefined;
+    if (Math.abs(d - (0.5 + f * 0.06)) < 0.07 / (c.res > 1 ? 1.6 : 1) && front && free) return 'C';
+    return free ? 'rgba(65,166,246,0.35)' : undefined;
+  });
+  for (let i = 0; i < 4; i++) {
+    const a = rng.range(0, Math.PI * 2);
+    c.set(cx + Math.cos(a) * rx * 0.9, cy + Math.sin(a) * ry * 0.9, 'W');
+  }
 }
 
 /** งูทะเล 22×20 โผล่จากน้ำ (มีวงคลื่นแทนเงา) */
@@ -397,33 +637,9 @@ function serpent(f: number): PixelCanvas {
   for (let x = 15; x <= 19; x++) c.set(x + sx, 6, 'O');
   c.set(16 + sx, 7, 'W');
   c.set(18 + sx, 7, 'W');
+  scaleTexture(c, { T: 'U' }, { T: 'b' });
   c.outline();
-  // น้ำ + วงคลื่น
-  const rx = 9.3 + f * 0.5;
-  const ry = 2.5;
-  const rng = new RNG(210 + f * 7);
-  for (let y = 12; y < 20; y++) {
-    for (let x = 0; x < 22; x++) {
-      const nx = (x + 0.5 - 11) / rx;
-      const ny = (y + 0.5 - 16.8) / ry;
-      const d = Math.sqrt(nx * nx + ny * ny);
-      if (d > 1) continue;
-      const p = c.get(x, y);
-      const free = !p || isShadow(p);
-      const front = y + 0.5 >= 16.8;
-      if (d > 0.8) {
-        if (front || free) c.set(x, y, dither(x, y) > 0.2 ? 'C' : 'b');
-      } else if (Math.abs(d - (0.5 + f * 0.06)) < 0.07 && front && free) {
-        c.set(x, y, 'C');
-      } else if (free) {
-        c.set(x, y, 'rgba(65,166,246,0.35)');
-      }
-    }
-  }
-  for (let i = 0; i < 4; i++) {
-    const a = rng.range(0, Math.PI * 2);
-    c.set(11 + Math.cos(a) * rx * 0.9, 16.8 + Math.sin(a) * ry * 0.9, 'W');
-  }
+  waterRing(c, 11, 16.8, 9.3 + f * 0.5, 2.5, f, 210); // น้ำ + วงคลื่น
   return c;
 }
 
@@ -469,19 +685,79 @@ function golem(f: number): PixelCanvas {
     });
   }
   // มอสบนผิวด้านบน
-  for (let y = 1; y < 19 + bob; y++) {
-    for (let x = 0; x < 24; x++) {
-      const p = c.get(x, y);
-      const above = c.get(x, y - 1);
-      if ((p === 'D' || p === 'L' || p === 'W') && (!above || above === 'O') && rng.chance(0.5)) {
-        c.set(x, y, rng.chance(0.4) ? 'g' : 'G');
-        if (rng.chance(0.5) && c.get(x, y + 1) && c.get(x, y + 1) !== 'O' && c.get(x, y + 1) !== 'C') c.set(x, y + 1, 'H');
-      }
-    }
-  }
+  moss(c, 1, 19 + bob, ['D', 'L', 'W'], rng, 0.5);
+  speckle(c, { D: ['F', 'L'], L: ['D', 'w'], F: ['#1d2033', 'D'] }, new RNG(501), 0.05);
   c.outline();
   groundShadow(c, 12, 24.6, 10, 1.6, 0.32);
   return c;
+}
+
+/**
+ * ขนสัตว์ HD: ขีดสั้นเฉียง 2–3 พิกเซลจริง สีเข้มกว่าพื้น (map: สีพื้น → สีขีด) เฉพาะในพื้นที่สีเดียวกัน
+ * กรอบตรรกะ [x0..x1]×[y0..y1]
+ */
+export function furStrokes(c: PixelCanvas, map: Record<string, string>, rng: RNG, n: number, x0: number, y0: number, x1: number, y1: number) {
+  const r = c.res;
+  for (let i = 0; i < n; i++) {
+    const X = rng.int(x0 * r, x1 * r + r - 1);
+    const Y = rng.int(y0 * r, y1 * r + r - 1);
+    const base = c.hget(X, Y);
+    const col = base ? map[base] : undefined;
+    if (!col) continue;
+    const len = rng.chance(0.5) ? 2 : 3;
+    const dx = rng.chance(0.5) ? 1 : 0;
+    for (let k = 0; k < len; k++) if (c.hget(X + (k === len - 1 ? dx : 0), Y + k) === base) c.hset(X + (k === len - 1 ? dx : 0), Y + k, col);
+  }
+}
+
+/** เกล็ด HD: ลายเกล็ดโค้งรูปตัว U สลับแถว (map: สีพื้น → สีเส้นเกล็ด) + จุดเงาวาวบนเกล็ด */
+export function scaleTexture(c: PixelCanvas, map: Record<string, string>, shine?: Record<string, string>) {
+  if (c.res < 2) return;
+  for (let Y = 0; Y < c.H; Y++) {
+    for (let X = 0; X < c.W; X++) {
+      const p = c.hget(X, Y);
+      if (!p || !map[p]) continue;
+      const bx = (X + ((Y >> 2) & 1) * 2) % 4;
+      const by = Y % 4;
+      if ((by === 2 && (bx === 0 || bx === 3)) || (by === 3 && (bx === 1 || bx === 2))) c.hset(X, Y, map[p]);
+      else if (shine?.[p] && by === 0 && bx === 1) c.hset(X, Y, shine[p]);
+    }
+  }
+}
+
+/** จุดผิวหิน/กระดอง HD: จุดเข้ม/สว่างเล็ก ๆ กระจาย (map: สีพื้น → [เข้ม, สว่าง]) */
+export function speckle(c: PixelCanvas, map: Record<string, [string, string]>, rng: RNG, density = 0.06) {
+  if (c.res < 2) return;
+  const n = Math.round(c.W * c.H * density);
+  for (let i = 0; i < n; i++) {
+    const X = rng.int(0, c.W - 1);
+    const Y = rng.int(0, c.H - 1);
+    const p = c.hget(X, Y);
+    const m = p ? map[p] : undefined;
+    if (m && c.hget(X + 1, Y) === p && c.hget(X, Y + 1) === p) c.hset(X, Y, rng.chance(0.65) ? m[0] : m[1]);
+  }
+}
+
+/** มอสขึ้นบนผิวด้านบนของหิน (ผืน HD: ทีละพิกเซลจริง เป็นกระจุกเล็ก + หยดย้อยลง) */
+export function moss(c: PixelCanvas, y0: number, y1: number, on: string[], rng: RNG, chance: number) {
+  const r = c.res;
+  for (let Y = Math.max(1, y0 * r); Y < y1 * r; Y++) {
+    for (let X = 0; X < c.W; X++) {
+      const p = c.hget(X, Y);
+      const above = c.hget(X, Y - 1);
+      if (!p || !on.includes(p) || (above && above !== 'O') || !rng.chance(chance)) continue;
+      const col = rng.chance(0.4) ? 'g' : 'G';
+      for (let j = 0; j < r; j++) {
+        const q = c.hget(X, Y + j);
+        if (q && q !== 'O' && q !== 'C') c.hset(X, Y + j, j && r > 1 && rng.chance(0.4) ? 'H' : col);
+      }
+      if (rng.chance(0.5)) {
+        const yb = Y + r + (r > 1 ? rng.int(0, 1) : 0);
+        const q = c.hget(X, yb);
+        if (q && q !== 'O' && q !== 'C') c.hset(X, yb, 'H');
+      }
+    }
+  }
 }
 
 /** เยติ 20×22 (ขนฟู) */
@@ -500,15 +776,17 @@ function yeti(f: number): PixelCanvas {
     p.set(10, 1 + bob, 'W');
     p.set(10, 2 + bob, 'W');
     p.set(12, 2 + bob, 'w');
-    for (let i = 0; i < 40; i++) {
-      const x = rng.int(4, 15);
-      const y = rng.int(3, 17) + bob;
-      const px = p.get(x, y);
-      if ((px === 'W' || px === 'w') && p.get(x, y + 1) && dither(x, y) > -0.2) {
-        p.set(x, y, 'L');
-        if (rng.chance(0.4)) p.set(x, y + 1, 'w');
+    if (p.res > 1) furStrokes(p, { W: 'w', w: 'L' }, rng, 150, 4, 3 + bob, 15, 17 + bob);
+    else
+      for (let i = 0; i < 40; i++) {
+        const x = rng.int(4, 15);
+        const y = rng.int(3, 17) + bob;
+        const px = p.get(x, y);
+        if ((px === 'W' || px === 'w') && p.get(x, y + 1) && dither(x, y) > -0.2) {
+          p.set(x, y, 'L');
+          if (rng.chance(0.4)) p.set(x, y + 1, 'w');
+        }
       }
-    }
     // หน้าเทาฟ้ากลม ตาโต เขี้ยวเล็ก (จิบิ)
     p.ellipse(10, 8.6 + bob, 4.4, 3, 'D');
     bigEye(p, 6, 6 + bob, 'B', 3, 4, 1);
@@ -552,29 +830,32 @@ function demonLord(f: number): PixelCanvas {
     tipY + 4 + (24 + bob - tipY - 4) * ((x - 1) / (shX - 1)) - 3.5 * Math.sin(((x - 1) / 3.67) * Math.PI) ** 2;
   for (const s of [0, 1]) {
     const X = (x: number) => (s ? M(x) : x);
-    for (let x = 1; x <= shX; x++) {
-      const top = Math.round(topAt(x));
-      const bot = Math.round(botAt(x));
-      for (let y = top; y <= bot; y++) {
-        const v = (y - top) / Math.max(1, bot - top) + dither(x, y) * 0.45;
-        c.set(X(x), y, y === top ? 'F' : v < 0.3 ? 'R' : v < 0.85 ? 'P' : 'U');
-      }
-    }
+    const r = c.res;
+    c.eachHi(1, 0, shX, 35, (x, y, Xh, Yh) => {
+      const xc = Math.max(1, x);
+      const top = Math.round(topAt(xc) * r) / r;
+      const bot = Math.round(botAt(xc) * r) / r;
+      if (y < top || y > bot + 1 - 1 / r) return undefined;
+      const v = (y - top) / Math.max(1, bot - top) + dither(Xh, Yh) * 0.45;
+      c.hset(s ? c.W - 1 - Xh : Xh, Yh, y < top + 1 / r ? 'F' : v < 0.3 ? 'R' : v < 0.85 ? 'P' : 'U');
+      return undefined;
+    });
     for (const fx of [1, 4.67, 8.33]) c.line(X(elX), elY, X(fx), botAt(Math.round(fx)), 'F');
     c.set(X(elX), elY - 1, 'L');
     c.set(X(1), tipY - 1, 'W');
   }
   // ผ้าคลุม
   part(c, (p) => {
-    for (let y = 13 + bob; y <= 32; y++) {
+    const r = p.res;
+    p.eachHi(0, 13 + bob, 31, 32, (x, y) => {
       const k = (y - 13 - bob) / (19 - bob);
-      const left = Math.ceil(15.5 - (4.5 + k * 5.5));
-      const right = 31 - left;
-      for (let x = left; x <= right; x++) {
-        if (y >= 31 && (x + f) % 3 === 0) continue;
-        p.set(x, y, x === left || x === right ? 'R' : x === left + 2 || x === right - 2 ? 'U' : 'P');
-      }
-    }
+      const left = r > 1 ? Math.round((15.5 - (4.5 + k * 5.5)) * r) / r : Math.ceil(15.5 - (4.5 + k * 5.5));
+      const right = 32 - 1 / r - left;
+      if (x < left || x > right) return undefined;
+      if (y >= 31 && (Math.floor(x) + f) % 3 === 0) return undefined;
+      const e = Math.min(x - left, right - x);
+      return e < 1 / r || (r > 1 && e < 1 && y > 20) ? 'R' : e >= 2 && e < 2 + 1 / r ? 'U' : r > 1 && e >= 2 + 1 / r && e < 3 && dither(x * r, y * r) > 0.2 ? 'U' : 'P';
+    });
   });
   // ขา + กีบ
   for (const s of [0, 1]) {
@@ -635,6 +916,7 @@ function demonLord(f: number): PixelCanvas {
   for (let x = 13; x <= 18; x++) c.set(x, 14 + bob, x === 13 ? 'y' : 'Y');
   c.set(15, 14 + bob, 'r');
   c.set(16, 14 + bob, 'r');
+  speckle(c, { R: ['P', 'r'], P: ['U', 'R'] }, new RNG(537), 0.025);
   c.outline();
   groundShadow(c, 16, 33.6, 11, 1.8, 0.34);
   return c;
@@ -817,6 +1099,12 @@ function impOverlay(c: PixelCanvas, v: View) {
 // ---------------------------------------------------------------- entry
 
 export function buildMonsterTextures(scene: Phaser.Scene): void {
+  withRes(SPRITE_RES, () => buildMonsterSprites(scene));
+  buildProjectiles(scene); // กระสุน/เอฟเฟกต์ ยังเป็นความละเอียดปกติ
+}
+
+/** มอน/บอส/มนุษย์จิบิ (HD) */
+function buildMonsterSprites(scene: Phaser.Scene) {
   strip(scene, 'slime', [slime(false), slime(true)]);
   anim(scene, 'slime_walk', 'slime', [0, 1], 4);
   strip(scene, 'bat', [bat(true), bat(false)]);
@@ -850,7 +1138,9 @@ export function buildMonsterTextures(scene: Phaser.Scene): void {
     { 1: 'R', 8: 'r', 2: 'R', 9: 'P', 3: 'Y', 4: 'R', 5: 'P', 6: 'F', 7: 'n', p: 'r', n: 'm' },
     impOverlay,
   );
+}
 
+function buildProjectiles(scene: Phaser.Scene) {
   strip(scene, 'fireball', [fireball(0), fireball(1)]);
   anim(scene, 'fireball_spin', 'fireball', [0, 1], 12);
   strip(scene, 'bone', [bone()]);

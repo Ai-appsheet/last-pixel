@@ -3,7 +3,8 @@ import { Sfx } from '../core/AudioManager';
 import { MetaSave } from '../core/MetaSave';
 import { CHARACTERS, HERO_CARDS, type CharacterDef, type HeroTier } from '../data/characters';
 import { CLASS_LOOKS, buildHeroTexture, heroKey } from '../gfx/art/heroes';
-import { button, COLORS, FONT, HEAD_FONT, heading, txt } from '../ui/widgets';
+import { setWorldScale } from '../gfx/hd';
+import { button, COLORS, FONT, heading, txt } from '../ui/widgets';
 import { artGroup, coverImage, queueArt } from '../ui/art';
 import { fadeIn, fadeTo } from '../ui/transition';
 import { applyUiScale } from '../ui/layout';
@@ -173,7 +174,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       if (!unlocked) img.setTint(0x6a6a7a);
       parts.push(img);
     } else {
-      const sp = this.add.sprite(CW / 2, py + ph - 8, heroTex(this, c.id), 0).setOrigin(0.5, 1).setScale(3);
+      const sp = setWorldScale(this.add.sprite(CW / 2, py + ph - 8, heroTex(this, c.id), 0).setOrigin(0.5, 1), 3);
       if (!unlocked) sp.setTintFill(0x555566);
       parts.push(sp);
     }
@@ -184,7 +185,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const badgeT = this.ink(bx, by, info.badge, info.badge === 'AI' ? 9 : 11, '#ffffff', { fontStyle: '700' }).setOrigin(0.5);
     parts.push(badge, badgeT);
     // ชื่อ + บทบาท (เส้นบางสองข้าง) + แถวท้าย
-    const name = this.ink(CW / 2, py + ph + 6, unlocked ? c.name : '???', 16, INK, { fontFamily: HEAD_FONT, fontStyle: '700' }).setOrigin(0.5, 0);
+    const name = this.ink(CW / 2, py + ph + 6, unlocked ? c.name : '???', 16, INK, { fontStyle: '600' }).setOrigin(0.5, 0);
     const role = this.ink(CW / 2, py + ph + 29, unlocked ? info.role : 'ยังไม่ปลดล็อก', 10, TIER_CSS[info.tier]).setOrigin(0.5, 0);
     const lines = this.add.graphics();
     const half = Math.min(role.width / 2 + 6, 44);
@@ -251,14 +252,14 @@ export class CharacterSelectScene extends Phaser.Scene {
       if (!unlocked) img.setTint(0x6a6a7a);
       d.add(img);
     } else {
-      const big = this.add.sprite(x + 16 + pw / 2, y + 16 + ph - 10, heroTex(this, c.id), 0).setOrigin(0.5, 1).setScale(5);
+      const big = setWorldScale(this.add.sprite(x + 16 + pw / 2, y + 16 + ph - 10, heroTex(this, c.id), 0).setOrigin(0.5, 1), 5);
       if (unlocked) big.play(`${key}_walk_down`);
       else big.setTintFill(0x555566);
       d.add(big);
     }
     const tx = x + 16 + pw + 14;
     const tw = w - (tx - x) - 18;
-    d.add(this.ink(tx, y + 14, unlocked ? c.name : '???', 26, INK, { fontFamily: HEAD_FONT, fontStyle: '700' }));
+    d.add(this.ink(tx, y + 14, unlocked ? c.name : '???', 24, INK, { fontStyle: '600' }));
     d.add(this.ink(tx, y + 50, unlocked ? `— ${info.role} —` : 'ยังไม่ปลดล็อก', 13, TIER_CSS[info.tier]));
     d.add(this.ink(tx, y + 72, unlocked ? c.desc : '', 13, '#4a445c', { wordWrap: { width: tw }, lineSpacing: 3, maxLines: 3 }));
     if (!unlocked) return;

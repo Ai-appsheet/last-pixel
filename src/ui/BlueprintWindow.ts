@@ -12,7 +12,7 @@ import type { GameScene } from '../scenes/GameScene';
 import { affordableTimes, craft, isHiddenRecipe, isPart, missingRaw, planConsume, rawCost, recipeNeeds, type MaterialPool } from '../systems/CraftingSystem';
 import { fitText } from './fancyButton';
 import { UIWindow } from './Window';
-import { placeArtCover, withItemArt, withItemThumb } from './itemArt';
+import { placeArtCover, showItemIcon, withItemArt, withItemThumb } from './itemArt';
 import { COLORS, txt } from './widgets';
 
 /**
@@ -135,9 +135,10 @@ class Btn {
   constructor(scene: Phaser.Scene, x: number, y: number, readonly w: number, h: number, label: string, size: number, onClick: () => void) {
     this.bg = scene.add.nineslice(x + w / 2, y + h / 2, 'ui_btn', undefined, w, h, 8, 8, 8, 8).setInteractive({ useHandCursor: true });
     this.hover = scene.add.nineslice(x + w / 2, y + h / 2, 'ui_btn_hover', undefined, w, h, 8, 8, 8, 8).setVisible(false);
-    this.t = txt(scene, x + w / 2, y + h / 2 - 1, label, size).setOrigin(0.5);
+    this.t = txt(scene, x + w / 2, y + h / 2 - 1, label, Math.max(13, size), COLORS.text, { fontStyle: '600' }).setOrigin(0.5);
+    this.t.setShadow(0, 1, '#0b0d1f', 0, false, true);
     fitText(this.t, w - 8);
-    this.badge = txt(scene, x + w - 1, y - 3, '', 9).setOrigin(1, 0).setBackgroundColor('#38b764').setPadding(3, 0, 3, 0).setVisible(false);
+    this.badge = txt(scene, x + w - 1, y - 3, '', 10, '#ffffff', { fontStyle: '600' }).setOrigin(1, 0).setBackgroundColor('#38b764').setPadding(3, 0, 3, 0).setVisible(false);
     this.bg
       .on('pointerover', () => {
         this.over = true;
@@ -167,7 +168,8 @@ class Btn {
   setActive(a: boolean) {
     this.active = a;
     this.hover.setVisible(a || this.over);
-    this.t.setColor(a ? COLORS.gold : COLORS.text);
+    // แท็บที่เลือก = พื้นทอง → ตัวหนังสือเข้ม (อ่านออก)
+    this.t.setColor(a ? COLORS.ink : COLORS.text).setShadow(0, 1, a ? '#fff2b0' : '#0b0d1f', 0, false, true);
   }
 
   setBadge(n: number) {
@@ -278,6 +280,8 @@ interface Card {
 interface Row {
   hit: Phaser.GameObjects.Rectangle;
   icon: Phaser.GameObjects.Image;
+  /** ภาพวาดวัตถุดิบมุมมน (แทน icon เมื่อมีภาพ) */
+  art: Phaser.GameObjects.Image;
   name: Phaser.GameObjects.Text;
   count: Phaser.GameObjects.Text;
   hint: Phaser.GameObjects.Text;
@@ -438,7 +442,7 @@ export class BlueprintWindow {
       ...this.secBtns.build.objects, ...this.secBtns.items.objects, ...this.chip.objects,
       zone, this.gridC, this.track, this.thumb, this.empty,
       ...this.subBtns.flatMap((s) => s.b.objects),
-      paper, ...this.detailParts, ...this.rows.flatMap((r) => [r.hit, r.icon, r.name, r.count, r.hint]), this.placeholder,
+      paper, ...this.detailParts, ...this.rows.flatMap((r) => [r.hit, r.icon, r.art, r.name, r.count, r.hint]), this.placeholder,
       ...this.goBuild.objects, ...this.demo.objects, ...this.fix.objects, ...this.goItem.objects, ...this.go5.objects, ...this.goMax.objects, ...this.upBtn.objects, ...this.pin.objects,
     ]);
     w.onClose = () => this.gs.build.cancel();
@@ -805,6 +809,7 @@ export class BlueprintWindow {
     const row: Row = {
       hit: s.add.rectangle(PX + 14, 0, PW - 28, 34, 0xffffff, 0.05).setOrigin(0).setInteractive({ useHandCursor: true }),
       icon: s.add.image(PX + 32, 0, 'px'),
+      art: s.add.image(PX + 32, 0, 'px').setVisible(false),
       name: txt(s, PX + 52, 0, '', 13),
       count: txt(s, PX + PW - 22, 0, '', 13).setOrigin(1, 0),
       hint: txt(s, PX + 52, 0, '', 11, COLORS.dim),
@@ -830,7 +835,7 @@ export class BlueprintWindow {
     this.goMax.setVisible(batch);
     this.pin.setVisible(has);
     if (!e) {
-      this.rows.forEach((r) => [r.hit, r.icon, r.name, r.count, r.hint].forEach((o) => o.setVisible(false)));
+      this.rows.forEach((r) => [r.hit, r.icon, r.art, r.name, r.count, r.hint].forEach((o) => o.setVisible(false)));
       btn.set(false, 'เลือกแปลนก่อน');
       this.upBtn.setVisible(false);
       return;
@@ -924,12 +929,23 @@ export class BlueprintWindow {
     const compact = pitch < 34;
     this.rows.forEach((row, i) => {
       const q = e.reqs[i];
-      [row.hit, row.icon, row.name, row.count, row.hint].forEach((o) => o.setVisible(!!q));
-      if (!q) return;
+      [row.hit, row.name, row.count, row.hint].forEach((o) => o.setVisible(!!q));
+      if (!q) {
+        showItemIcon(row.icon, row.art, null, 0);
+        return;
+      }
       row.hit.setY(y).setSize(PW - 28, pitch - 3).setFillStyle(q.ok ? 0xa7f070 : 0xef7d57, 0.08);
       (row.hit.input!.hitArea as Phaser.Geom.Rectangle).setSize(PW - 28, pitch - 3);
       row.icon.setY(y + (pitch - 3) / 2);
-      fitImage(row.icon, q.icon, q.frame, Math.min(26, pitch - 6), Math.min(26, pitch - 6), 2);
+      row.art.setY(row.icon.y);
+      const box = Math.min(28, pitch - 5);
+      // วัตถุดิบ = ภาพวาดมุมมน (ถ้ามี) · แปลน/สถานี = ไอคอนพิกเซลเดิม
+      if (q.item) showItemIcon(row.icon, row.art, q.item, box, box, q.icon, q.frame);
+      else {
+        showItemIcon(row.icon, row.art, null, 0);
+        row.icon.setVisible(true);
+        fitImage(row.icon, q.icon, q.frame, Math.min(26, pitch - 6), Math.min(26, pitch - 6), 2);
+      }
       const ty = compact ? y + (pitch - 3) / 2 - 8 : y + 2;
       row.name.setY(ty).setText(q.name).setColor(q.ok ? COLORS.text : '#ffd8c8');
       fitText(row.name, PW - 160);

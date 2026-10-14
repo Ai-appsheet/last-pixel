@@ -39,7 +39,7 @@ export class Rival extends Mob {
     super(scene, x, y, def);
     this.info = info;
     this.setData('rival', true);
-    this.tag = txt(scene, x, y, `${info.ranged ? '🏹' : '⚔'} ${info.name} Lv.${info.level}`, 6, '#ef7d57')
+    this.tag = txt(scene, x, y, `${info.ranged ? '🏹' : '⚔'} ${info.name} Lv.${info.level}`, 6, '#ef7d57', { fontStyle: '600' })
       .setOrigin(0.5, 1).setStroke('#0b0d1f', 2).setShadow(0, 1, '#0b0d1f', 0, true, true).setResolution(4).setDepth(1e6 - 2);
   }
 
@@ -136,7 +136,7 @@ export class Rival extends Mob {
   /** ข้อความลอยเหนือหัว */
   private say(text: string, color: string) {
     const s = this.scene;
-    const t = txt(s, this.x, this.y - this.displayHeight / 2 - 8, text, 6, color).setOrigin(0.5, 1).setStroke('#0b0d1f', 2).setShadow(0, 1, '#0b0d1f', 0, true, true).setResolution(4).setDepth(1e6 - 1);
+    const t = txt(s, this.x, this.y - this.displayHeight / 2 - 8, text, 6, color, { fontStyle: '600' }).setOrigin(0.5, 1).setStroke('#0b0d1f', 2).setShadow(0, 1, '#0b0d1f', 0, true, true).setResolution(4).setDepth(1e6 - 1);
     s.tweens.add({ targets: t, y: t.y - 10, alpha: 0, duration: 700, onComplete: () => t.destroy() });
   }
 

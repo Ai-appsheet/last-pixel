@@ -36,14 +36,14 @@ export class EventsPanel {
     this.open = !isCompact(scene);
     this.root = anchorGroup(scene, 0, 0, this.k, 2);
     const x = M;
-    this.boxBtn = txt(scene, x, 0, '', 12, '#1a1c2c').setPadding(7, 3, 7, 3).setBackgroundColor('#ffcd75');
+    this.boxBtn = txt(scene, x, 0, '', 12, '#1a1c2c', { fontStyle: '500' }).setPadding(7, 3, 7, 3).setBackgroundColor('#ffcd75');
     // ปุ่มพื้นทอง: ตัวหนังสือเข้มไม่ต้องมีขอบ/เงาดำ (อ่านชัดกว่า)
     this.boxBtn.setStroke('#ffcd75', 0).setShadow(0, 0, '#000', 0, false, false);
     this.boxBtn.setInteractive({ useHandCursor: true });
     this.boxBtn.on('pointerdown', () => this.claim());
     this.boxBtn.on('pointerover', () => (this.hoverBox = true));
     this.boxBtn.on('pointerout', () => (this.hoverBox = false));
-    this.odds = txt(scene, x, 0, '', 10, COLORS.dim).setBackgroundColor('#0b0d1fd9').setPadding(6, 2, 6, 2);
+    this.odds = txt(scene, x, 0, '', 11, COLORS.dim, { lineSpacing: 2 }).setBackgroundColor('#0b0d1fd9').setPadding(6, 2, 6, 2);
     this.head = txt(scene, x, 0, '', 11, COLORS.sea).setBackgroundColor('#0b0d1fcc').setPadding(6, 2, 6, 2);
     this.head.setInteractive({ useHandCursor: true });
     this.head.on('pointerdown', () => {
@@ -90,8 +90,9 @@ export class EventsPanel {
     }
     this.boxBtn.setPosition(M, y);
     y += this.boxBtn.height + 2;
-    const showOdds = this.hoverBox || (this.open && box.available);
-    this.odds.setVisible(showOdds).setText(`โอกาส: ${odds}${box.streak >= 3 || box.streak % 7 === 0 ? ' (โบนัสต่อเนื่อง)' : ' · ครบ 3 วันโอกาสดีขึ้น · วันที่ 7 การันตีทอง'}`).setPosition(M, y);
+    // โอกาสได้กล่อง = ป้ายเล็กตอนชี้ที่ปุ่มเท่านั้น (ไม่กินที่คอลัมน์ซ้าย)
+    const showOdds = this.hoverBox;
+    this.odds.setVisible(showOdds).setText(`โอกาส: ${odds}\n${box.streak >= 3 || box.streak % 7 === 0 ? 'โบนัสต่อเนื่องแล้ว' : 'ครบ 3 วันโอกาสดีขึ้น · วันที่ 7 การันตีทอง'}`).setPosition(M, y);
     if (showOdds) y += this.odds.height + 2;
     const marks = g.worldEvents.markers();
     const events = marks.filter((m) => m.kind === 'event');

@@ -1,3 +1,9 @@
+/* ฟอนต์พิกเซลไทย (GNU Unifont ตัดเหลือไทย+อังกฤษ · OFL) สำหรับหัวข้อ/ปุ่มในเกม — คมเฉพาะขนาด 16px (ขยายเลขเต็ม) */
+@font-face {
+  font-family: 'UnifontThai';
+  src: url('./fonts/unifont-thai.woff2') format('woff2');
+  font-display: swap;
+}
 html,
 body {
   margin: 0;

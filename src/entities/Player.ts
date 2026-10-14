@@ -8,6 +8,7 @@ import { Sfx } from '../core/AudioManager';
 import { EventBus } from '../core/EventBus';
 import type { GameScene } from '../scenes/GameScene';
 import { CLASS_LOOKS, buildHeroTexture, heroKey, type HeroLook } from '../gfx/art/heroes';
+import { resOf } from '../gfx/hd';
 import { plusMult } from '../data/loot';
 import { levelOfSlot } from '../data/upgrade';
 import { lookKey } from '../gfx/UpgradeLook';
@@ -117,7 +118,10 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.stamina = char.stats.stamina;
     scene.add.existing(this);
     scene.physics.add.existing(this);
-    this.body.setSize(8, 5).setOffset(6, 18);
+    // texture ฮีโร่เป็น HD (ละเอียด SPRITE_RES เท่า) → แสดง scale 1/res · ขนาด body เป็นพิกเซล texture จึงคูณ res (ขนาดในโลกเท่าเดิม 8×5)
+    const res = resOf(this.texture);
+    this.setScale(1 / res);
+    this.body.setSize(8 * res, 5 * res).setOffset(6 * res, 18 * res);
     this.setCollideWorldBounds(true);
     this.shadowImg = scene.add.image(x, y + 11, 'shadow').setDepth(-1);
     this.heldImg = scene.add.image(x, y, 'px').setVisible(false);

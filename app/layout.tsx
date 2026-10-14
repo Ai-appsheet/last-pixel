@@ -25,9 +25,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/* ฟอนต์เกม: Mitr (ข้อความ/ปุ่ม ทรงมน ไทย+ละติน) · Mali 700 (หัวข้อ ลายมือน่ารัก) · Press Start 2P (โลโก้/ตัวเลขพิกเซล) — ดู src/ui/widgets.ts */}
+        {/* ฟอนต์เกม: Noto Sans Thai (ข้อความ/ปุ่ม ทางการ อ่านง่าย) · UnifontThai พิกเซล (ชื่อหน้าต่าง/หัวข้อใหญ่ · app/globals.css) · Press Start 2P (โลโก้) · Mitr/Mali (หน้าโหลด) — ดู src/ui/widgets.ts */}
         {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@400;500;600;700&family=Mali:wght@600;700&family=Press+Start+2P&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600&family=Mitr:wght@400;500;600;700&family=Mali:wght@600;700&family=Press+Start+2P&display=swap" rel="stylesheet" />
       </head>
       <body>{children}</body>
     </html>

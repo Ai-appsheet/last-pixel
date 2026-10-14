@@ -22,7 +22,7 @@ import { extraArt } from './art/icons_extra';
 import { postArt } from './art/post';
 import { buildBuildingTextures } from './art/buildings';
 import { vehicleArt } from './art/vehicles';
-import { buildMonsterTextures, CHIBI_HUMANOID } from './art/monsters';
+import { buildMonsterTextures, CHIBI_HUMANOID_HD, humanoidFrame, strip } from './art/monsters';
 import { edgeTiles, groundTiles } from './art/terrain';
 
 export { TILE } from '../world/tiles';
@@ -58,38 +58,29 @@ function spriteTexture(scene: Phaser.Scene, key: string, rows: string[], w = 16,
   tex.refresh();
 }
 
-function sheetTexture(scene: Phaser.Scene, key: string, frames: string[][], w = 16, h = 16, colorMap?: Record<string, string>) {
-  const tex = scene.textures.createCanvas(key, w * frames.length, h)!;
-  const ctx = tex.getContext();
-  frames.forEach((rows, i) => {
-    paintRows(ctx, rows, i * w + Math.floor((w - rowsWidth(rows)) / 2), h - rows.length, colorMap);
-    tex.add(i, 0, i * w, 0, w, h);
-  });
-  tex.refresh();
-}
-
 /** texture จาก PixelCanvas หนึ่งรูป */
 function canvasTexture(scene: Phaser.Scene, key: string, pc: PixelCanvas) {
-  const tex = scene.textures.createCanvas(key, pc.w, pc.h)!;
-  pc.draw(tex.getContext());
+  const tex = scene.textures.createCanvas(key, pc.W, pc.H)!;
+  pc.blit(tex.getContext()); // ผืนใหม่ว่างเปล่า → เขียน ImageData ทีเดียว (เร็วกว่า fillRect ทีละพิกเซล)
   tex.refresh();
 }
 
 /** แผ่นรวมหลายรูปเรียงแนวนอน (ใช้เป็น tileset หรือ spritesheet) */
 function stripTexture(scene: Phaser.Scene, key: string, frames: PixelCanvas[]) {
-  const w = frames[0].w;
-  const h = frames[0].h;
+  const w = frames[0].W;
+  const h = frames[0].H;
   const tex = scene.textures.createCanvas(key, w * frames.length, h)!;
   frames.forEach((pc, i) => {
-    pc.draw(tex.getContext(), i * w, 0);
+    pc.blit(tex.getContext(), i * w, 0);
     tex.add(i, 0, i * w, 0, w, h);
   });
   tex.refresh();
 }
 
 function humanoid(scene: Phaser.Scene, key: string, colors: Record<string, string>) {
-  // เฟรม: 0-2 down, 3-5 up, 6-8 side
-  sheetTexture(scene, key, [...CHIBI_HUMANOID.down, ...CHIBI_HUMANOID.up, ...CHIBI_HUMANOID.side], 16, 18, colors);
+  // เฟรม: 0-2 down, 3-5 up, 6-8 side — วาด HD 32×36 (แสดงที่ scale 1/2)
+  const frames = (['down', 'up', 'side'] as const).flatMap((v) => CHIBI_HUMANOID_HD[v].map((rows) => humanoidFrame(rows, v, colors)));
+  strip(scene, key, frames);
   const anims = scene.anims;
   anims.create({ key: `${key}_walk_down`, frames: anims.generateFrameNumbers(key, { frames: [1, 0, 2, 0] }), frameRate: 8, repeat: -1 });
   anims.create({ key: `${key}_walk_up`, frames: anims.generateFrameNumbers(key, { frames: [4, 3, 5, 3] }), frameRate: 8, repeat: -1 });

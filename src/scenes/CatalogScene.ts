@@ -8,11 +8,19 @@ import { artGroup, bossArt, coverCrop, coverImage, queueArt, smallArtKey, type A
 import { itemArtKey, placeArtCover, queueItemArtIndex, withItemArt, withItemThumb } from '../ui/itemArt';
 import { TABS, type Block, type Entry, type SpriteRef } from './catalog/data';
 import { ScrollView, pixelFit, thaiWrap } from './catalog/ScrollView';
+import { resOf } from '../gfx/hd';
+
 import { BAND_TINT } from '../gfx/UpgradeLook';
 import { ensureLookKey, variantAnim } from '../gfx/UpgradeLook';
 import { applyUiScale } from '../ui/layout';
 import { fmtMoney } from '../ui/money';
 import { SaveManager } from '../core/SaveManager';
+
+/** pixelFit ที่คิดความละเอียด texture (sprite HD วัดเป็นพิกเซลโลกแล้วหารกลับเป็น scale จริง) */
+const hdFit = (s: Phaser.GameObjects.Sprite, boxW: number, boxH: number, maxS: number) => {
+  const r = resOf(s.texture);
+  return pixelFit(s.width / r, s.height / r, boxW, boxH, maxS) / r;
+};
 
 const W = 960;
 const H = 540;
@@ -402,7 +410,7 @@ export class CatalogScene extends Phaser.Scene {
       parts.push(glow, rim);
     }
     const icon = this.makeSprite(e.sprite, w / 2, 58, false).setOrigin(0.5, 1);
-    const base = pixelFit(icon.width, icon.height, w - 22, 50, 4);
+    const base = hdFit(icon, w - 22, 50, 4);
     icon.setScale(base);
     const name = txt(this, w / 2, 62, e.name, 13, e.info ? '#73eff7' : RARITY[e.rarity].color, { align: 'center', wordWrap: { callback: thaiWrap(w - 8) }, maxLines: 2 }).setOrigin(0.5, 0);
     parts.push(icon, name);
@@ -554,11 +562,11 @@ export class CatalogScene extends Phaser.Scene {
     sprites.push(s1);
     if (e.sprite2) {
       const s2 = this.makeSprite(e.sprite2, cx, floor, true).setOrigin(0.5, 1);
-      const sc = Math.min(pixelFit(s1.width, s1.height, p.w / 2 - 16, 104, 5), pixelFit(s2.width, s2.height, p.w / 2 - 16, 104, 5));
+      const sc = Math.min(hdFit(s1, p.w / 2 - 16, 104, 5), hdFit(s2, p.w / 2 - 16, 104, 5));
       s1.setScale(sc).setX(cx - p.w / 4 + 4);
       s2.setScale(sc).setX(cx + p.w / 4 - 4);
       sprites.push(s2);
-    } else s1.setScale(pixelFit(s1.width, s1.height, p.w - 24, 104, 4));
+    } else s1.setScale(hdFit(s1, p.w - 24, 104, 4));
     if (ownArt) {
       // มีภาพวาดเต็มกรอบแล้ว → ตัวในเกมย่อเป็นป้ายเล็กมุมขวาล่าง
       glow.setVisible(false);
@@ -688,7 +696,7 @@ export class CatalogScene extends Phaser.Scene {
         g.lineStyle(1, 0xffcd75, 0.4).strokeRoundedRect(0, y, cw, hh, 6);
         if (b.icon) {
           const s = add(this.makeSprite(b.icon, 22, y + hh / 2, false));
-          s.setScale(pixelFit(s.width, s.height, 34, 34, 2));
+          s.setScale(hdFit(s, 34, 34, 2));
         }
         return y + hh + 4;
       }
@@ -696,7 +704,7 @@ export class CatalogScene extends Phaser.Scene {
         const d = ITEMS[b.item];
         const slot = add(this.add.nineslice(19, y + 19, 'ui_slot', undefined, 36, 36, 6, 6, 6, 6));
         const s = add(this.makeSprite({ key: d?.icon ?? 'px' }, slot.x, slot.y, false));
-        s.setScale(pixelFit(s.width, s.height, 26, 26, 2));
+        s.setScale(hdFit(s, 26, 26, 2));
         const q = add(txt(this, 35, y + 36, `${b.qty}`, 11, '#ffffff').setOrigin(1, 1));
         q.setDepth(1);
         const nm = add(txt(this, 46, y + 1, `${d?.name ?? b.item} ×${b.qty}`, 14, RARITY[d?.rarity ?? 'common'].color));
@@ -708,7 +716,7 @@ export class CatalogScene extends Phaser.Scene {
         const ix = b.icon ? 34 : 0;
         if (b.icon) {
           const s = add(this.makeSprite(b.icon, 14, y + 12, false));
-          s.setScale(pixelFit(s.width, s.height, 26, 26, 2));
+          s.setScale(hdFit(s, 26, 26, 2));
         }
         let rw = 0;
         if (b.right) {
@@ -752,7 +760,7 @@ export class CatalogScene extends Phaser.Scene {
           const yy = y + Math.floor(i / per) * cell + cell / 2;
           add(this.add.nineslice(x, yy, 'ui_slot', undefined, cell - 4, cell - 4, 6, 6, 6, 6));
           const s = add(this.makeSprite(it.icon, x, yy, false));
-          s.setScale(pixelFit(s.width, s.height, cell - 12, cell - 12, 2));
+          s.setScale(hdFit(s, cell - 12, cell - 12, 2));
           // มีภาพวาด → ใช้ภาพวาด (ช่วงอัพเกรด = ย้อมสี + กรอบสีตามช่วง)
           if (it.art) {
             const band = it.band ?? null;

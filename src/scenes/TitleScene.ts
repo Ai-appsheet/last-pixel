@@ -82,7 +82,8 @@ export class TitleScene extends Phaser.Scene {
     };
     // รอด้วยการเช็กเป็นระยะ (ไม่พึ่ง event 'complete' — ซีน restart ระหว่างโหลดแล้ว event หาย)
     const waitArt = () => (this.load.isLoading() ? this.time.delayedCall(400, waitArt) : extras());
-    waitArt();
+    // เริ่มเฟรมถัดไป (ระหว่าง create() ซีนยังไม่ "active" → ถ้าภาพโหลดครบแล้ว เช่น restart การ์ดจะไม่ถูกวาด)
+    this.time.delayedCall(0, waitArt);
     Sfx.startMusic('title'); // เล่นจริงหลังแตะครั้งแรก (ปลดล็อกเสียง)
     this.input.once('pointerdown', () => Sfx.unlock());
   }
@@ -257,7 +258,7 @@ export class TitleScene extends Phaser.Scene {
       shines.push(s);
     });
     // ชื่อไทย: ตัวหนาคม ขอบเข้ม อ่านง่าย (ไม่ขยับ)
-    head.add(pixelTxt(this, cx, 136, 'เอาชีวิตรอดบนหมู่เกาะ', 24, COLORS.cream).setOrigin(0.5));
+    head.add(pixelTxt(this, cx, 136, 'เอาชีวิตรอดบนหมู่เกาะ', 32, COLORS.cream).setOrigin(0.5));
     if (this.still) return;
     head.setAlpha(0);
     this.tweens.add({ targets: head, alpha: 1, duration: 500, delay: 100 });
@@ -288,12 +289,13 @@ export class TitleScene extends Phaser.Scene {
     const pw = COL_W;
     const bw = 264;
     const bx = x + pw / 2;
-    const gap = 7;
-    const rows = 52 + gap + 40 + gap + 40 + gap + 34 + gap + 34;
-    fancyPanel(this, x, y, pw, rows + 30, 'gold');
+    // กล่องเมนูกะทัดรัด (ปุ่มหลัก 44 · รอง 34 · เล็ก 30 · ช่องไฟ 6) — ที่เหลือยกให้การ์ดสไลด์ด้านล่าง
+    const gap = 6;
+    const rows = 44 + gap + 34 + gap + 34 + gap + 30 + gap + 30;
+    fancyPanel(this, x, y, pw, rows + 20, 'gold');
     // การ์ดไฮไลต์วางใต้กล่องเมนูนี้
-    this.menuBottom = y + rows + 30;
-    let cy = y + 15;
+    this.menuBottom = y + rows + 20;
+    let cy = y + 10;
     const next = (h: number) => {
       const c = cy + h / 2;
       cy += h + gap;
@@ -303,33 +305,33 @@ export class TitleScene extends Phaser.Scene {
     if (save) {
       const ch = getCharacter(save.character);
       const info = [ch.name, `Lv.${save.player.level ?? 1}`, `วันที่ ${save.day}`].join(' · ');
-      fancyButton(this, bx, next(52), {
-        w: bw, h: 52, label: 'ไปเกาะของฉัน', pixel: true, sub: info, icon: 'play', theme: 'emerald', size: 21, breathe: true,
+      fancyButton(this, bx, next(44), {
+        w: bw, h: 44, label: 'ไปเกาะของฉัน', sub: info, icon: 'play', theme: 'emerald', size: 16, breathe: true,
         onClick: () => void this.enterIsland(),
       });
     } else {
-      fancyButton(this, bx, next(52), {
-        w: bw, h: 52, label: 'เริ่มผจญภัย', pixel: true, sub: 'เลือกตัวละคร · สุ่มเกาะ', icon: 'sword', theme: 'gold', size: 21, breathe: true,
+      fancyButton(this, bx, next(44), {
+        w: bw, h: 44, label: 'เริ่มผจญภัย', sub: 'เลือกตัวละคร · สุ่มเกาะ', icon: 'sword', theme: 'gold', size: 16, breathe: true,
         onClick: () => void this.enterIsland(),
       });
     }
-    fancyButton(this, bx, next(40), {
-      w: bw, h: 40, label: 'คลัง & ร้านค้า', pixel: true, icon: 'book', theme: 'teal', size: 16,
+    fancyButton(this, bx, next(34), {
+      w: bw, h: 34, label: 'คลัง & ร้านค้า', icon: 'book', theme: 'teal', size: 15,
       onClick: () => fadeTo(this, 'CatalogScene'),
     });
-    fancyButton(this, bx, next(40), {
-      w: bw, h: 40, label: 'ตัวละคร', pixel: true, icon: 'shield', theme: 'sky', size: 16,
+    fancyButton(this, bx, next(34), {
+      w: bw, h: 34, label: 'ตัวละคร', icon: 'shield', theme: 'sky', size: 15,
       onClick: () => fadeTo(this, 'CharacterSelectScene', {}),
     });
-    const sy = next(34);
-    fancyButton(this, bx - 68, sy, { w: 128, h: 34, label: 'ความสำเร็จ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showAchievements() });
-    fancyButton(this, bx + 68, sy, { w: 128, h: 34, label: 'อันดับ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showLeaderboard() });
+    const sy = next(30);
+    fancyButton(this, bx - 68, sy, { w: 128, h: 30, label: 'ความสำเร็จ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showAchievements() });
+    fancyButton(this, bx + 68, sy, { w: 128, h: 30, label: 'อันดับ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showLeaderboard() });
     // การตั้งค่าทั้งหมด (ควบคุม/เสียง/กล้อง/การแสดงผล) รวมอยู่ในปุ่มตั้งค่า
-    const sy2 = next(34);
-    fancyButton(this, bx - 68, sy2, { w: 128, h: 34, label: 'วิธีเล่น', icon: 'help', theme: 'steel', size: 14, onClick: () => this.showHelp() });
-    fancyButton(this, bx + 68, sy2, { w: 128, h: 34, label: 'ตั้งค่า', icon: 'pad', theme: 'steel', size: 14, onClick: () => this.showSettings() });
+    const sy2 = next(30);
+    fancyButton(this, bx - 68, sy2, { w: 128, h: 30, label: 'วิธีเล่น', icon: 'help', theme: 'steel', size: 14, onClick: () => this.showHelp() });
+    fancyButton(this, bx + 68, sy2, { w: 128, h: 30, label: 'ตั้งค่า', icon: 'pad', theme: 'steel', size: 14, onClick: () => this.showSettings() });
 
-    this.menuMsg = txt(this, bx, y + rows + 40, this.pendingMsg ?? '', 12, COLORS.bad, { align: 'center', wordWrap: { width: pw } }).setOrigin(0.5, 0).setStroke('#0b0d1f', 4);
+    this.menuMsg = txt(this, bx, y + rows + 30, this.pendingMsg ?? '', 12, COLORS.bad, { align: 'center', wordWrap: { width: pw } }).setOrigin(0.5, 0).setStroke('#0b0d1f', 4);
     this.pendingMsg = null;
     // มือถือ: ขยายคอลัมน์ซ้าย ×1.18 ยึดมุมซ้ายบน — ปุ่มใหญ่พอให้นิ้วกด (การ์ดไฮไลต์ด้านล่างซ่อนไว้)
     if (this.compact) {
@@ -410,16 +412,17 @@ export class TitleScene extends Phaser.Scene {
     frame.fillStyle(0x0b0d1f, 0.72).fillRoundedRect(x - 6, y - 6, cw + 12, ch + 32, 10);
     frame.lineStyle(2, 0xffcd75, 0.7).strokeRoundedRect(x - 6, y - 6, cw + 12, ch + 32, 10);
     box.add(frame);
-    const label = pixelTxt(this, x + 2, y + ch + 3, '', 18, COLORS.text).setOrigin(0, 0);
+    const label = txt(this, x + 2, y + ch + 4, '', 15, COLORS.text, { fontStyle: '600' }).setOrigin(0, 0);
     const sub = txt(this, x + cw, y + ch + 7, '', 10, COLORS.dim).setOrigin(1, 0);
-    const tag = pixelTxt(this, x + 8, y + 7, '', 16, '#ffffff').setPadding(4, 1, 4, 1);
+    const tag = txt(this, x + 8, y + 7, '', 12, '#ffffff', { fontStyle: '600' }).setPadding(5, 1, 5, 1);
     const count = txt(this, x + cw - 8, y + 7, '', 10, '#d6e4ee').setOrigin(1, 0).setStroke('#0b0d1f', 3);
     let cur: Phaser.GameObjects.Image | null = null;
     let i = -1;
     const show = (n: number) => {
       i = (n + list.length) % list.length;
       const s = list[i];
-      const img = coverCrop(this, s.art, cw, ch, x, y, s.focus ?? 0.45);
+      // ภาพสูงขึ้น → เอียงไปทางบน (เห็นหน้า/ส่วนหัวของภาพ)
+      const img = coverCrop(this, s.art, cw, ch, x, y, Math.min(s.focus ?? 0.3, 0.35));
       if (!img) return;
       box.addAt(img, 1);
       const old = cur;

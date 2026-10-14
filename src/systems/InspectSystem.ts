@@ -24,6 +24,19 @@ export interface InspectInfo {
   title: string;
   color: string;
   lines: string[];
+  /** id ภาพวาด (ไอเทม/อาคาร/มอน) สำหรับรูปเล็กบนการ์ด */
+  art?: string;
+  /** ข้อมูลสำคัญ 1 อย่างสำหรับป้ายเล็กตอนชี้ (เช่น HP 44/700) */
+  tip?: string;
+  /** จำนวนบรรทัดแรกที่แสดงเสมอ — ที่เหลือพับไว้ใต้ "▸ รายละเอียด" */
+  keep?: number;
+}
+
+/** ป้ายเล็กตอนชี้ + ตำแหน่งในโลก (หัวของเป้าหมาย) */
+export interface InspectTip {
+  info: InspectInfo;
+  x: number;
+  y: number;
 }
 
 type Target =
@@ -46,21 +59,52 @@ const AI_TEXT: Record<MobAI, string> = {
 };
 
 export class InspectSystem {
+  /** การ์ดเต็ม (เปิดเองด้วยคลิกขวา/แตะ/ปุ่ม I หรือโหมดอัพเกรด) — null = ไม่แสดง */
   info: InspectInfo | null = null;
+  /** ตำแหน่งในโลกของสิ่งที่การ์ดเต็มแสดง (ให้ UI วางการ์ดใกล้ๆ) */
+  anchor: { x: number; y: number } | null = null;
+  /** ป้ายเล็กบรรทัดเดียวตอนชี้/เดินใกล้ (ไม่เด้งการ์ดใหญ่) */
+  tip: InspectTip | null = null;
   /** สิ่งก่อสร้างที่การ์ดกำลังแสดง (ShelterSystem วาดวงเขตปลอดภัยของบ้านหลังนี้) */
   focus: Structure | null = null;
-  private pinned: { t: Target; until: number } | null = null;
+  private pinned: Target | null = null;
+  private hover: Target | null = null;
   private timer = 0;
 
   constructor(private s: GameScene) {}
 
-  /** จิ้ม/คลิกที่โลก → ปักการ์ดไว้ 5 วิ (คืน true ถ้าเจอของ) */
+  /** คลิกขวา/จิ้มที่โลก → เปิดการ์ดเต็มของสิ่งนั้น · จิ้มของเดิมซ้ำ = ปิด (คืน true ถ้าเจอของ) */
   pick(wx: number, wy: number): boolean {
     const t = this.targetAt(wx, wy, 14);
-    if (!t) return false;
-    this.pinned = { t, until: this.s.worldTime + 5 };
+    if (!t) {
+      this.unpin();
+      return false;
+    }
+    this.pinned = this.pinned?.o === t.o ? null : t;
     this.timer = 0;
     return true;
+  }
+
+  /** ปุ่ม I: เปิด/ปิดการ์ดเต็มของสิ่งที่ชี้อยู่ (หรือใกล้ตัว) */
+  togglePin() {
+    this.pinned = this.pinned ? null : this.hover ?? this.nearPlayer();
+    this.timer = 0;
+  }
+
+  unpin() {
+    if (!this.pinned) return false;
+    this.pinned = null;
+    this.timer = 0;
+    return true;
+  }
+
+  get pinnedOpen() {
+    return !!this.pinned;
+  }
+
+  private topOf(t: Target) {
+    const b = (t.o as unknown as Phaser.GameObjects.Sprite).getBounds();
+    return { x: b.centerX, y: b.top };
   }
 
   update(dt: number) {
@@ -72,23 +116,30 @@ export class InspectSystem {
     if (s.build.upgrade && !s.uiOpen) {
       const t = s.build.upgradeTarget;
       this.info = t ? this.upgradeCard(t) : { key: 'up', title: '⬆ โหมดอัพเกรด', color: '#ffcd75', lines: ['ชี้ (หรือหันหน้าเข้าหา) สิ่งก่อสร้าง/ยานพาหนะของคุณ', 'อัพแล้วเลเวล +1 ทันที · เปลี่ยนโฉมที่ Lv.4 / 7 / 10', 'U / คลิกขวา / Esc = ออก'] };
+      this.anchor = t ? { x: t.x, y: t.y - t.displayHeight } : null;
+      this.tip = null;
       return;
     }
     this.focus = null;
     if (s.uiOpen || s.build.on || !getSettings().infoCards) {
       this.info = null;
+      this.tip = null;
       return;
     }
-    let t: Target | null = null;
-    if (this.pinned && s.worldTime < this.pinned.until && this.pinned.t.o.active) t = this.pinned.t;
-    else this.pinned = null;
-    if (!t && !s.controls.touchMode) {
+    // การ์ดเต็ม: ปิดเองเมื่อของหายไป หรือผู้เล่นเดินห่างออกไป
+    const pin = this.pinned;
+    if (pin && (!pin.o.active || Phaser.Math.Distance.Between(s.player.x, s.player.y, pin.o.x, pin.o.y) > 150)) this.pinned = null;
+    this.hover = null;
+    if (!s.controls.touchMode) {
       const wp = s.pointerWorld();
-      if (wp) t = this.targetAt(wp.x, wp.y, 10);
+      if (wp) this.hover = this.targetAt(wp.x, wp.y, 10);
     }
-    t ??= this.nearPlayer();
-    this.info = t ? this.describe(t) : null;
-    if (t?.kind === 'structure') this.focus = t.o;
+    const t = this.hover ?? this.nearPlayer();
+    this.tip = t && t.o !== this.pinned?.o ? { info: this.describe(t), ...this.topOf(t) } : null;
+    this.info = this.pinned ? this.describe(this.pinned) : null;
+    this.anchor = this.pinned ? this.topOf(this.pinned) : null;
+    const f = this.pinned ?? t;
+    if (f?.kind === 'structure') this.focus = f.o;
   }
 
   // ------------------------------------------------------------------
@@ -148,7 +199,7 @@ export class InspectSystem {
         const def = ITEMS[t.o.itemId];
         const r = RARITY[def.rarity ?? 'common'];
         const nl = nutriLine(def);
-        return { key: `d${t.o.itemId}`, title: `${def.name}  ·  ${r.name}`, color: r.color, lines: [def.desc, ...(nl ? [nl] : []), 'เดินทับเพื่อเก็บ'] };
+        return { key: `d${t.o.itemId}`, art: t.o.itemId, title: `${def.name}  ·  ${r.name}`, color: r.color, tip: 'เดินทับเพื่อเก็บ', keep: 1, lines: [def.desc, ...(nl ? [nl] : []), 'เดินทับเพื่อเก็บ'] };
       }
       case 'boat': return this.vehicle(t.o);
     }
@@ -159,7 +210,7 @@ export class InspectSystem {
     const v = b.spec;
     const kind = vehicleKind(v);
     const head = `${VEHICLE_KIND_NAME[kind]} · ความเร็ว ${Math.round(b.speed)} · HP ${Math.ceil(b.hp)}/${b.maxHp}${b.armor ? ` · เกราะ ${Math.round(b.armor * 100)}%` : ''}`;
-    const lines = [b.def.desc, head];
+    const lines = [head];
     const up = this.s.upgrades.cardLines(b, false);
     if (v.fuel) lines.push(`⛽ เชื้อเพลิง ${Math.ceil(b.fuel)} วิ (เติม: ${(v.fuelItems ?? DEFAULT_FUEL).map(([i]) => ITEMS[i].name).join('/')})${v.fuelUse && v.fuelUse !== 1 ? ` · กิน ×${v.fuelUse}` : ''}`);
     else if (v.energy) lines.push(`${v.icon} แรง ${Math.round(b.energy)}%${v.energy.food ? ' · กินแครอท/เบอร์รี่' : ' · พักบนบกเพื่อฟื้น'}`);
@@ -167,19 +218,24 @@ export class InspectSystem {
     if (v.special) lines.push(`✨ ${v.special}`);
     else if (b.storage) lines.push(`📦 ห้องเก็บของ ${b.storage.slots.filter(Boolean).length}/${b.storage.slots.length} ช่อง`);
     lines.push(kind === 'water' ? '[E] ขึ้นเรือ · ออกทะเลไปเกาะอื่นได้' : kind === 'air' ? '[E] ขึ้นบิน · ข้ามทั้งทะเลและเกาะ' : '[E] ขี่ · วิ่งได้เฉพาะบนบก');
+    lines.push(b.def.desc);
     const band = bandOf(b.lv);
-    return { key: `b${b.def.id}${b.lv}`, title: `${v.icon} ${b.def.name}${b.lv > 1 ? ` Lv.${b.lv}` : ''}`, color: band ? BAND_INFO[band].css : kind === 'land' ? '#a7f070' : kind === 'air' ? '#ffcd75' : '#73eff7', lines: [...lines.slice(0, 5), ...up.slice(0, 3)] };
+    return { key: `b${b.def.id}${b.lv}`, title: `${v.icon} ${b.def.name}${b.lv > 1 ? ` Lv.${b.lv}` : ''}`, color: band ? BAND_INFO[band].css : kind === 'land' ? '#a7f070' : kind === 'air' ? '#ffcd75' : '#73eff7', tip: `HP ${Math.ceil(b.hp)}/${b.maxHp}`, keep: 2, lines: [...lines.slice(0, 6), ...up.slice(0, 3)] };
   }
 
   private structure(st: Structure): InspectInfo {
     const def = st.def;
     const foreign = !!st.getData('foreign');
-    const lines: string[] = [def.desc];
+    const lines: string[] = [];
     const hpTxt = `HP ${Math.ceil(st.hp)}/${st.maxHp}`;
     if (!foreign && st.hp < st.maxHp) {
       const cost = this.s.repairCost(st).map(([i, n]) => `${ITEMS[i].name}×${n}`).join(' ');
       lines.push(`${hpTxt} — 🔧 [E] ซ่อม (${cost || 'ฟรี'})`);
     } else lines.push(hpTxt);
+    // บรรทัดสำคัญ (แสดงเสมอ): HP/ซ่อม + ช่องเก็บของ · ที่เหลือพับไว้
+    if (st.storage) lines.push(`📦 เก็บของ ${st.storage.slots.filter(Boolean).length}/${st.storage.slots.length} ช่อง`);
+    const keep = lines.length;
+    lines.push(def.desc);
     // บ้าน: เขตปลอดภัย + วัสดุ (ทนแผ่นดินไหว/ไฟป่า)
     if (def.sleep && !foreign) {
       const mat = materialOf(def);
@@ -194,7 +250,6 @@ export class InspectSystem {
     if (def.stations) lines.push(`🔨 ใช้แทน: ${def.stations.map((k) => STATION_NAMES[k]).join(' · ')}`);
     if (def.station) lines.push(`🔨 ใช้คราฟต์: ${STATION_NAMES[def.station]} (มีบนเกาะก็คราฟต์จากแปลนได้ ไม่ต้องยืนใกล้)`);
     if (def.buff) lines.push(`🏠 บัฟฐาน: ${statLine(def.buff, BUILD_LEVEL.buff(st.lv))}${(def.buffMax ?? 1) > 1 ? ` (นับสูงสุด ${def.buffMax})` : ''}`);
-    if (st.storage) lines.push(`📦 เก็บของ ${st.storage.slots.filter(Boolean).length}/${st.storage.slots.length} ช่อง`);
     if (def.crop) lines.push(st.crop ? `🌱 ${Math.floor(st.growth * 100)}%${st.ripe ? ' — พร้อมเก็บ!' : ''}` : '🌱 ว่าง — ถือเมล็ดแล้วกด E');
     if (st.turret) lines.push(`🎯 ดาเมจ ${st.turret.damage} · ระยะ ${st.turret.range}${def.power === 'use' ? (st.powered ? ' · ⚡มีไฟ' : ' · ⚠ ไม่มีไฟ') : ''}`);
     if (def.power === 'gen' || def.id === 'campfire') lines.push(`🔥 เชื้อเพลิง ${Math.ceil(st.fuel)} วิ`);
@@ -202,7 +257,7 @@ export class InspectSystem {
     if (foreign) lines.push('ของผู้เล่นอื่น');
     const band = bandOf(st.lv);
     const up = foreign || !upCategoryOfBuild(def) ? [] : this.s.upgrades.cardLines(st, false).slice(0, 3);
-    return { key: `s${def.id}${st.lv}`, title: `${def.name}${st.lv > 1 ? ` Lv.${st.lv}` : ''}`, color: foreign ? '#94b0c2' : band ? BAND_INFO[band].css : '#ffcd75', lines: [...lines.slice(0, 5), ...up] };
+    return { key: `s${def.id}${st.lv}`, art: def.id, title: `${def.name}${st.lv > 1 ? ` Lv.${st.lv}` : ''}`, color: foreign ? '#94b0c2' : band ? BAND_INFO[band].css : '#ffcd75', tip: hpTxt, keep, lines: [...lines.slice(0, 7), ...up] };
   }
 
   private node(n: ResourceNode): InspectInfo {
@@ -212,7 +267,7 @@ export class InspectSystem {
     const lines = [`ได้: ${drops}`, how];
     if (!n.available) lines.push(`⏳ กำลังงอก/เกิดใหม่ (~${Math.round(sp.regrow / 60)} นาที)`);
     const name = NODE_NAMES[n.kind].replace(/\s*\(.*\)/, '');
-    return { key: `n${n.kind}${n.available}`, title: name, color: '#a7f070', lines };
+    return { key: `n${n.kind}${n.available}`, title: name, color: '#a7f070', tip: n.available ? how.replace(/\s*\(.*\)/, '') : '⏳ กำลังงอก', keep: 2, lines };
   }
 
   private mob(m: Mob): InspectInfo {
@@ -223,6 +278,6 @@ export class InspectSystem {
     if (m.getData('rival')) lines.splice(1, 1, '⚔ ผู้รอดชีวิตคู่แข่ง (PvP) — หลบ/ป้องกันได้ · ล้มแล้วได้ถุงของ (เหรียญ + ลุ้นกล่องทอง)');
     if (d.legendary) lines.splice(1, 1, `🐉 สัตว์ในตำนาน — ${d.lore ?? 'หายากมาก'}`);
     else if (d.onHit) lines.push(`⚠ โดนแล้ว${d.onHit.kind === 'poison' ? 'ติดพิษ' : d.onHit.kind === 'burn' ? 'ไฟลวก' : 'เดินช้าลง'}`);
-    return { key: `m${d.id}`, title: `${d.legendary ? '🐉 ' : m.isBoss ? '👑 ' : ''}${d.name}`, color: m.hostile ? '#ef7d57' : '#a7f070', lines };
+    return { key: `m${d.id}`, art: d.id, tip: `HP ${Math.max(0, Math.ceil(m.hp))}/${d.hp}`, keep: 2, title: `${d.legendary ? '🐉 ' : m.isBoss ? '👑 ' : ''}${d.name}`, color: m.hostile ? '#ef7d57' : '#a7f070', lines };
   }
 }

@@ -4,13 +4,15 @@ import type { Slot } from '../components/Inventory';
 import { Sfx } from '../core/AudioManager';
 import { BAND_INFO, bandOf, itemDurMult, levelOfSlot } from '../data/upgrade';
 import { variantKey } from '../gfx/UpgradeLook';
-import { textResolution } from './crispText';
+import { renderScale, textResolution } from './crispText';
+import { showItemIcon } from './itemArt';
 
 /**
- * ฟอนต์เกม (โหลดใน app/layout.tsx · BootScene รอโหลดเสร็จก่อนวาด)
- * FONT = Mitr (ไทย+ละติน ทรงมน อ่านง่าย) ใช้กับข้อความ/ปุ่ม · HEAD_FONT = Mali 700 (ลายมือน่ารัก) ใช้กับหัวข้อ · PIXEL_FONT สำหรับโลโก้/ตัวเลขพิกเซล
+ * ฟอนต์เกม (Google Fonts ใน app/layout.tsx + app/globals.css · BootScene รอโหลดเสร็จก่อนวาด)
+ * FONT = Noto Sans Thai (ข้อความทั่วไป/คำอธิบาย/ปุ่ม — ทางการ อ่านง่าย) · PIXEL_TH = UnifontThai (ชื่อหน้าต่าง/หัวข้อใหญ่เท่านั้น)
+ * PIXEL_FONT = Press Start 2P (โลโก้) · HEAD_FONT (Mali) เหลือไว้ให้โค้ดเก่า
  */
-export const FONT = '"Mitr", "Itim", Kanit, Thonburi, Tahoma, sans-serif';
+export const FONT = '"Noto Sans Thai", "Sarabun", Tahoma, sans-serif';
 export const HEAD_FONT = '"Mali", "Mitr", Kanit, Thonburi, Tahoma, sans-serif';
 export const PIXEL_FONT = '"Press Start 2P", monospace';
 
@@ -63,78 +65,122 @@ export function setTextBoost(scene: Phaser.Scene, on: boolean) {
   if (on) boostScenes.add(scene);
   else boostScenes.delete(scene);
 }
-/** ขนาดตัวหนังสือจริงหลังขยาย (9→11, 10→11.5, 11→12, 12→13, 13→13.5) */
+/** ขนาดตัวหนังสือจริงหลังขยาย (เฉพาะจอเล็ก · ไม่เกิน ×1.15: 9→10.5, 10→11.5, 11→12, 12→13, 13→13.5) */
 export function boosted(scene: Phaser.Scene, size: number) {
-  return size < 14 && boostScenes.has(scene) ? Math.round((size + (14 - size) * 0.4) * 2) / 2 : size;
+  return size < 14 && boostScenes.has(scene) ? Math.round(Math.min(size * 1.15, size + (14 - size) * 0.4) * 2) / 2 : size;
 }
 
-/** ข้อความคมชัด มีเส้นขอบ + เงา แบบเกม (บรรทัดสูงพอสำหรับสระ/วรรณยุกต์ไทย) */
+/**
+ * ข้อความทั่วไป (Noto Sans Thai คมชัด ความละเอียดสูง + LINEAR · บรรทัดสูงพอสำหรับสระ/วรรณยุกต์ไทย)
+ * ตัวเล็ก < 15px = คำอธิบาย: ตัวปกติ 400 ไม่มีขอบ มีแค่เงาจางๆ · ≥ 15px = ชื่อ/หัวข้อย่อย: 600 + เงาตกบาง
+ * ข้อความบนโลกเกม/ภาพ ใส่ขอบบางเอง (outline())
+ */
 export function txt(scene: Phaser.Scene, x: number, y: number, text: string, size0 = 16, color = COLORS.text, extra: Style = {}) {
   const size = boosted(scene, size0);
   const family = extra.fontFamily ?? FONT;
-  const weight = extra.fontStyle ?? '600';
+  const body = size0 < 15;
+  const weight = extra.fontStyle ?? (body ? '400' : '600');
   const t = scene.add.text(x, y, text, {
     fontFamily: family,
     fontSize: `${size}px`,
     fontStyle: weight,
     color,
     stroke: '#0b0d1f',
-    strokeThickness: Math.max(2, Math.round(size / 6)),
+    strokeThickness: family === PIXEL_FONT ? Math.max(2, Math.round(size / 8)) : 0,
     resolution: textResolution(),
     metrics: family === PIXEL_FONT ? undefined : thaiMetrics(size, family, weight),
     ...extra,
   });
-  t.setShadow(0, Math.max(1, Math.round(size / 12)), '#0b0d1f', 0, true, true);
+  if (body) t.setShadow(0, 1, 'rgba(11,13,31,0.55)', 0, false, true);
+  else t.setShadow(0, Math.max(1, Math.round(size / 14)), '#0b0d1f', 0, true, true);
   t.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
   return t;
 }
 
-/**
- * ตัวหนังสือแบบพิกเซลอาร์ต (เฉพาะข้อความโชว์บนหน้าแรก/หัวหน้าเลือกตัวละคร — ข้อความอธิบายใช้ txt() ที่คมชัด)
- * วาดฟอนต์ไทยตัวหนาขนาดเล็ก (≈1/3) ความละเอียด 1 · ขอบแข็ง (crispText.hardEdges) · NEAREST แล้วขยาย ×2–3 → ตัวอักษรเป็นก้อนพิกเซล
- * ขอบดำ 1px + เงาตก 1px (หน่วยพิกเซลเล็ก) · ขนาดบนจอ ≈ size
- */
-export function pixelTxt(scene: Phaser.Scene, x: number, y: number, text: string, size = 24, color = COLORS.text, extra: Style = {}) {
-  // ตัวเล็กกว่า ~26px: ฟอนต์ไทยย่อเหลือ <13px แล้วขยาย จะเละอ่านไม่ออก → ใช้ตัวหนาคมชัดแบบเกม (ขอบหนา + เงา) แทน
-  if (size < 26) {
-    const c = txt(scene, x, y, text, size, color, { fontStyle: '700', ...extra });
-    c.setStroke('#1a1c2c', Math.max(3, Math.round(size / 5)));
-    c.setShadow(0, 2, '#1a1c2c', 0, true, true);
-    return c;
-  }
-  // ฟอนต์ไทยต้องมีอย่างน้อย ~10px ถึงจะอ่านออก → ขยาย ×2 (ตัวใหญ่มาก ×3)
-  const k = size >= 36 ? 3 : 2;
-  const fs = Math.max(9, Math.round(size / k));
-  const family = extra.fontFamily ?? FONT;
-  const t = scene.add.text(x, y, '', {
-    fontFamily: family, fontSize: `${fs}px`, fontStyle: '700', color, stroke: '#1a1c2c', strokeThickness: 2, resolution: 1,
-    metrics: thaiMetrics(fs, family, '700'), ...extra,
-  }) as Phaser.GameObjects.Text & { __pixel?: boolean };
-  t.__pixel = true;
-  t.setShadow(1, 1, '#1a1c2c', 0, true, true);
-  t.setText(text).setScale(k).setData('pxScale', k);
+/** ขอบเข้มบางๆ สำหรับตัวหนังสือที่วางทับโลกเกม/ภาพ (ตัวเลขในช่องไอเทม ป้ายชื่อ) — ตัวพิกเซลจะเป็นขอบ 1 พิกเซลฟอนต์ */
+export function outline<T extends Phaser.GameObjects.Text>(t: T, px = 2): T {
+  t.setStroke('#0b0d1f', px);
+  t.setShadow(0, 1, '#0b0d1f', 0, true, true);
   return t;
 }
 
-/** หัวข้อ: ฟอนต์ลายมือ Mali ไล่สีครีม → ทอง → ส้ม + เงาตกน่ารัก · pixel = แบบพิกเซลอาร์ต (pixelTxt) */
-export function heading(scene: Phaser.Scene, x: number, y: number, text: string, size = 32, pixel = false) {
-  if (pixel) {
-    const p = pixelTxt(scene, x, y, text, size, COLORS.gold);
-    const g = p.context.createLinearGradient(0, 0, 0, p.height);
-    g.addColorStop(0, '#fff2b0');
-    g.addColorStop(0.5, '#ffcd75');
-    g.addColorStop(1, '#ef7d57');
-    return p.setFill(g);
+/** ฟอนต์พิกเซลไทย (GNU Unifont ไทย+อังกฤษ · app/fonts) — ใช้เฉพาะชื่อหน้าต่าง/ชื่อเกมไทย/หัวข้อใหญ่ */
+export const PIXEL_TH = '"UnifontThai", monospace';
+
+export type PixelText = Phaser.GameObjects.Text & {
+  __pixel?: boolean;
+  /** สีขอบ 1 พิกเซลฟอนต์ (null = ไม่มี) · สีเงาตก 1 พิกเซลฟอนต์ · ตัวหนาเทียม (วาดซ้ำเลื่อน 1 พิกเซลฟอนต์) */
+  __pxOutline?: string | null;
+  __pxShadow?: string | null;
+  __pxBold?: boolean;
+  /** พิกเซลจอจริงต่อ 1 พิกเซลฟอนต์ (เลขเต็ม) */
+  __pxM?: number;
+  /** พิกเซลจอจริงต่อ 1 หน่วยเกม ตอนสร้าง (ความละเอียดแคนวาส × ซูมกล้อง) */
+  __pxD?: number;
+  /** ขนาดที่ขอ (หน่วยเกม) */
+  __pxWant?: number;
+};
+
+export interface PixelOpts {
+  outline?: string | null;
+  shadow?: string | null;
+  bold?: boolean;
+}
+
+/** ตัวคูณเลขเต็ม m (พิกเซลจอต่อพิกเซลฟอนต์) ที่ให้ขนาดใกล้ size ที่สุด */
+const pixelM = (size: number, D: number) => Math.max(1, Math.round((size * D) / 16));
+
+/**
+ * ตั้งขนาดฟอนต์พิกเซล: วาด Unifont ให้ 1 พิกเซลฟอนต์ = m พิกเซลแคนวาส = m พิกเซลจอจริง (ความละเอียดแคนวาส = D)
+ * → ขนาดในเกม = 16m/D · บรรทัด/ระยะขอบปัดเป็นพิกเซลฟอนต์ (crispText) → คมทุกพิกเซล ไม่เบลอ/ไม่หยัก
+ */
+function applyPixelSize(t: PixelText, m: number) {
+  const D = t.__pxD ?? 1;
+  const u = m / D;
+  t.__pxM = m;
+  t.style.setStyle({ fontSize: `${(16 * u).toFixed(4)}px`, fontStyle: 'normal', resolution: D, metrics: { ascent: 14 * u, descent: 2 * u, fontSize: 16 * u } }, true, false);
+}
+
+/**
+ * ตัวหนังสือพิกเซลไทย (ชื่อหน้าต่าง · ชื่อเกมภาษาไทย · หัวข้อใหญ่) — ไม่มีเส้นขอบแคนวาส:
+ * ตัดขอบแข็ง + ขอบ/เงา/ตัวหนา 1 พิกเซลฟอนต์ ทำบนแคนวาส (crispText.pixelPost) · NEAREST
+ */
+export function pixelTxt(scene: Phaser.Scene, x: number, y: number, text: string, size = 16, color = COLORS.text, extra: Style = {}, opts: PixelOpts = {}) {
+  const t = scene.add.text(x, y, '', { fontFamily: PIXEL_TH, color, ...extra }) as PixelText;
+  t.__pixel = true;
+  t.__pxD = renderScale() * (scene.cameras?.main?.zoom || 1);
+  t.__pxWant = size;
+  t.__pxBold = opts.bold ?? true;
+  t.__pxOutline = opts.outline === undefined ? '#1a1c2c' : opts.outline;
+  t.__pxShadow = opts.shadow === undefined ? '#1a1c2c' : opts.shadow;
+  applyPixelSize(t, pixelM(size, t.__pxD));
+  t.setText(text);
+  t.texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+  return t;
+}
+
+/**
+ * ย่อข้อความให้พอดีความกว้าง · ตัวพิกเซล: ลดตัวคูณเลขเต็มทีละขั้นก่อน (คมเหมือนเดิม) แล้วค่อยย่อเศษส่วนเป็นทางเลือกสุดท้าย
+ * ข้อความสั้นลงภายหลัง → กลับไปขนาดที่ขอ
+ */
+export function fitPixel(t: Phaser.GameObjects.Text, maxW: number) {
+  const p = t as PixelText;
+  if (p.__pixel && p.__pxD) {
+    const want = pixelM(p.__pxWant ?? 16, p.__pxD);
+    if (p.__pxM !== want) applyPixelSize(p, want);
+    while (t.width > maxW && (p.__pxM ?? 1) > 1) applyPixelSize(p, (p.__pxM ?? 1) - 1);
   }
-  const t = txt(scene, x, y, text, size, COLORS.gold, { fontFamily: HEAD_FONT, fontStyle: '700' });
+  return t.setScale(t.width > maxW ? maxW / t.width : 1);
+}
+
+/** หัวข้อใหญ่ของหน้าจอ: ฟอนต์พิกเซลไทย ไล่สีครีม → ทอง → ส้ม + ขอบ/เงาม่วงเข้ม */
+export function heading(scene: Phaser.Scene, x: number, y: number, text: string, size = 32, _pixel = true) {
+  const t = pixelTxt(scene, x, y, text, size, COLORS.gold, {}, { outline: '#3a2440', shadow: '#3a2440' });
   const grad = t.context.createLinearGradient(0, 0, 0, t.height);
   grad.addColorStop(0, '#fff2b0');
   grad.addColorStop(0.5, '#ffcd75');
   grad.addColorStop(1, '#ef7d57');
-  t.setFill(grad);
-  t.setStroke('#3a2440', Math.max(3, Math.round(size / 6)));
-  t.setShadow(0, Math.max(2, Math.round(size / 9)), '#3a2440', 0, true, true);
-  return t;
+  return t.setFill(grad);
 }
 
 /** กรอบหน้าต่างแบบ pixel (NineSlice) — origin มุมซ้ายบน */
@@ -157,9 +203,10 @@ export function button(
 ): Button {
   const bg = scene.add.nineslice(x, y, enabled ? 'ui_btn' : 'ui_btn_off', undefined, w, h, 8, 8, 8, 8);
   const hover = scene.add.nineslice(x, y, 'ui_btn_hover', undefined, w, h, 8, 8, 8, 8).setVisible(false);
-  const t = txt(scene, x, y - 1, label, size, enabled ? COLORS.text : '#8a95a8').setOrigin(0.5);
-  // ข้อความยาวเกินปุ่ม → ย่อให้พอดี
-  const fit = () => t.setScale(t.width > w - 10 ? (w - 10) / t.width : 1);
+  // ป้ายปุ่ม: Noto Sans Thai 600 ขนาด 14–15 (ปุ่มใหญ่ตามที่ขอ) · เงาตกบาง ไม่มีขอบหนา · ยาวเกินปุ่มย่อให้พอดี
+  const t = txt(scene, x, y - 1, label, size >= 18 ? size : Math.min(15, Math.max(14, size)), enabled ? COLORS.text : '#8a95a8', { fontStyle: '600' }).setOrigin(0.5);
+  t.setShadow(0, 1, '#0b0d1f', 0, false, true);
+  const fit = () => fitPixel(t, w - 10);
   fit();
   if (enabled) {
     const all = [bg, hover, t];
@@ -179,7 +226,7 @@ export function button(
         scene.tweens.killTweensOf(all);
         all.forEach((o) => o.setScale(o === t ? t.scaleX * 0.94 : 0.94));
         scene.tweens.add({ targets: [bg, hover], scale: 1, duration: 180, ease: 'Back.easeOut' });
-        scene.tweens.add({ targets: t, scale: t.scaleX / 0.94, duration: 180, ease: 'Back.easeOut' });
+        scene.tweens.add({ targets: t, scale: t.scaleX / 0.94, duration: 180, ease: 'Back.easeOut', onComplete: fit });
         onClick();
       });
   }
@@ -229,6 +276,8 @@ export class SlotView {
   readonly bg: Phaser.GameObjects.NineSlice;
   private sel: Phaser.GameObjects.NineSlice;
   private icon: Phaser.GameObjects.Image;
+  /** ภาพวาดไอเทมมุมมน (แทนไอคอนพิกเซลเมื่อมีภาพ) */
+  private art: Phaser.GameObjects.Image;
   private qty: Phaser.GameObjects.Text;
   private durBg: Phaser.GameObjects.Rectangle;
   private dur: Phaser.GameObjects.Rectangle;
@@ -240,17 +289,18 @@ export class SlotView {
   constructor(scene: Phaser.Scene, x: number, y: number, readonly size: number, label?: string) {
     this.bg = scene.add.nineslice(x, y, 'ui_slot', undefined, size, size, 6, 6, 6, 6);
     this.sel = scene.add.nineslice(x, y, 'ui_slot_sel', undefined, size, size, 6, 6, 6, 6).setVisible(false);
-    this.icon = scene.add.image(x, y - 1, 'px').setVisible(false);
-    this.qty = txt(scene, x + size / 2 - 4, y + size / 2 - 2, '', 13).setOrigin(1, 1);
+    this.icon = scene.add.image(x, y, 'px').setVisible(false);
+    this.art = scene.add.image(x, y, 'px').setVisible(false);
+    this.qty = outline(txt(scene, x + size / 2 - 3, y + size / 2 - 1, '', 13, COLORS.text, { fontStyle: '600' }).setOrigin(1, 1), 3);
     this.durBg = scene.add.rectangle(x - size / 2 + 6, y + size / 2 - 7, size - 12, 3, 0x0b0d1f).setOrigin(0, 0.5).setVisible(false);
     this.dur = scene.add.rectangle(x - size / 2 + 6, y + size / 2 - 7, size - 12, 3, 0xa7f070).setOrigin(0, 0.5).setVisible(false);
-    if (label) this.label = txt(scene, x - size / 2 + 5, y - size / 2 + 2, label, 11, COLORS.dim);
+    if (label) this.label = outline(txt(scene, x - size / 2 + 5, y - size / 2 + 2, label, 11, COLORS.cream, { fontStyle: '500' }));
     this.bandFrame = scene.add.rectangle(x, y, size - 6, size - 6).setStrokeStyle(2, 0xffcd75, 0.9).setVisible(false);
-    this.lvT = txt(scene, x + size / 2 - 3, y - size / 2 + 1, '', size >= 40 ? 10 : 9, COLORS.good).setOrigin(1, 0).setVisible(false);
+    this.lvT = outline(txt(scene, x + size / 2 - 3, y - size / 2 + 1, '', size >= 40 ? 11 : 10, COLORS.good, { fontStyle: '600' }).setOrigin(1, 0)).setVisible(false);
   }
 
   get objects(): Phaser.GameObjects.GameObject[] {
-    return [this.bg, this.sel, this.bandFrame, this.icon, this.qty, this.durBg, this.dur, ...(this.label ? [this.label] : []), this.lvT];
+    return [this.bg, this.sel, this.icon, this.art, this.bandFrame, this.durBg, this.dur, this.qty, ...(this.label ? [this.label] : []), this.lvT];
   }
 
   /** ค่าล่าสุดที่วาด — HUD เรียก set() ทุกเฟรม ถ้าไม่เปลี่ยนก็ไม่ต้องวาดใหม่ */
@@ -267,7 +317,7 @@ export class SlotView {
     this.last = key;
     this.sel.setVisible(selected);
     if (!slot) {
-      this.icon.setVisible(false);
+      showItemIcon(this.icon, this.art, null, 0);
       this.bandFrame.setVisible(false);
       this.lvT.setVisible(false);
       this.qty.setText('');
@@ -276,12 +326,11 @@ export class SlotView {
       return;
     }
     const def = ITEMS[slot.id];
-    const tex = this.icon.scene.textures.get(def.icon).getSourceImage();
-    const scale = Math.max(1, Math.floor(((this.size - 12) / Math.max(tex.width, tex.height)) * 2) / 2);
     // เลเวลอัพเกรด: ไอคอนโฉมใหม่ (Lv4/7/10) + กรอบสี + ป้าย Lv
     const lv = def.enhanceable ? levelOfSlot(slot) : 1;
     const band = bandOf(lv);
-    this.icon.setTexture(variantKey(this.icon.scene, def.icon, band)).setVisible(true).setScale(scale);
+    // ภาพวาดมุมมนเต็มช่อง (เว้นขอบช่อง) · ไม่มีภาพ = ไอคอนพิกเซลขยายเลขเต็ม (×2 สำหรับไอคอน 16px)
+    showItemIcon(this.icon, this.art, slot.id, this.size - 8, this.size - 4, variantKey(this.icon.scene, def.icon, band));
     this.bandFrame.setVisible(!!band);
     if (band) this.bandFrame.setStrokeStyle(band === 'legend' ? 2 : 1, BAND_INFO[band].color, 0.95);
     this.lvT.setVisible(lv > 1);

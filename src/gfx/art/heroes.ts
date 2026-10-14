@@ -1,6 +1,7 @@
 import type Phaser from 'phaser';
 import { PALETTE } from '../../data/palette';
 import { PixelCanvas, dither } from '../PixelCanvas';
+import { markHd, SPRITE_RES } from '../hd';
 import type { HeroId } from '../../data/characters';
 
 // ตัวละครผู้เล่นแบบ paper-doll สไตล์จิบิ: หัวโต (≈60% ของความสูง) ตาอนิเมะ 3×4 ตัวจิ๋ว แขนขาป้อม
@@ -8,6 +9,9 @@ import type { HeroId } from '../../data/characters';
 // เฟรม 20×24 — 0-2 หันลง (ยืน, ก้าว A, ก้าว B), 3-5 หันขึ้น, 6-8 ด้านข้างหันขวา (ยืน, ก้าว, ยืน)
 // ผม y=1.. หัว y=2..13 (กว้าง 14) ลำตัว y=14..18 ขา y=19..22 เท้าล่างสุด y=22 (ขอบ y=23) แสงมาจากซ้ายบน
 // เฟรมก้าว: หัวกระดกลง 1 px (bob) ให้เดินแบบน่ารัก
+// HD: ตำแหน่ง/ท่าทั้งหมดยังเป็นพิกัดตรรกะ 20×24 แต่ผืนจริงละเอียด SPRITE_RES เท่า (40×48) — mask ขยายแบบ Scale2x (มุมมน)
+// แรเงา/ลายผ้า/เส้นขอบคำนวณที่พิกเซลจริง แล้วเติมรายละเอียดเฉพาะ HD (ตา ผม ตะเข็บ กระดุม ประกายโลหะ) ทับอีกชั้น
+// (ชั้นรายละเอียด HD เขียนพิกัดพิกเซลจริงไว้สำหรับ SPRITE_RES = 2 · res 1 = ลายเดิมทุกพิกเซล ใช้ทำไอคอนชุด)
 
 export const HERO_W = 20;
 export const HERO_H = 24;
@@ -85,6 +89,32 @@ class Mask {
   each(fn: (x: number, y: number) => void) {
     for (let i = 0; i < this.on.length; i++) if (this.on[i]) fn(i % W, (i / W) | 0);
   }
+
+  /** ขยายเป็นความละเอียดจริง (r=2 ใช้ Scale2x: มุมนูนถูกตัดมน มุมเว้าถูกเติม) */
+  hi(r: number): Uint8Array {
+    const HW = W * r;
+    const out = new Uint8Array(HW * H * r);
+    const g = (x: number, y: number) => (this.has(x, y) ? 1 : 0);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const E = g(x, y);
+        if (r !== 2) {
+          if (E) for (let j = 0; j < r; j++) for (let i = 0; i < r; i++) out[(y * r + j) * HW + x * r + i] = 1;
+          continue;
+        }
+        const A = g(x, y - 1);
+        const B = g(x + 1, y);
+        const C = g(x - 1, y);
+        const D = g(x, y + 1);
+        const o = y * 2 * HW + x * 2;
+        out[o] = C === A && C !== D && A !== B ? A : E;
+        out[o + 1] = A === B && A !== C && B !== D ? B : E;
+        out[o + HW] = D === C && D !== B && C !== A ? C : E;
+        out[o + HW + 1] = B === D && B !== A && D !== C ? D : E;
+      }
+    }
+    return out;
+  }
 }
 
 const shadeDown = (mt: Mat, col: string) => (col === mt.h ? mt.l : col === mt.l ? mt.m : mt.d);
@@ -94,6 +124,10 @@ const shadeDown = (mt: Mat, col: string) => (col === mt.h ? mt.l : col === mt.l 
  * soft = ชิ้นเล็ก (แขน มือ) ต้องรับแสงสองด้านถึงจะสว่าง
  */
 function shade(c: PixelCanvas, m: Mask, mt: Mat, soft = false) {
+  if (c.res > 1) {
+    shadeHi(c, m, mt, soft);
+    return;
+  }
   const out: [number, number, string][] = [];
   m.each((x, y) => {
     const l = !m.has(x - 1, y);
@@ -114,16 +148,78 @@ function shade(c: PixelCanvas, m: Mask, mt: Mat, soft = false) {
   for (const [x, y, col] of out) c.set(x, y, col);
 }
 
+/**
+ * แรเงา HD: แถบรับแสง/เงากว้างเท่าเดิม (1 พิกเซลตรรกะ) แต่ไล่ 2 ขั้นที่พิกเซลจริง + ประกายจุดมุมซ้ายบน
+ * ลายผ้า (ตาราง/ทาง/ห่วงเกราะโซ่) ละเอียดขึ้นตามพิกเซลจริง
+ */
+function shadeHi(c: PixelCanvas, m: Mask, mt: Mat, soft: boolean) {
+  const r = c.res;
+  const HW = W * r;
+  const HH = H * r;
+  const on = m.hi(r);
+  const has = (x: number, y: number) => x >= 0 && y >= 0 && x < HW && y < HH && on[y * HW + x] === 1;
+  const dist = (x: number, y: number, dx: number, dy: number) => {
+    for (let k = 1; k <= 4; k++) if (!has(x + k * dx, y + k * dy)) return k;
+    return 5;
+  };
+  const f = (d: number) => (d === 1 ? 1 : d === 2 ? 0.5 : 0);
+  for (let Y = 0; Y < HH; Y++) {
+    for (let X = 0; X < HW; X++) {
+      if (!on[Y * HW + X]) continue;
+      const dl = dist(X, Y, -1, 0);
+      const dt = dist(X, Y, 0, -1);
+      const dr = dist(X, Y, 1, 0);
+      const db = dist(X, Y, 0, 1);
+      let sc = f(dl) + f(dt) - f(dr) - f(db);
+      if (dr >= 3 && dr <= 4 && dl > 1 && dither(X, Y) > 0.1) sc -= 0.5;
+      let col = mt.m;
+      if (sc >= 2 && mt.h) col = mt.h;
+      else if (sc >= (soft ? 1.5 : 0.5)) col = mt.l;
+      else if (sc <= -0.5) col = mt.d;
+      if (mt.pattern === 'plaid' && (X % 4 === 0 || Y % 4 === 2)) col = shadeDown(mt, col);
+      else if (mt.pattern === 'stripe' && Y % 4 === 0) col = shadeDown(mt, col);
+      else if (mt.pattern === 'stripe' && Y % 4 === 1 && col === mt.m) col = mt.l;
+      else if (mt.pattern === 'check') {
+        // ห่วงเกราะโซ่: ตารางห่วง 2×2 ที่สลับแถว + จุดสะท้อนบนห่วง
+        const cell = ((X >> 1) + (Y >> 1)) & 1;
+        col = cell ? mt.d : (X & 1) === 0 && (Y & 1) === 0 ? mt.l : col === mt.d ? mt.m : mt.m;
+      }
+      c.hset(X, Y, col);
+    }
+  }
+}
+
 function px(c: PixelCanvas, list: [number, number][], col: string) {
   for (const [x, y] of list) c.set(x, y, col);
 }
 
 /** วาดเฉพาะจุดที่เป็นสีของวัสดุนั้นอยู่แล้ว (เช่นรอยต่อเกราะบนลำตัว ไม่ทับผ้าคลุม/เสื้อทับ) */
 function onMat(c: PixelCanvas, list: [number, number][], mt: Mat, col: string) {
+  const r = c.res;
   for (const [x, y] of list) {
-    const p = c.get(x, y);
-    if (p === mt.m || p === mt.l || p === mt.d || p === mt.h) c.set(x, y, col);
+    for (let j = 0; j < r; j++) {
+      for (let i = 0; i < r; i++) {
+        const p = c.hget(x * r + i, y * r + j);
+        if (p === mt.m || p === mt.l || p === mt.d || p === mt.h) c.hset(x * r + i, y * r + j, col);
+      }
+    }
   }
+}
+
+const isMat = (p: string | null, mt: Mat) => !!p && (p === mt.m || p === mt.l || p === mt.d || p === mt.h);
+
+/** HD: ระบายพิกเซลจริงเฉพาะจุดที่ยังเป็นวัสดุ mt */
+function hOn(c: PixelCanvas, pts: [number, number][], mt: Mat, col: string) {
+  for (const [X, Y] of pts) if (isMat(c.hget(X, Y), mt)) c.hset(X, Y, col);
+}
+
+/** HD: กระดุม/หมุดกลมมีประกาย (บล็อก 2×2 ที่ช่องตรรกะ x,y) */
+function hdStud(c: PixelCanvas, x: number, y: number, col: string) {
+  const r = c.res;
+  c.hset(x * r, y * r, lighten(hexOf(col), 0.55));
+  c.hset(x * r + 1, y * r, col);
+  c.hset(x * r, y * r + 1, col);
+  c.hset(x * r + 1, y * r + 1, darken(hexOf(col), 0.35));
 }
 
 /**
@@ -136,11 +232,13 @@ function stamp(
   rows: string[],
   mats: Record<string, Mat>,
   cols: Record<string, string>,
-  opt: { shift?: (y: number) => number; minY?: number; dy?: number } = {},
+  opt: { shift?: (y: number) => number; minY?: number; dy?: number; fine?: Record<string, 'hi' | 'lo'> } = {},
 ) {
   const masks: Record<string, Mask> = {};
   const direct: [number, number, string | null][] = [];
+  const fine: [number, number, string, 'hi' | 'lo'][] = [];
   const dy = opt.dy ?? 0;
+  const hd = c.res > 1;
   rows.forEach((row, y) => {
     if (y < (opt.minY ?? 0)) return;
     const dx = opt.shift ? opt.shift(y) : 0;
@@ -149,11 +247,21 @@ function stamp(
       if (ch === '.' || ch === ' ') continue;
       if (mats[ch]) (masks[ch] ??= new Mask()).add(x + dx, y + dy);
       else if (ch === '_') direct.push([x + dx, y + dy, null]);
-      else if (cols[ch]) direct.push([x + dx, y + dy, cols[ch]]);
+      else if (hd && opt.fine?.[ch] && cols[ch] && mats['1']) {
+        // HD: ช่องลายเส้น (ไฮไลต์/ร่องผม) เป็นเนื้อวัสดุหลัก แล้วขีดเส้นบางทับ
+        (masks['1'] ??= new Mask()).add(x + dx, y + dy);
+        fine.push([x + dx, y + dy, cols[ch], opt.fine[ch]]);
+      } else if (cols[ch]) direct.push([x + dx, y + dy, cols[ch]]);
     }
   });
   for (const k of Object.keys(masks)) shade(c, masks[k], mats[k]);
   for (const [x, y, col] of direct) c.set(x, y, col);
+  const r = c.res;
+  for (const [x, y, col, kind] of fine) {
+    // hi = ขีดเฉียงขึ้นขวา (เส้นผมรับแสง) · lo = ขีดตั้งด้านซ้าย (ร่องระหว่างช่อผม)
+    const pts: [number, number][] = kind === 'hi' ? [[0, 1], [1, 0]] : [[0, 0], [0, 1]];
+    for (const [i, j] of pts) if (c.hget(x * r + i, y * r + j)) c.hset(x * r + i, y * r + j, col);
+  }
 }
 
 // ---------------------------------------------------------------- วัสดุมาตรฐาน
@@ -1078,6 +1186,15 @@ function drawLegs(f: Ctx) {
       shade(c, new Mask().rect(x0, 19, 3, 2 - L), o.legs);
       shade(c, new Mask().rect(x0, 21 - L, 3, 2), o.boots);
       if (o.bootTop) px(c, [[x0, 21 - L], [x0 + 1, 21 - L], [x0 + 2, 21 - L]], o.bootTop);
+      if (c.res > 1) {
+        // HD: รอยพับกางเกงกลางขา · ขอบรองเท้า (ตะเข็บ) · พื้นรองเท้า · ประกายหัวรองเท้า
+        const X = x0 * 2;
+        const by = (21 - L) * 2;
+        if (!o.robe && o.legs.pattern !== 'check') hOn(c, [[X + 3, 39], [X + 3, 40]].filter(([, Y]) => Y < by) as [number, number][], o.legs, o.legs.d);
+        if (!o.bootTop) hOn(c, [[X + 1, by + 1], [X + 2, by + 1], [X + 3, by + 1], [X + 4, by + 1]], o.boots, o.boots.d);
+        hOn(c, [[X + 1, by + 2]], o.boots, o.boots.h ?? lighten(hexOf(o.boots.l), 0.3));
+        hOn(c, [[X, by + 3], [X + 1, by + 3], [X + 2, by + 3], [X + 3, by + 3], [X + 4, by + 3], [X + 5, by + 3]], o.boots, darken(hexOf(o.boots.d), 0.3));
+      }
     }
     return;
   }
@@ -1098,6 +1215,14 @@ function drawLegs(f: Ctx) {
     const bm = new Mask().rect(g.bx, g.by, 3, 2).add(g.toe, g.by + 1);
     shade(c, bm, g.far ? dim(o.boots) : o.boots);
     if (o.bootTop) px(c, [[g.bx, g.by], [g.bx + 1, g.by], [g.bx + 2, g.by]], g.far ? darken(hexOf(o.bootTop)) : o.bootTop);
+    if (c.res > 1) {
+      // HD: พื้นรองเท้า + ประกายหัวรองเท้า (ด้านข้าง)
+      const bt = g.far ? dim(o.boots) : o.boots;
+      const sole: [number, number][] = [];
+      for (let X = g.bx * 2; X <= g.toe * 2 + 1; X++) sole.push([X, g.by * 2 + 3]);
+      hOn(c, sole, bt, darken(hexOf(bt.d), 0.3));
+      hOn(c, [[g.toe * 2, g.by * 2 + 2]], bt, bt.l);
+    }
   }
 }
 
@@ -1150,6 +1275,26 @@ function drawTorso(f: Ctx) {
       c.set(8, 14, o.trim);
       c.set(11, 14, o.trim);
     }
+    if (c.res > 1) {
+      // HD: คอเสื้อรูปตัว V มีขอบผ้า
+      const top = o.coat && !o.coat.open ? o.coat.mat : o.top;
+      for (const [X, Y] of [[18, 29], [21, 29]] as [number, number][]) c.hset(X, Y, o.trim ? hexOf(o.trim) : top.d);
+      c.hset(19, 29, f.skin.d);
+      c.hset(20, 29, f.skin.d);
+      c.hset(19, 30, o.trim ? hexOf(o.trim) : top.d);
+      c.hset(20, 30, o.trim ? hexOf(o.trim) : top.d);
+      if (o.trim) {
+        c.hset(16, 28, top.l);
+        c.hset(23, 28, top.m);
+      }
+    }
+  }
+  if (c.res > 1 && !o.robe) {
+    // HD: รอยย่นผ้าใต้รักแร้ + ชายเสื้อมีเงาตะเข็บ
+    const mt = o.coat && !o.coat.open ? o.coat.mat : o.top;
+    if (view === 'down') hOn(c, [[13, 30], [14, 31], [26, 30], [25, 31]], mt, mt.d);
+    else if (view === 'side') hOn(c, [[16, 30], [17, 31]], mt, mt.d);
+    else hOn(c, [[19, 30], [20, 31], [19, 32], [20, 33]], mt, mt.d); // ตะเข็บหลัง
   }
   // เอว: ชายเสื้อ
   if (!o.robe) {
@@ -1168,6 +1313,23 @@ function drawBelt(f: Ctx) {
     if (view === 'down') px(c, [[9, 18], [10, 18]], o.buckle);
     else if (view === 'side') c.set(12, 18, o.buckle);
     else if (o.beltWide) px(c, [[9, 17], [10, 17]], o.buckle); // ปมโอบิด้านหลัง
+  }
+  if (c.res > 1) {
+    // HD: หัวเข็มขัดเป็นกรอบมีรูกลาง + ประกาย · รูเข็มขัด
+    const bk = o.buckle ? hexOf(o.buckle) : '';
+    if (o.buckle && view === 'down' && !o.beltWide) {
+      for (const [X, Y] of [[19, 36], [20, 36], [19, 37], [20, 37]] as [number, number][]) c.hset(X, Y, darken(hexOf(o.belt.d), 0.2));
+      c.hset(18, 36, lighten(bk, 0.5));
+      c.hset(21, 37, darken(bk, 0.3));
+    } else if (o.buckle && view === 'side') {
+      c.hset(24, 36, lighten(bk, 0.5));
+      c.hset(25, 37, darken(bk, 0.3));
+    }
+    const y = (view === 'side' ? 37 : o.beltWide ? 35 : 36);
+    const holes: [number, number][] = [];
+    for (let X = 0; X < W * 2; X++) if (X % 4 === 1 && (view !== 'down' || X < 17 || X > 22)) holes.push([X, y]);
+    if (!o.beltWide) hOn(c, holes, o.belt, o.belt.d);
+    else hOn(c, holes.map(([X]) => [X, 34] as [number, number]), o.belt, o.belt.l);
   }
 }
 
@@ -1285,6 +1447,10 @@ function drawHead(f: Ctx) {
   const hi = sk.h ?? lighten(hexOf(sk.m), 0.5);
   if (look.hairStyle === 'bald' && helmetById(look.helmet).hide !== 'all') px(c, [[7, 3 + b], [6, 4 + b], [5, 5 + b]], hi);
 
+  if (o.face && c.res > 1) {
+    hdRobotFace(c, view, b, look.eyes || 'C', o.face);
+    return;
+  }
   if (o.face) {
     // หน้ากากหุ่นยนต์: วิซอร์กว้าง + ไฟตาโต + ตะแกรงปาก + น็อตหู
     if (view === 'down') {
@@ -1328,6 +1494,10 @@ function drawHead(f: Ctx) {
     c.set(x, y + 1, 'W');
     c.set(x + 2, y + 3, 'W');
   };
+  if (c.res > 1) {
+    hdFace(c, view, b, { lash, eyeD, eye, eyeL, blush, mouth, sk });
+    return;
+  }
   if (view === 'down') {
     eyeAt(5, 7 + b);
     eyeAt(12, 7 + b);
@@ -1342,6 +1512,134 @@ function drawHead(f: Ctx) {
   }
 }
 
+/** หน้ากากหุ่นยนต์ HD: วิซอร์มุมมน + แสงสะท้อนเฉียง · ไฟตา LED มีเส้นสแกน · ตะแกรงปาก · น็อตหูมีประกาย */
+function hdRobotFace(c: PixelCanvas, view: View, b: number, eyeCol: string, face: Mat) {
+  const yb = b * 2;
+  const led = hexOf(eyeCol);
+  const ledHi = lighten(led, 0.6);
+  const ledLo = darken(led, 0.35);
+  const visor = (x0: number, x1: number) => {
+    for (let Y = 14; Y <= 21; Y++) {
+      for (let X = x0; X <= x1; X++) {
+        if ((Y === 14 || Y === 21) && (X === x0 || X === x1)) continue;
+        c.hset(X, Y + yb, Y === 14 ? '#262b44' : 'F');
+      }
+    }
+    // แสงสะท้อนเฉียงบนกระจก
+    for (let k = 0; k < 3; k++) c.hset(x0 + 2 + k, 19 - k + yb, 'D');
+  };
+  const eye = (X: number, w: number) => {
+    for (let j = 0; j < 4; j++) for (let i = 0; i < w; i++) c.hset(X + i, 16 + j + yb, j === 0 ? ledHi : j === 3 ? ledLo : j === 2 && i % 2 ? ledLo : led);
+    c.hset(X, 16 + yb, 'W');
+    c.hset(X + 1, 16 + yb, 'W');
+    c.hset(X, 17 + yb, 'W');
+  };
+  const bolt = (X: number) => {
+    c.hset(X, 18 + yb, face.l);
+    c.hset(X + 1, 18 + yb, face.m);
+    c.hset(X, 19 + yb, face.m);
+    c.hset(X + 1, 19 + yb, face.d);
+    c.hset(X, 20 + yb, face.d);
+    c.hset(X + 1, 20 + yb, face.d);
+  };
+  if (view === 'down') {
+    visor(8, 31);
+    eye(10, 6);
+    eye(24, 6);
+    for (let X = 16; X <= 23; X++) c.hset(X, 24 + yb, X % 2 ? 'D' : 'F');
+    for (let X = 17; X <= 22; X++) c.hset(X, 25 + yb, X % 2 ? 'F' : '#262b44');
+    bolt(6);
+    bolt(32);
+  } else if (view === 'side') {
+    visor(20, 33);
+    eye(24, 6);
+    for (let X = 26; X <= 29; X++) c.hset(X, 24 + yb, X % 2 ? 'D' : 'F');
+    bolt(16);
+  } else {
+    for (let Y = 4; Y <= 25; Y++) c.hset(19, Y + yb, face.d);
+    for (let Y = 4; Y <= 25; Y++) c.hset(20, Y + yb, face.l); // รอยต่อหลังหัว
+    for (const X of [12, 26]) {
+      c.hset(X, 20 + yb, 'F');
+      c.hset(X + 1, 20 + yb, 'F');
+      c.hset(X, 21 + yb, 'D');
+    }
+    bolt(6);
+    bolt(32);
+  }
+}
+
+// ตา HD 6×8 (ตรรกะ 3×4): ขนตาหนา 2 แถว + หางขนตาชี้ออก · ม่านตาไล่ 3 เฉด + รูม่านตา · ประกายใหญ่ซ้ายบน + ประกายจิ๋วขวาล่าง · ขอบล่างมน
+const HD_EYE = [
+  'KKKKKK',
+  'KKKKKK',
+  'WWDPDE',
+  'WWPPDE',
+  'EDPPDE',
+  'EEDDEE',
+  'LLEEWL',
+  '.LLLL.',
+];
+
+interface FaceCols {
+  lash: string;
+  eyeD: string;
+  eye: string;
+  eyeL: string;
+  blush: string;
+  mouth: string;
+  sk: Mat;
+}
+
+function hdFace(c: PixelCanvas, view: View, b: number, k: FaceCols) {
+  const r = c.res;
+  const pupil = mix(k.eyeD, k.lash, 0.55);
+  const map: Record<string, string> = { K: k.lash, W: 'W', D: k.eyeD, P: pupil, E: k.eye, L: k.eyeL };
+  /** x,y = มุมตาตรรกะ · outer = ด้านหางตา (-1 ซ้าย / 1 ขวา) */
+  const eye = (x: number, y: number, outer: number) => {
+    const X = x * r;
+    const Y = y * r;
+    HD_EYE.forEach((row, j) => {
+      for (let i = 0; i < row.length; i++) if (row[i] !== '.') c.hset(X + i, Y + j, map[row[i]]);
+    });
+    const ox = outer > 0 ? X + 6 : X - 1;
+    c.hset(ox, Y + 1, k.lash);
+    c.hset(ox + outer, Y, k.lash);
+    c.hset(ox, Y + 5, mix(k.lash, k.sk.m, 0.5)); // ขนตาล่างจาง ๆ
+  };
+  const blushAt = (X: number, Y: number) => {
+    const soft = mix(k.sk.m, k.blush, 0.55);
+    for (let i = 0; i < 4; i++) c.hset(X + i, Y, soft);
+    for (let i = 1; i < 3; i++) c.hset(X + i, Y + 1, soft);
+    c.hset(X + 1, Y, k.blush); // ขีดแก้มเฉียง
+    c.hset(X, Y + 1, k.blush);
+    c.hset(X + 3, Y, k.blush);
+    c.hset(X + 2, Y + 1, k.blush);
+  };
+  if (view === 'down') {
+    eye(5, 7 + b, -1);
+    eye(12, 7 + b, 1);
+    blushAt(8, (11 + b) * r);
+    blushAt(28, (11 + b) * r);
+    // ปากยิ้มเล็ก ๆ + จมูกจุด
+    const my = (12 + b) * r;
+    c.hset(18, my, k.mouth);
+    c.hset(21, my, k.mouth);
+    c.hset(19, my + 1, k.mouth);
+    c.hset(20, my + 1, k.mouth);
+    c.hset(19, my - 3, k.sk.d);
+  } else if (view === 'side') {
+    eye(12, 7 + b, 1);
+    blushAt(24, (11 + b) * r);
+    const my = (12 + b) * r;
+    c.hset(30, my, k.mouth);
+    c.hset(31, my + 1, k.mouth);
+    c.hset(29, my + 1, k.mouth);
+    // หู: เงาโค้งในหู
+    for (const [x, y] of [[20, 18], [21, 18], [20, 19], [20, 20], [21, 21]] as [number, number][]) c.hset(x, y + b * r, k.sk.d);
+    c.hset(21, 19 + b * r, mix(k.sk.d, k.blush, 0.5));
+  }
+}
+
 function drawHair(f: Ctx, minY: number) {
   const { c, view, step, look } = f;
   if (look.hairStyle === 'bald') return;
@@ -1350,18 +1648,64 @@ function drawHair(f: Ctx, minY: number) {
   const hm: Mat = { d: look.hairShade, m: look.hair, l: lighten(hexOf(look.hair), 0.28), h: lighten(hexOf(look.hair), 0.5) };
   const swayFrom = HAIR_SWAY[look.hairStyle]?.[view];
   const sway = view === 'side' ? -step : step;
-  stamp(c, rows, { '1': hm }, { c: hm.l, a: hm.d, e: 'R' }, {
+  stamp(c, rows, { '1': hm }, { c: c.res > 1 ? hm.h ?? hm.l : hm.l, a: hm.d, e: 'R' }, {
+    fine: { c: 'hi', a: 'lo' },
     minY,
     dy: f.bob,
     shift: swayFrom === undefined ? undefined : (y) => (y >= swayFrom ? sway : 0),
   });
+  if (c.res > 1) hairShine(c, hm, view, minY * 2);
+}
+
+/** HD: วงแสงบนผม (angel ring) โค้งตามหัว เว้นช่องเป็นช่อ ๆ + ร่องผมด้านหลัง */
+function hairShine(c: PixelCanvas, hm: Mat, view: View, minY: number) {
+  const HW = W * 2;
+  const tops: number[] = [];
+  let x0 = HW;
+  let x1 = -1;
+  for (let X = 0; X < HW; X++) {
+    tops[X] = -1;
+    for (let Y = Math.max(0, minY); Y < 30; Y++) {
+      if (isMat(c.hget(X, Y), hm)) {
+        tops[X] = Y;
+        x0 = Math.min(x0, X);
+        x1 = Math.max(x1, X);
+        break;
+      }
+    }
+  }
+  if (x1 < 0) return;
+  const w = x1 - x0;
+  for (let X = x0 + 2; X <= x1 - 2; X++) {
+    const t = (X - x0) / w;
+    if (tops[X] < 0 || t > (view === 'side' ? 0.75 : 0.7) || (X - x0) % 4 === 3) continue;
+    const Y = tops[X] + 3 + Math.round(Math.abs(t - 0.38) * 3);
+    for (const yy of [Y, Y + 1]) if (c.hget(X, yy) === hm.m) c.hset(X, yy, t < 0.5 ? hm.l : hm.m === hm.l ? hm.l : lighten(hexOf(hm.m), 0.16));
+  }
+  if (view !== 'up') return;
+  // ร่องผมด้านหลัง: เส้นเข้มยาวลงตามช่อ
+  for (let X = x0 + 3; X <= x1 - 3; X += 5) {
+    const len = 10 + ((X * 7) % 4) * 3;
+    for (let Y = tops[X] + 7 + ((X * 3) % 4); Y < Math.min(30, tops[X] + 7 + len); Y++) {
+      if (c.hget(X, Y) === hm.m) c.hset(X, Y, hm.d);
+    }
+  }
 }
 
 function drawHelmet(f: Ctx, h: HelmetDef) {
   const rows = f.view === 'side' ? h.side : f.view === 'up' ? h.up ?? h.down : h.down;
   if (!rows.length) return;
   const m1 = h.mat ?? STEEL;
-  stamp(f.c, rows, { '1': m1, '2': h.mat2 ?? m1 }, { c: m1.l, a: m1.d, h: m1.h ?? m1.l, ...h.cols }, { dy: f.bob });
+  stamp(f.c, rows, { '1': m1, '2': h.mat2 ?? m1 }, { c: m1.l, a: m1.d, h: m1.h ?? m1.l, ...h.cols }, { dy: f.bob, fine: { c: 'hi', a: 'lo' } });
+  if (f.c.res > 1 && (h.id === 'hood' || h.id === 'ninja_mask') && f.view === 'up') {
+    // HD: ตะเข็บกลางหลังฮู้ด + รอยพับผ้า
+    const yb = f.bob * 2;
+    for (let Y = 4; Y <= 30; Y++) {
+      hOn(f.c, [[19, Y + yb]], m1, m1.d);
+      hOn(f.c, [[20, Y + yb]], m1, m1.l);
+    }
+    for (const [X, Y] of [[11, 14], [12, 15], [12, 16], [28, 14], [27, 15], [27, 16], [9, 24], [30, 24]] as [number, number][]) hOn(f.c, [[X, Y + yb]], m1, m1.d);
+  }
 }
 
 // ---------------------------------------------------------------- ผ้าคลุม
@@ -1459,13 +1803,17 @@ function drawDetails(f: Ctx, phase: Phase) {
         for (const ln of lines) {
           ln.forEach(([x, y], i) => c.set(x, y, i % 2 ? darken(hexOf(d.color), 0.25) : d.color));
           if (d.buckle && view !== 'side') px(c, [ln[4], ln[5]], d.buckle);
+          // HD: ตะเข็บเย็บบนสาย (จุดสว่างเว้นระยะ)
+          if (c.res > 1) ln.forEach(([x, y], i) => i % 2 === 0 && !(d.buckle && (i === 4 || i === 5)) && c.hset(x * 2 + 1, y * 2, lighten(hexOf(d.color), 0.35)));
+          if (c.res > 1 && d.buckle && view !== 'side') hdStud(c, ln[4][0], ln[4][1], d.buckle);
         }
         break;
       }
       case 'buttons': {
         if (phase !== 'chest') break;
-        if (view === 'down') px(c, d.double ? [[8, 15], [8, 17], [11, 15], [11, 17]] : [[9, 15], [9, 17]], d.color);
-        else if (view === 'side') px(c, [[12, 15], [12, 17]], d.color);
+        const pts: [number, number][] = view === 'down' ? (d.double ? [[8, 15], [8, 17], [11, 15], [11, 17]] : [[9, 15], [9, 17]]) : view === 'side' ? [[12, 15], [12, 17]] : [];
+        px(c, pts, d.color);
+        if (c.res > 1) for (const [x, y] of pts) hdStud(c, x, y, d.color);
         break;
       }
       case 'zip': {
@@ -1473,6 +1821,12 @@ function drawDetails(f: Ctx, phase: Phase) {
         if (view === 'down') {
           for (let y = 14; y <= 17; y++) c.set(9, y, d.color);
           c.set(9, 15, d.pull);
+          if (c.res > 1) {
+            // HD: ฟันซิปสลับซ้ายขวา + หัวซิปมีรู
+            for (let Y = 28; Y <= 35; Y++) if (Y < 30 || Y > 31) c.hset(18 + (Y % 2), Y, o.top.l);
+            c.hset(18, 30, lighten(hexOf(d.pull), 0.5));
+            c.hset(19, 31, darken(hexOf(d.pull), 0.4));
+          }
         } else if (view === 'side') for (let y = 14; y <= 17; y++) c.set(12, y, d.color);
         break;
       }
@@ -1493,6 +1847,17 @@ function drawDetails(f: Ctx, phase: Phase) {
         onMat(c, seam, o.top, d.seam);
         if (d.ridge && view === 'down') onMat(c, [[9, 14], [9, 15], [9, 17]], o.top, d.ridge);
         if (d.ridge && view !== 'side') onMat(c, [[8, 19], [11, 19]], o.legs, d.ridge);
+        if (c.res > 1) {
+          // HD: รอยต่อแผ่นเกราะบาง 1 พิกเซล + ขอบมุมรับแสงใต้รอยต่อ + หมุดย้ำ
+          const row: [number, number][] = [];
+          for (let X = x0 * 2; X <= x1 * 2 + 1; X++) row.push([X, 33]);
+          for (const [X, Y] of row) {
+            const p = c.hget(X, Y);
+            if (p === hexOf(d.seam) || p === d.seam) c.hset(X, Y, o.top.l);
+          }
+          const rivet = d.ridge ? hexOf(d.ridge) : lighten(hexOf(o.top.l), 0.4);
+          hOn(c, view === 'side' ? [[x1 * 2, 30]] : [[x0 * 2 + 1, 30], [x1 * 2, 30], [x0 * 2 + 1, 35], [x1 * 2, 35]], o.top, rivet);
+        }
         break;
       }
       case 'zigzag': {
@@ -1510,6 +1875,10 @@ function drawDetails(f: Ctx, phase: Phase) {
           onMat(c, [[7, 15], [7, 16], [12, 15], [12, 16], [8, 17], [11, 17]], o.top, d.color);
           onMat(c, [[9, 16], [10, 16]], o.top, d.core);
           onMat(c, [[8, 19], [11, 19], [8, 20], [11, 20]], o.legs, d.color);
+          if (c.res > 1) {
+            c.hset(19, 32, 'W');
+            c.hset(20, 32, lighten(hexOf(d.core), 0.5));
+          }
         } else if (view === 'up') {
           onMat(c, [[9, 15], [10, 15], [9, 17], [10, 17], [7, 15], [12, 15]], o.top, d.color);
           onMat(c, [[9, 16], [10, 16]], o.top, d.core);
@@ -1529,6 +1898,13 @@ function drawDetails(f: Ctx, phase: Phase) {
           px(c, [[10, 15]], d.lights[1 % d.lights.length]);
           px(c, [[11, 15]], d.lights[2 % d.lights.length]);
           px(c, [[8, 17], [10, 17]], 'D');
+          if (c.res > 1) {
+            // HD: ไฟแผงมีประกาย + ร่องระบายอากาศ
+            for (const x of [8, 10, 11]) c.hset(x * 2, 30, 'W');
+            for (let X = 16; X <= 23; X++) if (X % 2 === 0) c.hset(X, 33, 'D');
+            c.hset(18, 35, 'L');
+            c.hset(22, 35, 'L');
+          }
         } else if (view === 'up') {
           for (let y = 15; y <= 17; y++) for (let x = 8; x <= 11; x++) c.set(x, y, y % 2 ? 'D' : d.base);
         } else {
@@ -1543,6 +1919,12 @@ function drawDetails(f: Ctx, phase: Phase) {
           shade(c, new Mask().rect(7, 16, 6, 2).rect(6, 18, 8, 1), d.mat);
           px(c, [[7, 14], [7, 15], [12, 14], [12, 15]], d.mat.m);
           px(c, [[7, 16], [12, 16]], d.button);
+          if (c.res > 1) {
+            hdStud(c, 7, 16, d.button);
+            hdStud(c, 12, 16, d.button);
+            // กระเป๋าหน้าอก
+            hOn(c, [[17, 34], [18, 34], [19, 34], [20, 34], [21, 34], [22, 34]], d.mat, d.mat.d);
+          }
         } else if (view === 'up') {
           shade(c, new Mask().rect(6, 16, 8, 3), d.mat);
           px(c, [[7, 14], [8, 15], [12, 14], [11, 15]], d.mat.m);
@@ -1591,6 +1973,11 @@ function drawDetails(f: Ctx, phase: Phase) {
           px(c, [[8, 14], [8, 15], [9, 16], [10, 16], [11, 15], [11, 14]], d.cord);
           px(c, [[9, 17], [10, 17]], d.bead);
           if (d.tooth) px(c, [[8, 16], [11, 16]], d.tooth);
+          if (c.res > 1) {
+            hdStud(c, 9, 17, d.bead);
+            hdStud(c, 10, 17, d.bead);
+            if (d.tooth) for (const x of [8, 11]) c.hset(x * 2 + (x === 8 ? 1 : 0), 33, 'L'); // เขี้ยวปลายแหลม
+          }
         } else if (view === 'side') {
           px(c, [[11, 14], [12, 15]], d.cord);
           c.set(12, 16, d.bead);
@@ -1626,7 +2013,10 @@ function drawDetails(f: Ctx, phase: Phase) {
         else m.span(13 + b, 5, 6).span(13 + b, 13, 14).span(14 + b, 4, 15).add(6, 15 + b).add(13, 15 + b);
         if (view === 'up') m.span(13 + b, 5, 14);
         shade(c, m, d.mat, true);
-        m.each((x, y) => dither(x, y) > 0.25 && c.set(x, y, d.mat.d));
+        if (c.res > 1) {
+          const on = m.hi(c.res);
+          for (let i = 0; i < on.length; i++) if (on[i] && dither(i % (W * 2), (i / (W * 2)) | 0) > 0.3) c.hset(i % (W * 2), (i / (W * 2)) | 0, d.mat.d);
+        } else m.each((x, y) => dither(x, y) > 0.25 && c.set(x, y, d.mat.d));
         break;
       }
       case 'quiver': {
@@ -1658,8 +2048,8 @@ function skinMat(look: HeroLook): Mat {
 
 const isShadow = (p: string | null) => !!p && p.startsWith('rgba');
 
-function drawHero(look: HeroLook, view: View, step: number): PixelCanvas {
-  const c = new PixelCanvas(W, H);
+function drawHero(look: HeroLook, view: View, step: number, res: number): PixelCanvas {
+  const c = new PixelCanvas(W, H, res);
   const o = outfitById(look.outfit);
   const helm = helmetById(look.helmet);
   const cape = capeById(look.cape);
@@ -1691,12 +2081,17 @@ function drawHero(look: HeroLook, view: View, step: number): PixelCanvas {
   for (let i = 0; i < sh.px.length; i++) if (sh.px[i] && !c.px[i]) c.px[i] = sh.px[i];
 
   // ประกายโลหะหลังตีขอบ
+  // HD: ประกายเป็นจุดคม 2 พิกเซลจริงแนวเฉียง (แทนบล็อกทั้งช่อง)
+  const r = c.res;
   const spec = (pts: [number, number][], col: string, allow?: Mat) => {
     for (const [x, y] of pts) {
-      const p = c.get(x, y);
-      if (!p || p === 'O' || isShadow(p)) continue;
-      if (allow && p !== allow.m && p !== allow.l && p !== allow.h) continue;
-      c.set(x, y, col);
+      const sub: [number, number][] = r > 1 ? [[x * r, y * r + 1], [x * r + 1, y * r]] : [[x, y]];
+      for (const [X, Y] of sub) {
+        const p = c.hget(X, Y);
+        if (!p || p === 'O' || isShadow(p)) continue;
+        if (allow && p !== allow.m && p !== allow.l && p !== allow.h) continue;
+        c.hset(X, Y, col);
+      }
     }
   };
   if (o.spec) {
@@ -1713,9 +2108,15 @@ const FRAMES: [View, number][] = [
   ['side', 0], ['side', 1], ['side', 0],
 ];
 
-/** วาดทั้ง 9 เฟรม (ใช้ทำ preview ใน UI ได้ เช่นหน้าจอเลือกชุด) */
-export function heroFrames(look: HeroLook): PixelCanvas[] {
-  return FRAMES.map(([v, s]) => drawHero(look, v, s));
+/** วาดทั้ง 9 เฟรม (ใช้ทำ preview ใน UI ได้ เช่นหน้าจอเลือกชุด) · res = ความละเอียด (ค่าเริ่มต้น HD) */
+export function heroFrames(look: HeroLook, res = SPRITE_RES): PixelCanvas[] {
+  return FRAMES.map(([v, s]) => drawHero(look, v, s, res));
+}
+
+/** เฟรมเดียว (เช่นไอคอนชุดในกระเป๋า ใช้ res 1 = ขนาด 20×24 ที่ UI ไอเทมคาดไว้) */
+export function heroFrame(look: HeroLook, index = 0, res = SPRITE_RES): PixelCanvas {
+  const [v, st] = FRAMES[index] ?? FRAMES[0];
+  return drawHero(look, v, st, res);
 }
 
 /** key ที่ไม่ซ้ำตาม look */
@@ -1730,19 +2131,22 @@ export function heroKey(look: HeroLook): string {
 }
 
 /**
- * สร้าง texture strip ชื่อ key (ถ้ายังไม่มี) + anims `${key}_walk_down` [1,0,2,0] 8fps,
+ * สร้าง texture strip ชื่อ key (ถ้ายังไม่มี) — HD: เฟรมละ (HERO_W×HERO_H)×SPRITE_RES แสดงที่ scale 1/SPRITE_RES + anims `${key}_walk_down` [1,0,2,0] 8fps,
  * `${key}_walk_up` [4,3,5,3] 8fps, `${key}_walk_side` [7,6] 6fps (repeat -1). คืน key
  */
 export function buildHeroTexture(scene: Phaser.Scene, key: string, look: HeroLook): string {
   if (!scene.textures.exists(key)) {
     const frames = heroFrames(look);
-    const tex = scene.textures.createCanvas(key, W * frames.length, H)!;
+    const fw = frames[0].W;
+    const fh = frames[0].H;
+    const tex = scene.textures.createCanvas(key, fw * frames.length, fh)!;
     const ctx = tex.getContext();
     frames.forEach((pc, i) => {
-      pc.draw(ctx, i * W, 0);
-      tex.add(i, 0, i * W, 0, W, H);
+      pc.blit(ctx, i * fw, 0);
+      tex.add(i, 0, i * fw, 0, fw, fh);
     });
     tex.refresh();
+    markHd(tex, frames[0].res);
   }
   const anims = scene.anims;
   const defs: [string, number[], number][] = [

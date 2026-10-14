@@ -37,7 +37,7 @@ export class GuideSystem {
     const g = s.add.graphics();
     g.fillStyle(0xffcd75, 1).fillTriangle(10, 0, -6, -7, -6, 7);
     g.lineStyle(2, 0x0b0d1f, 0.9).strokeTriangle(10, 0, -6, -7, -6, 7);
-    this.arrowTxt = s.add.text(0, -16, '', { fontFamily: '"Mitr", sans-serif', fontSize: '11px', fontStyle: '600', color: '#ffcd75', stroke: '#0b0d1f', strokeThickness: 3 }).setOrigin(0.5).setResolution(2);
+    this.arrowTxt = s.add.text(0, -16, '', { fontFamily: '"Noto Sans Thai", Tahoma, sans-serif', fontSize: '11px', fontStyle: '600', color: '#ffcd75', stroke: '#0b0d1f', strokeThickness: 3 }).setOrigin(0.5).setResolution(2);
     this.arrow = s.add.container(0, 0, [g, this.arrowTxt]).setDepth(1e6 - 3).setVisible(false);
     s.tweens.add({ targets: g, x: 4, duration: 450, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
 

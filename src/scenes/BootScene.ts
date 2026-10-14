@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
 import { buildAllTextures } from '../gfx/TextureFactory';
-import { CAPES, CLASS_LOOKS, HELMETS, OUTFITS, buildHeroTexture, heroKey, type HeroLook } from '../gfx/art/heroes';
+import { CAPES, CLASS_LOOKS, HELMETS, OUTFITS, heroFrame, type HeroLook } from '../gfx/art/heroes';
 import { registerCosmetics } from '../data/items';
 import { registerBlueprints } from '../data/blueprints';
 import { LOOT_GROUPS, type Rarity } from '../data/loot';
-import { FONT, HEAD_FONT, PIXEL_FONT } from '../ui/widgets';
+import { FONT, HEAD_FONT, PIXEL_FONT, PIXEL_TH } from '../ui/widgets';
 import { installCrispText } from '../ui/crispText';
 import { TiltPipeline } from '../gfx/TiltPipeline';
 import { coverImage, queueArt } from '../ui/art';
@@ -26,16 +26,14 @@ function registerCostumes(scene: Phaser.Scene) {
   registerCosmetics(list);
   registerBlueprints();
   LOOT_GROUPS.cosmetic.entries = list.map((c) => ({ item: `cos_${c.slot}_${c.id}`, qty: [1, 1], rarity: c.rarity }));
-  // ไอคอน = เฟรมหน้าตรงของตัวละครที่ใส่ชุดนั้น
+  // ไอคอน = เฟรมหน้าตรงของตัวละครที่ใส่ชุดนั้น — วาดความละเอียดปกติ 20×24 (ขนาดที่ช่องไอเทมคาดไว้ · ตัวในเกมเป็น HD)
   for (const c of list) {
-    const look = { ...base, [c.slot]: c.id } as HeroLook;
-    const key = buildHeroTexture(scene, heroKey(look), look);
-    const src = scene.textures.get(key);
-    const f = src.get(0);
     const iconKey = `icon_cos_${c.slot}_${c.id}`;
     if (scene.textures.exists(iconKey)) continue;
-    const tex = scene.textures.createCanvas(iconKey, f.width, f.height)!;
-    tex.getContext().drawImage(src.getSourceImage() as HTMLCanvasElement, f.cutX, f.cutY, f.width, f.height, 0, 0, f.width, f.height);
+    const look = { ...base, [c.slot]: c.id } as HeroLook;
+    const pc = heroFrame(look, 0, 1);
+    const tex = scene.textures.createCanvas(iconKey, pc.W, pc.H)!;
+    pc.blit(tex.getContext());
     tex.refresh();
   }
 }
@@ -68,12 +66,14 @@ export class BootScene extends Phaser.Scene {
     const r = this.renderer as Phaser.Renderer.WebGL.WebGLRenderer;
     if (r.pipelines && !r.pipelines.getPostPipeline('TiltPipeline')) r.pipelines.addPostPipeline('TiltPipeline', TiltPipeline);
     this.time.delayedCall(30, () => {
+      const t0 = performance.now();
       buildAllTextures(this);
+      this.registry.set('bootTexMs', Math.round(performance.now() - t0)); // ดูเวลาสร้าง texture ตอนบูต (game.registry)
       report(0.85);
       registerCostumes(this);
       report(0.92);
       const fonts = document.fonts
-        ? Promise.all([document.fonts.load(`600 16px ${FONT}`), document.fonts.load(`700 16px ${HEAD_FONT}`), document.fonts.load(`16px ${PIXEL_FONT}`)])
+        ? Promise.all([document.fonts.load(`400 16px ${FONT}`), document.fonts.load(`500 16px ${FONT}`), document.fonts.load(`600 16px ${FONT}`), document.fonts.load(`700 16px ${HEAD_FONT}`), document.fonts.load(`16px ${PIXEL_FONT}`), document.fonts.load(`16px ${PIXEL_TH}`)])
         : Promise.resolve();
       Promise.race([fonts, new Promise((r) => setTimeout(r, 3000))]).finally(() => {
         label.destroy();

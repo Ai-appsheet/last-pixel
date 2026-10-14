@@ -5,6 +5,7 @@ import type { GameScene } from '../scenes/GameScene';
 import { Sfx } from '../core/AudioManager';
 import { isWater } from '../world/tiles';
 import { STATUS_INFO, type StatusKind } from '../data/weapons';
+import { resOf, setWorldScale } from '../gfx/hd';
 
 type State = 'idle' | 'wander' | 'flee' | 'chase' | 'windup' | 'charge';
 
@@ -70,7 +71,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
     this.humanoid = scene.anims.exists(`${def.texture}_walk_down`);
     scene.add.existing(this);
     scene.physics.add.existing(this);
-    if (def.scale) this.setScale(def.scale);
+    setWorldScale(this, def.scale ?? 1); // texture HD → scale จริง = def.scale / res (ขนาดในโลกเท่าเดิม)
     if (def.tint) this.setTint(def.tint);
     if (def.alpha) this.setAlpha(def.alpha);
     this.fitBody();
@@ -89,8 +90,11 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
   }
 
   fitBody() {
-    const { w, h } = this.def.body;
-    this.body.setSize(w, h).setOffset((this.width - w) / 2, this.height - h - 1);
+    // body.setSize/Offset เป็นพิกเซล texture → คูณความละเอียด (texture HD) ให้ขนาด/ตำแหน่งในโลกเท่าเดิม
+    const r = resOf(this.texture);
+    const w = this.def.body.w * r;
+    const h = this.def.body.h * r;
+    this.body.setSize(w, h).setOffset((this.width - w) / 2, this.height - h - r);
   }
 
   get feetY() {
@@ -318,7 +322,8 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
     if (Math.abs(vx) > 1) this.setFlipX(vx < 0);
     if (tex === 'rabbit') {
       this.bob += moving ? 0.35 : 0;
-      this.setDisplayOrigin(8, this.height / 2 + (moving ? Math.abs(Math.sin(this.bob)) * 3 : 0));
+      const r = resOf(this.texture);
+      this.setDisplayOrigin(8 * r, this.height / 2 + (moving ? Math.abs(Math.sin(this.bob)) * 3 * r : 0));
       return;
     }
     const anim = `${tex}_walk`;
@@ -499,7 +504,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
       this.squashT = Math.max(0, this.squashT - dt);
       const k = this.squashT / 0.14;
       const sc = this.def.scale ?? 1;
-      this.setScale(sc * (1 + 0.22 * k), sc * (1 - 0.18 * k));
+      setWorldScale(this, sc * (1 + 0.22 * k), sc * (1 - 0.18 * k));
     }
   }
 

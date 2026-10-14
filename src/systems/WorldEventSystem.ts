@@ -282,7 +282,7 @@ export class WorldEventSystem {
     beamG.fillStyle(0xfff2b0, 0.3).fillEllipse(0, 0, 90, 28);
     const beam = s.add.container(x, y, [beamG]).setDepth(5e5).setBlendMode(Phaser.BlendModes.ADD);
     s.tweens.add({ targets: beam, alpha: 0.55, duration: 900, yoyo: true, repeat: -1 });
-    const label = txt(s, x, y - (is.r + 4) * 16, '', 10, col.open).setOrigin(0.5).setDepth(5e5 + 1).setStroke('#0b0d1f', 3).setResolution(4);
+    const label = txt(s, x, y - (is.r + 4) * 16, '', 10, col.open, { fontStyle: '600' }).setOrigin(0.5).setDepth(5e5 + 1).setStroke('#0b0d1f', 3).setResolution(4);
     // ป้ายปิด 4 ทิศบนแนวพายุ (ทางที่เรือเข้ามา)
     const signs: GateFx['signs'] = [];
     for (let i = 0; i < 4; i++) {
@@ -290,7 +290,7 @@ export class WorldEventSystem {
       const sx = x + Math.cos(a) * (R + 26);
       const sy = y + Math.sin(a) * (R + 26);
       const img = s.add.image(sx, sy, 'signpost').setOrigin(0.5, 1).setDepth(5e5 + 1).setScale(1.4);
-      const text = txt(s, sx, sy - 28, '', 9, col.closed).setOrigin(0.5, 1).setDepth(5e5 + 1).setStroke('#0b0d1f', 3).setResolution(4);
+      const text = txt(s, sx, sy - 28, '', 9, col.closed, { fontStyle: '600' }).setOrigin(0.5, 1).setDepth(5e5 + 1).setStroke('#0b0d1f', 3).setResolution(4);
       signs.push({ img, text });
     }
     this.gateFx[kind] = { storm, beam, label, signs };
@@ -363,7 +363,7 @@ export class WorldEventSystem {
     g.fillGradientStyle(c, c, c, c, 0, 0, 0.45, 0.45).fillRect(-12, -800, 24, 800);
     const beam = s.add.container(x, y, [g]).setDepth(5e5).setBlendMode(Phaser.BlendModes.ADD);
     s.tweens.add({ targets: beam, alpha: 0.5, duration: 800, yoyo: true, repeat: -1 });
-    const label = txt(s, x, y - (is.r + 4) * 16, '', 10, def.color).setOrigin(0.5).setDepth(5e5 + 1).setStroke('#0b0d1f', 3).setResolution(4);
+    const label = txt(s, x, y - (is.r + 4) * 16, '', 10, def.color, { fontStyle: '600' }).setOrigin(0.5).setDepth(5e5 + 1).setStroke('#0b0d1f', 3).setResolution(4);
     this.active.set(plan.id, { plan, slot, endAt, beam, label, warned: false });
     const mins = Math.max(1, Math.ceil((endAt - WorldClock.now()) / MINUTE));
     if (this.announce(`${plan.id}:start`, `${def.icon} ${def.name}โผล่แล้ว${this.dirText(slot)}! อยู่ได้อีก ${mins} นาที (ดูแผนที่ M)`, def.color)) Sfx.play('horn');

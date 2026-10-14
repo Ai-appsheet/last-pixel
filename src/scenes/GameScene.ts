@@ -35,6 +35,7 @@ import { addStats, emptyStats, statLine, SLOT_NAME, STAT_INFO, TRAIN_CAP, type E
 import { ResourceNode } from '../entities/ResourceNode';
 import { RAIN_WATER_CAP, Structure } from '../entities/Structure';
 import { TiltPipeline, tiltMap } from '../gfx/TiltPipeline';
+import { setWorldScale } from '../gfx/hd';
 import { AchievementSystem } from '../systems/AchievementSystem';
 import { InspectSystem } from '../systems/InspectSystem';
 import { AutoSystem } from '../systems/AutoSystem';
@@ -497,9 +498,9 @@ export class GameScene extends Phaser.Scene {
       this.braziers.push(bz);
     }
     this.add.image(cx, cy - 8, 'statue').setOrigin(0.5, 1).setDepth(cy - 8);
-    const m = this.add.sprite(cx + 40, cy + 30, 'merchant', 0).setOrigin(0.5, 1).setDepth(cy + 30);
+    const m = setWorldScale(this.add.sprite(cx + 40, cy + 30, 'merchant', 0).setOrigin(0.5, 1).setDepth(cy + 30), 1); // HD
     this.add.image(cx + 40, cy + 29, 'shadow').setDepth(-1);
-    this.tweens.add({ targets: m, scaleY: 1.04, yoyo: true, repeat: -1, duration: 900 });
+    this.tweens.add({ targets: m, scaleY: m.scaleY * 1.04, yoyo: true, repeat: -1, duration: 900 });
     this.merchantSprite = m;
     for (const [dx, dy, text] of [[0, 17, 'เกาะกลาง — เขตปลอดภัย ห้ามต่อสู้'], [17, 0, 'ตลาดแลกเปลี่ยน: วางขาย/ซื้อของที่แผง'], [-17, 0, 'พ่อค้ากลาง: ซื้อ/ขาย/แลกเพชร']] as [number, number, string][]) {
       const x = cx + dx * 16;
@@ -1350,6 +1351,8 @@ export class GameScene extends Phaser.Scene {
     }
     if (pointer.rightButtonDown()) {
       if (this.build.on) this.build.cancel();
+      // คอม: คลิกขวาที่ของ = เปิด/ปิดการ์ดข้อมูลเต็ม
+      else this.inspect.pick(wp.x, wp.y);
       return;
     }
     if (this.build.demolish) return this.build.demolishAt(wp.x, wp.y);
@@ -2525,7 +2528,7 @@ export class GameScene extends Phaser.Scene {
     if (!isWater(this.tileAt(Math.floor(x / 16), Math.floor(y / 16)))) return EventBus.emit('toast', 'หันหน้าเข้าหาน้ำแล้วเหวี่ยงเบ็ด', '#94b0c2');
     const bobber = this.add.image(p.x, p.y, 'px').setTint(0xb13e53).setScale(1.2).setDepth(1e5);
     this.tweens.add({ targets: bobber, x, y, duration: 350, ease: 'Quad.easeOut' });
-    const mark = this.add.text(x, y - 14, '!', { fontFamily: '"Mitr", sans-serif', fontSize: '13px', fontStyle: '700', color: '#ffcd75', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(1e6 + 5).setVisible(false);
+    const mark = this.add.text(x, y - 14, '!', { fontFamily: '"Noto Sans Thai", Tahoma, sans-serif', fontSize: '13px', fontStyle: '700', color: '#ffcd75', stroke: '#000', strokeThickness: 3 }).setOrigin(0.5).setDepth(1e6 + 5).setVisible(false);
     // เรือประมง: อวนในตัว ปลากินเร็วขึ้น
     this.fishing = { state: 'wait', t: Phaser.Math.FloatBetween(1.6, 4.5) / (this.riding?.spec.fishing ?? 1), bobber, mark };
     Sfx.play('splash');
