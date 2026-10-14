@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { PALETTE } from '../data/palette';
-import { HUMANOID, SPRITES } from '../data/sprites';
+import { SPRITES } from '../data/sprites';
 import { CHARACTERS, MERCHANT_COLORS, RIVAL_COLORS, SHADE_COLORS, ZOMBIE_COLORS } from '../data/characters';
 import { PixelCanvas, dither } from './PixelCanvas';
 import {
@@ -20,7 +20,7 @@ import { weaponIcons } from './art/weapons';
 import { buildCreatureTextures, creatureIcons } from './art/creatures';
 import { buildBuildingTextures } from './art/buildings';
 import { vehicleArt } from './art/vehicles';
-import { buildMonsterTextures } from './art/monsters';
+import { buildMonsterTextures, CHIBI_HUMANOID } from './art/monsters';
 import { edgeTiles, groundTiles } from './art/terrain';
 
 export { TILE } from '../world/tiles';
@@ -87,7 +87,7 @@ function stripTexture(scene: Phaser.Scene, key: string, frames: PixelCanvas[]) {
 
 function humanoid(scene: Phaser.Scene, key: string, colors: Record<string, string>) {
   // เฟรม: 0-2 down, 3-5 up, 6-8 side
-  sheetTexture(scene, key, [...HUMANOID.down, ...HUMANOID.up, ...HUMANOID.side], 16, 18, colors);
+  sheetTexture(scene, key, [...CHIBI_HUMANOID.down, ...CHIBI_HUMANOID.up, ...CHIBI_HUMANOID.side], 16, 18, colors);
   const anims = scene.anims;
   anims.create({ key: `${key}_walk_down`, frames: anims.generateFrameNumbers(key, { frames: [1, 0, 2, 0] }), frameRate: 8, repeat: -1 });
   anims.create({ key: `${key}_walk_up`, frames: anims.generateFrameNumbers(key, { frames: [4, 3, 5, 3] }), frameRate: 8, repeat: -1 });
@@ -249,11 +249,7 @@ export function buildAllTextures(scene: Phaser.Scene) {
   humanoid(scene, 'rival', RIVAL_COLORS);
   humanoid(scene, 'merchant', MERCHANT_COLORS);
   humanoid(scene, 'shade', SHADE_COLORS);
-  sheetTexture(scene, 'boar', [SPRITES.boar, SPRITES.boar_walk]);
-  sheetTexture(scene, 'wolf', [SPRITES.wolf, SPRITES.wolf_walk]);
-  scene.anims.create({ key: 'boar_walk', frames: scene.anims.generateFrameNumbers('boar', { frames: [0, 1] }), frameRate: 6, repeat: -1 });
-  scene.anims.create({ key: 'wolf_walk', frames: scene.anims.generateFrameNumbers('wolf', { frames: [0, 1] }), frameRate: 8, repeat: -1 });
-  spriteTexture(scene, 'rabbit', SPRITES.rabbit);
+  // หมูป่า/หมาป่า/กระต่าย วาดแบบจิบิใน art/creatures.ts (buildCreatureTextures)
 
   // ---------- ไอคอน ----------
   for (const key of Object.keys(SPRITES).filter((k) => k.startsWith('i_'))) spriteTexture(scene, key, SPRITES[key]);

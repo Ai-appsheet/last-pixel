@@ -1,12 +1,114 @@
 import Phaser from 'phaser';
 import { RNG } from '../../core/RNG';
-import { HUMANOID } from '../../data/sprites';
 import { PixelCanvas, dither } from '../PixelCanvas';
 
 // มอนสเตอร์ + กระสุน: วาดด้วยโค้ดทั้งหมด (ขอบ 'O', แสงจากซ้ายบน, เงาวงรีที่ฐาน)
 // ด้านข้างหันขวาเสมอ (เกมจะ flipX เมื่อหันซ้าย)
 
 type View = 'down' | 'up' | 'side';
+
+// ---------------------------------------------------------------- มนุษย์จิบิ 16×18 (ช่องสีเหมือน sprites.ts)
+//   1 ผม/หมวก  8 ไฮไลต์ผม  2 ผิว  9 เงาผิว  3 ตา  4 เสื้อ  5 เงาเสื้อ  6 กางเกง  7 รองเท้า  n เข็มขัด  p แก้ม
+//   หัวโต 11 แถว (≈60%) กว้าง 12 ตาอนิเมะ 3×3 (ขนตา 'O' + ประกาย 'W') ตัวจิ๋ว 4 แถว ขา 3 แถว
+//   ใช้กับ char_* / zombie / rival / merchant / shade / skeleton / mummy / imp
+
+const CH_HEAD_DOWN = [
+  '...OOOOOOOOOO...',
+  '..O8811111111O..',
+  '.O881111111111O.',
+  '.O811111111111O.',
+  '.O111211112111O.',
+  '.O1OOO2222OOO1O.',
+  '.O1W332222W331O.',
+  '.O233322223339O.',
+  '.O2p22222222p9O.',
+  '..O2222992229O..',
+  '...OO222222OO...',
+];
+const CH_HEAD_UP = [
+  '...OOOOOOOOOO...',
+  '..O8811111111O..',
+  '.O881111111111O.',
+  '.O811111111111O.',
+  '.O111111111111O.',
+  '.O111111111111O.',
+  '.O111111111111O.',
+  '.O111111111111O.',
+  '.O111111111111O.',
+  '..O9111111119O..',
+  '...OO922229OO...',
+];
+const CH_HEAD_SIDE = [
+  '...OOOOOOOOOO...',
+  '..O8811111111O..',
+  '.O881111111111O.',
+  '.O811111111111O.',
+  '.O111111112221O.',
+  '.O1111112OOO22O.',
+  '.O1111192W3322O.',
+  '.O1111122333p2O.',
+  '.O111122222292O.',
+  '..O1112222229O..',
+  '...OO222222OO...',
+];
+const CH_BODY_FRONT = [
+  '..O2444444442O..',
+  '..O2544444452O..',
+  '..O9O5nnnn5O9O..',
+  '...OO666666OO...',
+];
+const CH_BODY_BACK = [
+  '..O2444444442O..',
+  '..O2544444452O..',
+  '..O9O555555O9O..',
+  '...OO666666OO...',
+];
+const CH_BODY_SIDE = [
+  '.....O4444O.....',
+  '.....O4544O.....',
+  '.....Onn9nO.....',
+  '.....O6666O.....',
+];
+const CH_LEGS_FRONT = [
+  ['....O66OO66O....', '....O77OO77O....', '....OOOOOOOO....'],
+  ['....O77OO66O....', '....OOOOO77O....', '........OOOO....'],
+  ['....O66OO77O....', '....O77OOOOO....', '....OOOO........'],
+];
+const CH_LEGS_SIDE = [
+  ['.....O6666O.....', '.....O7777O.....', '.....OOOOOO.....'],
+  ['....O66OO66O....', '...O77O..O77O...', '...OOOO..OOOO...'],
+];
+
+/** เฟรมมนุษย์จิบิ: down/up/side × [ยืน, ก้าว A, ก้าว B] (แทน HUMANOID เดิมใน sprites.ts) */
+export const CHIBI_HUMANOID: Record<View, string[][]> = {
+  down: CH_LEGS_FRONT.map((legs) => [...CH_HEAD_DOWN, ...CH_BODY_FRONT, ...legs]),
+  up: CH_LEGS_FRONT.map((legs) => [...CH_HEAD_UP, ...CH_BODY_BACK, ...legs]),
+  side: [0, 1, 0].map((i) => [...CH_HEAD_SIDE, ...CH_BODY_SIDE, ...CH_LEGS_SIDE[i]]),
+};
+
+/**
+ * ตาโตแบบอนิเมะ w×h: แถวบน = ขนตา 'O', ประกายใหญ่ 'W' ซ้ายบน, ประกายจิ๋วขวาล่าง (ถ้าสูง ≥4)
+ * angry = คิ้วขมวด (1 = เฉียงลงไปทางขวา, -1 = ไปทางซ้าย) สำหรับบอส/ตัวดุ
+ */
+export function bigEye(c: PixelCanvas, x: number, y: number, iris = 'O', w = 3, h = 3, angry = 0) {
+  x = Math.round(x);
+  y = Math.round(y);
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) c.set(x + i, y + j, j === 0 ? 'O' : iris);
+  c.set(x, y + 1, 'W');
+  if (w >= 3 && h >= 4) c.set(x + 1, y + 1, 'W');
+  if (h >= 4) c.set(x + w - 1, y + h - 1, 'W');
+  else if (iris !== 'O' && w >= 3) c.set(x + 1, y + h - 1, 'O');
+  if (angry > 0) for (const [dx, dy] of [[-1, -2], [0, -2], [1, -1], [2, -1]]) c.set(x + dx, y + dy, 'O');
+  else if (angry < 0) for (const [dx, dy] of [[w, -2], [w - 1, -2], [w - 2, -1], [w - 3, -1]]) c.set(x + dx, y + dy, 'O');
+}
+
+export function cuteEye(c: PixelCanvas, x: number, y: number, iris = 'O', tall = 2) {
+  for (let j = 0; j < tall; j++) {
+    c.set(x, y + j, iris);
+    c.set(x + 1, y + j, iris);
+  }
+  c.set(x, y, 'W');
+}
 
 export const isShadow = (p: string | null) => !!p && p.startsWith('rgba');
 const solidAt = (c: PixelCanvas, x: number, y: number) => {
@@ -87,7 +189,7 @@ function humanoidMonster(
 ) {
   const frames: PixelCanvas[] = [];
   for (const v of ['down', 'up', 'side'] as View[]) {
-    HUMANOID[v].forEach((rows, i) => {
+    CHIBI_HUMANOID[v].forEach((rows, i) => {
       const c = new PixelCanvas(16, 18).rows(rows, 0, 0, colors);
       overlay?.(c, v, i);
       frames.push(c);
@@ -130,14 +232,14 @@ function slime(squash: boolean): PixelCanvas {
   c.set(hx + 1, hy, 'W');
   c.set(hx - 1, hy + 1, 'W');
   c.set(hx, hy + 1, 'g');
-  // ตา + ปาก
-  const ey = Math.round(cy) - 1;
-  for (const ex of [5, 9]) {
-    c.rect(ex, ey, 2, 2, 'O');
-    c.set(ex, ey, 'W');
-  }
-  c.set(7, ey + 2, 'O');
-  c.set(8, ey + 2, 'O');
+  // ตาโต 2×3 + ปากยิ้ม + แก้ม (จิบิ)
+  const ey = Math.round(cy) - 2;
+  bigEye(c, 4, ey, 'O', 3, squash ? 3 : 4);
+  bigEye(c, 9, ey, 'O', 3, squash ? 3 : 4);
+  c.set(7, ey + 3, 'O');
+  c.set(8, ey + 3, 'O');
+  c.set(3, ey + 3, 'y');
+  c.set(12, ey + 3, 'y');
   c.outline();
   groundShadow(c, 8, 12.6, squash ? 7.5 : 6.5, 1.4);
   return c;
@@ -163,21 +265,22 @@ function bat(up: boolean): PixelCanvas {
     c.set(X(3), Math.round(tipY + (shY - tipY) * 0.4) + 1, 'U');
     c.set(X(1), tipY - 1 < 0 ? 0 : tipY, 'F');
   }
-  c.blob(8, 5.5 + oy, 2.8, 2.8, ['U', 'P', 'u']);
+  // หัวโตกลม (จิบิ)
+  c.blob(8, 5.5 + oy, 3.8, 3.4, ['U', 'P', 'u']);
   // หู
-  for (const x of [6, 9]) {
+  for (const x of [5, 10]) {
     c.set(x, 1 + oy, 'U');
     c.set(x, 2 + oy, 'P');
   }
-  // ตาแดง เขี้ยว เท้า
-  c.set(6, 5 + oy, 'r');
-  c.set(9, 5 + oy, 'r');
-  c.set(7, 4 + oy, 'U');
-  c.set(8, 4 + oy, 'U');
-  c.set(7, 7 + oy, 'W');
-  c.set(8, 7 + oy, 'W');
-  c.set(6, 8 + oy, 'F');
-  c.set(9, 8 + oy, 'F');
+  // ตาแดงโต เขี้ยว เท้า
+  bigEye(c, 5, 4 + oy, 'r', 3, 3, 1);
+  bigEye(c, 8, 4 + oy, 'r', 3, 3, -1);
+  c.set(7, 7 + oy, 'U');
+  c.set(8, 7 + oy, 'U');
+  c.set(6, 8 + oy, 'W');
+  c.set(9, 8 + oy, 'W');
+  c.set(6, 9 + oy, 'F');
+  c.set(9, 9 + oy, 'F');
   c.outline();
   groundShadow(c, 8, 11.2, 3, 0.7, 0.16);
   return c;
@@ -212,13 +315,15 @@ function crab(f: number): PixelCanvas {
       p.set(X(2), top + 1, null);
     });
   }
-  // ก้านตา
+  // ก้านตาโต 3×3 (จิบิ)
   part(c, (p) => {
-    for (const [x, px] of [[7, 6], [10, 11]]) {
-      p.set(x, 3, 'r');
-      p.set(x, 4, 'r');
-      p.rect(Math.min(x, px), 1, 2, 2, 'W');
-      p.set(x === 7 ? 7 : 11, 2, 'O');
+    for (const x of [6, 11]) {
+      p.set(x + 1, 4, 'r');
+      p.set(x + 1, 5, 'r');
+      p.rect(x - 1, 0, 4, 4, 'W');
+      p.rect(x, 1, 2, 3, 'O');
+      p.set(x, 1, 'W');
+      p.set(x + 1, 3, 'L');
     }
   });
   // กระดอง
@@ -232,6 +337,8 @@ function crab(f: number): PixelCanvas {
     p.set(9, 9, 'O');
     p.set(8, 10, 'R');
     p.set(9, 10, 'R');
+    p.set(6, 9, 'p');
+    p.set(11, 9, 'p');
   });
   c.outline();
   groundShadow(c, 9, 12.7, 8, 1.3);
@@ -257,9 +364,9 @@ function serpent(f: number): PixelCanvas {
     curve.push([x, y, r]);
     c.ellipse(x, y, r, r, 'T');
   }
-  // หัว + จมูก
-  c.ellipse(13 + sx, 5, 3.4, 2.6, 'T');
-  c.ellipse(17 + sx, 6, 2.6, 1.6, 'T');
+  // หัวโต + จมูก (จิบิ)
+  c.ellipse(13 + sx, 5, 4.2, 3.4, 'T');
+  c.ellipse(17.5 + sx, 6.5, 2.4, 1.6, 'T');
   clearFrom(c, WL);
   // ท้องเกล็ด (ด้านหน้าคอ)
   curve.forEach(([x, y, r], i) => {
@@ -281,14 +388,11 @@ function serpent(f: number): PixelCanvas {
   }
   // หงอนหัว
   for (let k = 0; k < 3; k++) {
-    const bx = 11 + sx + k * 1.6;
-    c.line(bx, 3, bx - 1, 1 + (k === 1 ? 0 : 1), k === 1 ? 'C' : 'b');
+    const bx = 10 + sx + k * 1.6;
+    c.line(bx, 2, bx - 1, k === 1 ? 0 : 1, k === 1 ? 'C' : 'b');
   }
-  // ตา ปาก เขี้ยว
-  c.set(14 + sx, 3, 'U');
-  c.set(15 + sx, 3, 'U');
-  c.set(14 + sx, 4, 'Y');
-  c.set(15 + sx, 4, 'r');
+  // ตาโต ปาก เขี้ยว
+  bigEye(c, 13 + sx, 2, 'Y', 3, 3, 1);
   c.set(19 + sx, 5, 'U');
   for (let x = 15; x <= 19; x++) c.set(x + sx, 6, 'O');
   c.set(16 + sx, 7, 'W');
@@ -333,29 +437,21 @@ function golem(f: number): PixelCanvas {
   for (const s of [0, 1]) part(c, (p) => p.blob(s ? 16 : 8, 21 - (s === f ? 1 : 0), 2.8, 2.6, stone));
   // ลำตัว
   part(c, (p) => {
-    p.blob(12, 13 + bob, 6.6, 5.6, stone, rng, 0.2);
+    p.blob(12, 15 + bob, 5.8, 4.6, stone, rng, 0.2);
     p.line(9, 11 + bob, 11, 14 + bob, 'F');
     p.line(11, 14 + bob, 10, 17 + bob, 'F');
     p.line(15, 15 + bob, 16, 17 + bob, 'F');
     // แกนเรืองแสงกลางอก
-    p.set(13, 12 + bob, 'W');
-    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) p.set(13 + dx, 12 + bob + dy, 'C');
-    p.set(13, 10 + bob, 'b');
-    p.set(13, 14 + bob, 'b');
+    p.set(13, 16 + bob, 'W');
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) p.set(13 + dx, 16 + bob + dy, 'C');
   });
-  // หัว + ตาเรืองฟ้า
+  // หัวโต + ตาเรืองฟ้าโต (จิบิ)
   part(c, (p) => {
-    p.blob(12, 6 + bob, 3.8, 3.2, ['F', 'D', 'L', 'W'], rng, 0.15);
-    for (const ex of [9, 13]) {
-      p.set(ex, 5 + bob, 'F');
-      p.set(ex + 1, 5 + bob, 'F');
-      p.set(ex, 6 + bob, 'C');
-      p.set(ex + 1, 6 + bob, 'C');
-    }
-    p.set(10, 6 + bob, 'W');
-    p.set(13, 6 + bob, 'W');
-    p.set(11, 8 + bob, 'F');
-    p.set(12, 8 + bob, 'F');
+    p.blob(12, 7 + bob, 6.4, 5.4, ['F', 'D', 'L', 'W'], rng, 0.12);
+    bigEye(p, 8, 6 + bob, 'C', 3, 4, 1);
+    bigEye(p, 13, 6 + bob, 'C', 3, 4, -1);
+    p.set(11, 11 + bob, 'F');
+    p.set(12, 11 + bob, 'F');
   });
   // ไหล่ + กำปั้นใหญ่ (แกว่งสลับกับขา)
   for (const s of [0, 1]) {
@@ -363,13 +459,13 @@ function golem(f: number): PixelCanvas {
     const fx = s ? 20 : 4;
     const sw = s === f ? 0 : 1;
     part(c, (p) => {
-      p.line(sx, 12 + bob, fx, 15 + bob, 'D', 2);
-      p.blob(sx, 11 + bob, 2.6, 2.6, stone, rng, 0.2);
+      p.line(sx, 14 + bob, fx, 17 + bob, 'D', 2);
+      p.blob(sx, 13.5 + bob, 2.4, 2.4, stone, rng, 0.2);
     });
     part(c, (p) => {
-      p.blob(fx, 17 + bob + sw, 2.8, 2.8, stone);
-      for (const ky of [16, 18]) p.set(fx + (s ? -1 : 1), ky + bob + sw, 'F');
-      p.set(fx + (s ? -2 : 2), 17 + bob + sw, 'F');
+      p.blob(fx, 18.5 + bob + sw, 2.6, 2.6, stone);
+      for (const ky of [17.5, 19.5]) p.set(fx + (s ? -1 : 1), ky + bob + sw, 'F');
+      p.set(fx + (s ? -2 : 2), 18.5 + bob + sw, 'F');
     });
   }
   // มอสบนผิวด้านบน
@@ -398,8 +494,8 @@ function yeti(f: number): PixelCanvas {
   for (const s of [0, 1]) part(c, (p) => p.blob(s ? 13 : 7, 18.6 - (s === f ? 1 : 0), 2.4, 1.6, ['D', 'L', 'w']));
   // ตัว + หัว
   part(c, (p) => {
-    p.blob(10, 11 + bob, 5.6, 6.4, fur, rng, 0.35);
-    p.blob(10, 6 + bob, 4.2, 3.6, fur, rng, 0.3);
+    p.blob(10, 14 + bob, 5, 4.4, fur, rng, 0.35);
+    p.blob(10, 7 + bob, 6.4, 5.6, fur, rng, 0.3);
     p.set(8, 2 + bob, 'W');
     p.set(10, 1 + bob, 'W');
     p.set(10, 2 + bob, 'W');
@@ -413,22 +509,21 @@ function yeti(f: number): PixelCanvas {
         if (rng.chance(0.4)) p.set(x, y + 1, 'w');
       }
     }
-    // หน้าเทาฟ้า
-    const ey = 8 + bob;
-    p.rows(
-      ['WWWWWW', 'DOLLOD', 'DLFFLD', 'DWFFWD', '.DDDD.'],
-      7,
-      ey - 1,
-    );
-    p.set(8, ey - 1, 'w');
-    p.set(11, ey - 1, 'w');
+    // หน้าเทาฟ้ากลม ตาโต เขี้ยวเล็ก (จิบิ)
+    p.ellipse(10, 8.6 + bob, 4.4, 3, 'D');
+    bigEye(p, 6, 6 + bob, 'B', 3, 4, 1);
+    bigEye(p, 11, 6 + bob, 'B', 3, 4, -1);
+    p.set(9, 10 + bob, 'F');
+    p.set(10, 10 + bob, 'F');
+    p.set(8, 11 + bob, 'W');
+    p.set(11, 11 + bob, 'W');
   });
   // แขนยาว + มือ
   for (const s of [0, 1]) {
     const ax = s ? 16 : 4;
     const sw = s === f ? 1 : 0;
     part(c, (p) => {
-      p.blob(ax, 12 + bob, 2.1, 4.4, fur, rng, 0.3);
+      p.blob(ax, 13 + bob, 2.1, 3.8, fur, rng, 0.3);
       p.blob(ax, 16.4 + bob + sw, 1.6, 1.3, ['D', 'L', 'L']);
       p.set(ax + (s ? -1 : 1), 10 + bob, 'L');
     });
@@ -518,28 +613,23 @@ function demonLord(f: number): PixelCanvas {
       p.set(X(11), 11 + bob, 'L');
     });
   }
-  // หัว หู เขา ตา
+  // หัวโต หู เขา ตาโตคิ้วขมวด (จิบิดุ ๆ)
   part(c, (p) => {
-    p.blob(16, 9 + bob, 4, 3.8, skin);
-    p.set(15, 13 + bob, 'P');
-    p.set(16, 13 + bob, 'P');
+    p.blob(16, 9.5 + bob, 6.4, 5.6, skin);
     for (const s of [0, 1]) {
       const X = (x: number) => (s ? M(x) : x);
-      p.set(X(11), 9 + bob, 'R');
-      p.set(X(10), 8 + bob, 'R');
-      p.line(X(13), 6 + bob, X(11), 4 + bob, s ? 'D' : 'L', 2);
-      p.line(X(11), 4 + bob, X(10), 1 + bob, 'L');
-      p.set(X(10), 1 + bob, 'W');
-      p.set(X(s ? 12 : 11), 4 + bob, 'W');
-      p.set(X(13), 9 + bob, 'Y');
-      p.set(X(14), 9 + bob, 'y');
-      p.set(X(13), 8 + bob, 'O');
-      p.set(X(12), 7 + bob, 'O');
-      p.set(X(14), 8 + bob, 'O');
+      p.set(X(10), 10 + bob, 'R');
+      p.set(X(9), 9 + bob, 'R');
+      p.line(X(12), 6 + bob, X(10), 4 + bob, s ? 'D' : 'L', 2);
+      p.line(X(10), 4 + bob, X(9), 1 + bob, 'L');
+      p.set(X(9), 1 + bob, 'W');
+      p.set(X(s ? 11 : 10), 4 + bob, 'W');
     }
-    for (let x = 14; x <= 17; x++) p.set(x, 11 + bob, 'O');
-    p.set(14, 12 + bob, 'W');
-    p.set(17, 12 + bob, 'W');
+    bigEye(p, 11, 8 + bob, 'Y', 3, 4, 1);
+    bigEye(p, 18, 8 + bob, 'Y', 3, 4, -1);
+    for (let x = 14; x <= 17; x++) p.set(x, 12 + bob, 'O');
+    p.set(14, 13 + bob, 'W');
+    p.set(17, 13 + bob, 'W');
   });
   // ปลอกคอทอง
   for (let x = 13; x <= 18; x++) c.set(x, 14 + bob, x === 13 ? 'y' : 'Y');
@@ -637,67 +727,90 @@ function warnRing(): PixelCanvas {
 // ---------------------------------------------------------------- humanoid overlays
 
 function skeletonOverlay(c: PixelCanvas, v: View) {
+  // กะโหลกจิบิ: ขอบเทา เบ้าตาโบ๋ใหญ่ + แววแดงเรือง จมูกโหว่ ฟันซี่ ๆ แก้มแรเงา
+  for (let y = 0; y <= 10; y++) for (let x = 0; x < 16; x++) if (c.get(x, y) === 'O') c.set(x, y, 'D');
   if (v === 'down') {
-    // เบ้าตาโหว่ 2×2 + แววแดง
-    c.rect(5, 5, 2, 2, 'O');
-    c.rect(9, 5, 2, 2, 'O');
-    c.set(6, 6, 'R');
-    c.set(9, 6, 'R');
-    c.set(7, 7, 'D');
-    c.set(8, 7, 'D');
-    c.set(6, 8, 'D');
-    c.set(8, 8, 'D');
+    for (const ex of [3, 10]) {
+      c.rect(ex, 5, 3, 3, 'O');
+      c.set(ex + 1, 6, 'r');
+      c.set(ex + 2, 6, 'R');
+      c.set(ex, 4, 'L');
+      c.set(ex + 2, 4, 'L');
+    }
+    c.set(7, 8, 'O');
+    c.set(8, 8, 'O');
+    for (let x = 5; x <= 10; x++) c.set(x, 9, x % 2 ? 'W' : 'D');
+    c.set(4, 9, 'L');
+    c.set(11, 9, 'L');
+    c.set(3, 8, 'L');
+    c.set(12, 8, 'L');
   } else if (v === 'side') {
-    c.rect(9, 5, 2, 2, 'O');
-    c.set(10, 6, 'R');
-    c.set(11, 7, 'D');
-    c.set(8, 8, 'D');
-    c.set(10, 8, 'D');
-  }
-  if (v === 'side') {
-    c.set(8, 11, 'D');
-    c.set(9, 11, 'D');
-    c.set(8, 13, 'D');
+    c.rect(9, 5, 3, 3, 'O');
+    c.set(10, 6, 'r');
+    c.set(11, 6, 'R');
+    c.set(13, 7, 'O');
+    for (let x = 9; x <= 13; x++) c.set(x, 9, x % 2 ? 'W' : 'D');
+    c.set(7, 7, 'L');
+    c.set(7, 8, 'L');
   } else {
-    for (const x of [5, 6, 9, 10]) c.set(x, 11, 'D');
+    c.set(7, 9, 'L');
+    c.set(8, 9, 'L');
+  }
+  // ซี่โครง + กระดูกสันหลัง
+  if (v === 'side') {
     for (const y of [11, 12]) {
-      c.set(7, y, 'L');
-      c.set(8, y, 'L');
+      c.set(6, y, 'W');
+      c.set(7, y, 'D');
+      c.set(8, y, 'W');
+      c.set(9, y, 'L');
     }
-    if (v === 'down') {
-      c.set(5, 12, 'D');
-      c.set(10, 12, 'D');
-    }
+  } else {
+    for (const y of [11, 12]) for (let x = 4; x <= 11; x++) c.set(x, y, x === 7 || x === 8 ? 'L' : y === 11 ? 'W' : 'w');
+    for (const x of [5, 10]) c.set(x, 12, 'D');
   }
 }
 
 function mummyOverlay(c: PixelCanvas, v: View) {
+  // ผ้าพันเป็นแถบเฉียง
   for (let y = 0; y < 18; y++) {
     for (let x = 0; x < 16; x++) {
-      if (c.get(x, y) === 'S' && (((y * 2 - Math.floor(x / 4)) % 6) + 6) % 6 === 0) c.set(x, y, 's');
+      if (c.get(x, y) === 'S' && (((y * 2 - Math.floor(x / 3)) % 5) + 5) % 5 === 0) c.set(x, y, 's');
     }
   }
   if (v === 'down') {
-    for (let x = 5; x <= 10; x++) c.set(x, 6, 'F');
-    c.set(6, 6, 'Y');
-    c.set(9, 6, 'Y');
-    paint(c, [[12, 14, 'S'], [12, 15, 's']]);
+    // ตาโตเรืองแสงข้างเดียว อีกข้างพันผ้าปิด
+    c.rect(3, 5, 4, 3, 'O');
+    c.rect(4, 6, 2, 2, 'Y');
+    c.set(4, 6, 'W');
+    c.set(5, 7, 'y');
+    c.set(3, 6, 'y');
+    for (let x = 9; x <= 13; x++) {
+      c.set(x, 5, 's');
+      c.set(x, 6, 'S');
+      c.set(x, 7, 's');
+    }
+    paint(c, [[13, 12, 'S'], [14, 13, 's'], [14, 14, 'S']]);
   } else if (v === 'side') {
-    for (let x = 8; x <= 11; x++) c.set(x, 6, 'F');
-    c.set(10, 6, 'Y');
-    paint(c, [[4, 12, 'S'], [3, 13, 's']]);
+    c.rect(9, 5, 4, 3, 'O');
+    c.rect(10, 6, 2, 2, 'Y');
+    c.set(10, 6, 'W');
+    c.set(11, 7, 'y');
+    paint(c, [[4, 12, 'S'], [3, 13, 's'], [2, 14, 'S']]);
   } else {
-    paint(c, [[3, 14, 'S'], [3, 15, 's']]);
+    paint(c, [[2, 12, 'S'], [2, 13, 's'], [1, 14, 'S']]);
   }
 }
 
 function impOverlay(c: PixelCanvas, v: View) {
   // เขาเล็กสีเหลือง 2 พิกเซลต่อข้าง
-  paint(c, [[5, 1, 'Y'], [4, 0, 'y'], [10, 1, 'Y'], [11, 0, 'y']]);
+  paint(c, [[4, 1, 'Y'], [3, 0, 'y'], [11, 1, 'Y'], [12, 0, 'y']]);
   if (v === 'side') {
     paint(c, [[4, 13, 'R'], [3, 12, 'R'], [2, 11, 'P'], [2, 10, 'R'], [1, 10, 'R']]);
+    c.set(8, 4, 'O');
+    c.set(9, 4, 'O');
   } else {
-    paint(c, [[2, 5, 'R'], [13, 5, 'R']]);
+    paint(c, [[0, 4, 'R'], [1, 5, 'R'], [15, 4, 'R'], [14, 5, 'R']]);
+    if (v === 'down') for (const [x, y] of [[3, 4], [4, 4], [11, 4], [12, 4]]) c.set(x, y, 'O'); // คิ้วขมวด
   }
 }
 
@@ -722,7 +835,7 @@ export function buildMonsterTextures(scene: Phaser.Scene): void {
   humanoidMonster(
     scene,
     'skeleton',
-    { 1: 'W', 8: 'W', 2: 'W', 9: 'L', 3: 'O', 4: 'W', 5: 'L', 6: 'L', 7: 'D', p: 'W', n: 'D' },
+    { 1: 'w', 8: 'W', 2: 'W', 9: 'L', 3: 'O', 4: 'F', 5: 'D', 6: 'L', 7: 'w', p: 'W', n: 'D' },
     skeletonOverlay,
   );
   humanoidMonster(

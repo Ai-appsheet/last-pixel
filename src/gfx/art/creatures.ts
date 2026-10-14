@@ -1,9 +1,9 @@
 import type Phaser from 'phaser';
 import { RNG } from '../../core/RNG';
 import { PixelCanvas, dither } from '../PixelCanvas';
-import { anim, clearFrom, groundShadow, isShadow, part, shadeEdges, strip } from './monsters';
+import { anim, bigEye, clearFrom, cuteEye, groundShadow, isShadow, part, shadeEdges, strip } from './monsters';
 
-// สัตว์ชุดใหม่ (สัตว์ป่า · สัตว์ในน้ำ · สัตว์ในตำนาน) วาดด้วยโค้ดแบบเดียวกับ monsters.ts
+// สัตว์ชุดใหม่ (สัตว์ป่า · สัตว์ในน้ำ · สัตว์ในตำนาน) วาดด้วยโค้ดแบบเดียวกับ monsters.ts — สไตล์จิบิ: หัวโต ตาโตมีประกาย
 // ด้านข้างหันขวาเสมอ (เกม flipX เมื่อหันซ้าย) · ขอบ 'O' · แสงจากซ้ายบน · สัตว์น้ำมีวงน้ำรอบตัว
 
 const GOLD = ['#a0662a', '#e0a040', 'Y', 'y'];
@@ -64,25 +64,25 @@ function wing(c: PixelCanvas, x: number, y: number, len: number, up: number, col
 /** กวางป่า 20×18 */
 function deer(f: number) {
   const c = pc(20, 18);
-  legs(c, [5, 6, 12, 13], 10, 6, f, 'M', 'm', { foot: 'n' });
+  legs(c, [5, 6, 11, 12], 11, 5, f, 'M', 'm', { foot: 'n' });
   part(c, (p) => {
-    p.blob(9, 9, 5.6, 3, ['m', 'M', 'N', 'S']);
-    p.line(13, 8, 15, 4, 'M', 2);
-    p.blob(16, 4, 2.3, 1.7, ['m', 'M', 'N']);
-    p.set(18, 5, 'N');
-    p.set(19, 5, 'n');
-    for (const [x, y] of [[7, 8], [9, 7], [11, 8], [8, 10]]) p.set(x, y, 'S');
-    p.set(3, 8, 'W');
+    p.blob(8, 10.5, 4.6, 2.6, ['m', 'M', 'N', 'S']);
+    p.line(11, 9, 13, 7, 'M', 2);
+    p.blob(15, 5.5, 4, 3.6, ['m', 'M', 'N']);
+    p.set(18, 7, 'N');
+    p.set(19, 7, 'n');
+    for (const [x, y] of [[7, 9], [9, 8], [11, 9], [8, 11]]) p.set(x, y, 'S');
+    p.set(3, 9, 'W');
   });
-  // หู + เขา
-  c.set(14, 2, 'M');
-  c.line(15, 2, 14, -1, 'N');
-  c.line(16, 2, 17, 0, 'N');
-  c.set(14, 0, 'S');
-  c.set(17, -1, 'S');
-  c.set(13, 0, 'N');
-  c.set(18, 0, 'N');
-  c.set(17, 3, 'O');
+  // หู + เขา + ตาโต
+  c.set(12, 3, 'M');
+  c.line(14, 2, 13, 0, 'N');
+  c.line(17, 2, 18, 0, 'N');
+  c.set(12, 0, 'S');
+  c.set(19, 0, 'S');
+  c.set(15, 1, 'N');
+  bigEye(c, 14, 4, 'O', 3, 3);
+  c.set(17, 7, 'p');
   c.outline();
   groundShadow(c, 9.5, 16.6, 7, 1.2);
   return c;
@@ -93,18 +93,18 @@ function buffalo(f: number) {
   const c = pc(24, 18);
   legs(c, [5, 7, 14, 16], 10, 6, f, 'F', '#1d2033', { thick: 2, foot: 'O' });
   part(c, (p) => {
-    p.blob(11, 8.5, 7.5, 4.2, ['#1d2033', 'F', 'D', 'L']);
-    p.blob(19.5, 9, 2.8, 2.6, ['#1d2033', 'F', 'D']);
+    p.blob(10.5, 9, 7, 4, ['#1d2033', 'F', 'D', 'L']);
+    p.blob(18.6, 8.5, 4.6, 4.2, ['#1d2033', 'F', 'D', 'L']);
     p.set(22, 10, 'D');
     p.set(22, 11, 'L');
     p.line(4, 7, 2, 12, 'F');
   });
-  // เขาโค้งใหญ่
-  c.line(18, 6, 15, 4, 'L');
-  c.line(15, 4, 14, 6, 'W');
-  c.line(21, 6, 23, 4, 'L');
-  c.set(23, 3, 'W');
-  c.set(20, 8, 'r');
+  // เขาโค้งใหญ่ + ตาโต
+  c.line(17, 5, 15, 3, 'L');
+  c.line(15, 3, 14, 5, 'W');
+  c.line(21, 5, 23, 3, 'L');
+  c.set(23, 2, 'W');
+  bigEye(c, 18, 6, 'r', 3, 3, 1);
   c.outline();
   groundShadow(c, 12, 16.6, 9, 1.3);
   return c;
@@ -118,18 +118,19 @@ function fox(f: number) {
   c.set(0, 6 + f, 'W');
   c.set(1, 6 + f, 'W');
   part(c, (p) => {
-    p.blob(8.5, 8, 4.4, 2.3, ['R', 'r', 'r', 'Y']);
-    p.blob(13.5, 6, 2.4, 1.9, ['R', 'r', 'r', 'Y']);
+    p.blob(8, 8.5, 4, 2.2, ['R', 'r', 'r', 'Y']);
+    p.blob(12.6, 6, 4, 3.4, ['R', 'r', 'r', 'Y']);
+    p.set(15, 7, 'W');
     p.set(16, 7, 'W');
     p.set(17, 7, 'O');
     p.line(7, 10, 11, 10, 'W');
-    p.set(12, 3, 'r');
-    p.set(12, 2, 'R');
-    p.set(14, 3, 'r');
-    p.set(14, 2, 'R');
-    p.set(15, 7, 'W');
+    p.set(11, 3, 'r');
+    p.set(11, 2, 'R');
+    p.set(15, 3, 'r');
+    p.set(15, 2, 'R');
   });
-  c.set(14, 5, 'O');
+  bigEye(c, 12, 4, 'O', 3, 3);
+  c.set(11, 7, 'p');
   c.outline();
   groundShadow(c, 9, 12.6, 6, 1);
   return c;
@@ -142,13 +143,15 @@ function monkey(f: number) {
   c.line(3, 9, 1, 5, 'M');
   c.line(1, 5, 3, 3, 'M');
   part(c, (p) => {
-    p.blob(7, 8.5, 4, 2.8, ['m', 'M', 'N']);
-    p.blob(11.5, 6, 2.8, 2.5, ['m', 'M', 'N']);
-    p.blob(12.5, 6.5, 1.6, 1.5, ['k', 'K', 'p']);
-    p.set(9, 5, 'p');
+    p.blob(6.5, 9, 3.8, 2.6, ['m', 'M', 'N']);
+    p.blob(10.6, 5.6, 4.6, 4.2, ['m', 'M', 'N']);
+    p.blob(11.6, 6.6, 3, 2.8, ['k', 'K', 'p']);
+    p.set(8, 4, 'p');
+    p.set(8, 5, 'M');
   });
-  c.set(12, 5, 'O');
-  c.set(14, 7, 'O');
+  bigEye(c, 10, 4, 'O', 3, 3);
+  c.set(13, 8, 'O');
+  c.set(10, 8, 'p');
   c.outline();
   groundShadow(c, 7.5, 14.6, 5.5, 1);
   return c;
@@ -161,15 +164,16 @@ function parrot(f: number) {
   c.line(4, 8, 0, 11, 'B', 2);
   c.line(4, 8, 1, 12, 'b');
   part(c, (p) => {
-    p.blob(8, 7, 3.6, 2.2, ['R', 'R', 'r']);
-    p.blob(11.5, 5.5, 2, 1.8, ['R', 'R', 'r']);
-    p.set(13, 6, 'W');
-    p.set(14, 6, 'L');
-    p.set(14, 7, 'F');
+    p.blob(8, 7.5, 3.6, 2.2, ['R', 'R', 'r']);
+    p.blob(11.5, 5, 2.8, 2.6, ['R', 'R', 'r']);
+    p.set(14, 5, 'L');
+    p.set(15, 6, 'L');
+    p.set(14, 6, 'F');
   });
-  c.set(12, 5, 'W');
-  c.set(12, 4, 'O');
-  part(c, (p) => wing(p, 9, 6, 7, up, ['Y', 'b', 'B'], 5));
+  cuteEye(c, 11, 4, 'O');
+  c.set(11, 2, 'O');
+  c.set(11, 3, 'Y');
+  part(c, (p) => wing(p, 9, 7, 7, up, ['Y', 'b', 'B'], 5));
   c.outline();
   groundShadow(c, 8, 13, 3, 0.7, 0.16);
   return c;
@@ -183,17 +187,17 @@ function cobra(f: number) {
   c.line(11, 12, 11 + sx, 6, 'M', 2);
   shadeEdges(c, 'M', 'N', 'm');
   part(c, (p) => {
-    p.blob(11 + sx, 6, 2.8, 3.4, ['m', 'M', 'N']);
-    for (let y = 4; y <= 8; y++) p.set(11 + sx, y, y % 2 ? 'S' : 's');
-    p.set(10 + sx, 5, 'S');
-    p.set(12 + sx, 5, 'S');
+    p.blob(11 + sx, 6.5, 3.6, 3.8, ['m', 'M', 'N']);
+    for (let y = 5; y <= 9; y++) p.set(11 + sx, y, y % 2 ? 'S' : 's');
+    p.set(10 + sx, 6, 'S');
+    p.set(12 + sx, 6, 'S');
   });
   part(c, (p) => {
-    p.blob(13.5 + sx, 2.6, 2.2, 1.4, ['m', 'M', 'N']);
-    p.set(15 + sx, 3, 'N');
+    p.blob(13.5 + sx, 3, 2.8, 2.2, ['m', 'M', 'N']);
+    p.set(16 + sx, 4, 'N');
   });
-  c.set(14 + sx, 2, 'Y');
-  if (f) c.line(16 + sx, 4, 17 + sx, 4, 'R');
+  cuteEye(c, 13 + sx, 2, 'Y');
+  if (f) c.line(16 + sx, 5, 17 + sx, 5, 'R');
   c.outline();
   groundShadow(c, 8, 14.6, 6.5, 1);
   return c;
@@ -218,7 +222,7 @@ function scorpion(f: number) {
   });
   part(c, (p) => {
     p.blob(10, 8.5, 4.6, 2.2, shell);
-    p.blob(15, 8, 1.8, 1.6, shell);
+    p.blob(15, 8, 2.6, 2.2, shell);
     // ก้ามหนีบ
     p.line(16, 8, 18, 6, 'F', 2);
     p.blob(18.5, 5.2, 1.3, 1.2, ['F', 'D', 'r']);
@@ -226,7 +230,7 @@ function scorpion(f: number) {
     p.blob(18.5, 10.6, 1.3, 1.1, ['F', 'D', 'r']);
     for (const x of [8, 10, 12]) p.set(x, 7, 'r');
   });
-  c.set(16, 7, 'R');
+  cuteEye(c, 15, 7, 'r');
   c.outline();
   groundShadow(c, 10, 12.6, 8, 1);
   return c;
@@ -240,12 +244,14 @@ function penguin(f: number) {
     p.blob(6 + t * 0.5, 9, 3.8, 5.2, ['#1d2033', 'F', 'F', 'D']);
     p.ellipse(7 + t * 0.5, 10, 2.3, 4, 'W');
     p.ellipse(7.2 + t * 0.5, 11, 1.6, 3, 'w');
-    p.set(9 + t, 4, 'Y');
-    p.set(9 + t, 5, 'y');
-    p.line(10 + t, 6, 11 + t, 6, 'r');
+    p.set(9 + t, 6, 'Y');
+    p.set(10 + t, 6, 'y');
+    p.line(10 + t, 7, 11 + t, 7, 'r');
     p.line(3 + t, 8, 2 + t, 11, 'F', 2);
   });
-  c.set(8 + t, 4, 'O');
+  c.rect(6 + t, 4, 2, 2, 'W');
+  c.set(7 + t, 5, 'O');
+  c.set(8 + t, 7, 'p');
   c.set(5 + (f ? 0 : 1), 14, 'r');
   c.set(6 + (f ? 0 : 1), 14, 'r');
   c.set(8 - (f ? 0 : 1), 14, 'r');
@@ -268,6 +274,79 @@ function fireflies(f: number) {
   return c;
 }
 
+/** หมูป่า 16×16 (แทนลายเก่าใน sprites.ts) */
+function boar(f: number) {
+  const c = pc(16, 16);
+  legs(c, [4, 5, 10, 11], 11, 3, f, 'm', 'n', { foot: 'n' });
+  part(c, (p) => {
+    p.blob(6, 9.5, 4.4, 2.8, ['n', 'm', 'M', 'N']);
+    p.blob(10.8, 7, 4.6, 4, ['m', 'M', 'N', 'S']);
+    p.set(14, 9, 'p');
+    p.set(15, 9, 'p');
+    p.set(15, 8, 'p');
+    p.set(14, 10, 'W'); // เขี้ยว
+    p.set(8, 3, 'm'); // หู
+    p.set(8, 2, 'n');
+    p.set(13, 3, 'm');
+    p.set(13, 2, 'n');
+    for (let x = 3; x <= 6; x += 2) p.set(x, 7, 'n'); // แผงขนหลัง
+  });
+  bigEye(c, 10, 5, 'O', 3, 3);
+  c.set(9, 9, 'p');
+  c.set(2, 7 + f, 'm');
+  c.set(1, 6 + f, 'n');
+  c.outline();
+  groundShadow(c, 8, 14.6, 6, 1);
+  return c;
+}
+
+/** หมาป่า 16×16 (แทนลายเก่าใน sprites.ts) */
+function wolf(f: number) {
+  const c = pc(16, 16);
+  legs(c, [4, 5, 10, 11], 11, 3, f, 'D', 'F', { foot: 'F' });
+  part(c, (p) => p.line(3, 9, 0, 5 + f, 'D', 2)); // หาง
+  part(c, (p) => {
+    p.blob(6.5, 9.5, 4.2, 2.6, ['F', 'D', 'L', 'w']);
+    p.blob(11, 6.5, 4.4, 4, ['F', 'D', 'L', 'w']);
+    p.line(5, 11, 9, 11, 'w');
+    p.set(14, 9, 'w'); // ปาก
+    p.set(15, 9, 'O');
+    p.set(8, 2, 'D'); // หู
+    p.set(8, 1, 'F');
+    p.set(9, 2, 'F');
+    p.set(13, 2, 'D');
+    p.set(13, 1, 'F');
+    p.set(12, 2, 'F');
+  });
+  bigEye(c, 10, 5, 'Y', 3, 3, 1);
+  c.outline();
+  groundShadow(c, 8, 14.6, 6, 1);
+  return c;
+}
+
+/** กระต่าย 16×12 (แทนลายเก่าใน sprites.ts) */
+function rabbit(f: number) {
+  const c = pc(16, 12);
+  part(c, (p) => {
+    p.blob(6.5, 8, 4, 2.6, ['L', 'w', 'W', 'W']);
+    p.blob(10.5, 6.5, 3.4, 3, ['L', 'w', 'W', 'W']);
+    p.line(9, 3, 8, 0 - f, 'w', 2);
+    p.line(11, 3, 12, 0, 'w', 2);
+    p.set(8, 1 - f, 'p');
+    p.set(12, 1, 'p');
+    p.set(2, 7, 'W'); // หาง
+    p.set(3, 7, 'W');
+    p.set(5 - f, 10, 'w');
+    p.set(9 + f, 10, 'w');
+  });
+  cuteEye(c, 10, 5, 'O');
+  c.set(13, 7, 'p');
+  c.set(12, 8, 'R');
+  c.outline();
+  groundShadow(c, 7, 10.6, 5, 0.9);
+  return c;
+}
+
 // ================================================================ สัตว์ในน้ำ
 
 /** ฉลามขาว 24×14 (ครีบหลังโผล่ผิวน้ำ) */
@@ -276,6 +355,7 @@ function shark(f: number) {
   const flick = f ? 1 : -1;
   part(c, (p) => {
     p.blob(12, 8, 8, 2.8, ['F', 'D', 'L', 'w']);
+    p.blob(18, 8, 4.4, 2.8, ['F', 'D', 'L', 'w']);
     p.line(4, 8, 1, 5 + flick, 'D', 2);
     p.line(4, 8, 1, 11 - flick, 'D', 2);
     for (let i = 0; i < 4; i++) p.line(11 + i, 7, 12 + i * 0.5, 2 + i, 'D');
@@ -283,7 +363,7 @@ function shark(f: number) {
     p.line(14, 9, 20, 9, 'W');
     for (let x = 16; x <= 20; x += 2) p.set(x, 10, 'W');
   });
-  c.set(18, 7, 'O');
+  bigEye(c, 17, 5, 'O', 3, 3, 1);
   c.set(20, 9, 'R');
   clearFrom(c, 11);
   c.outline();
@@ -303,7 +383,8 @@ function jellyfish(f: number) {
     p.line(2, 7, 10, 7, 'P');
   });
   c.set(5, 3, 'W');
-  c.set(7, 5, 'C');
+  cuteEye(c, 3, 5, 'U');
+  cuteEye(c, 7, 5, 'U');
   if (f) {
     c.set(1, 10, 'y');
     c.set(10, 12, 'y');
@@ -328,13 +409,12 @@ function octopus(f: number) {
         p.ellipse(x, y, 0.9, 0.9, 'R');
       }
     }
-    p.blob(9, 5.5, 4.4, 4.6, ['#7a2633', 'R', 'r', 'p']);
+    p.blob(9, 5.8, 5.4, 5, ['#7a2633', 'R', 'r', 'p']);
   });
   for (const [x, y] of [[5, 12], [13, 12], [3, 13], [15, 13]]) if (c.get(x, y)) c.set(x, y, 'p');
-  c.rect(7, 6, 2, 2, 'W');
-  c.rect(11, 6, 2, 2, 'W');
-  c.set(8, 7, 'O');
-  c.set(12, 7, 'O');
+  for (const ex of [5, 10]) bigEye(c, ex, 4, 'O', 3, 4);
+  c.set(4, 8, 'p');
+  c.set(13, 8, 'p');
   clearFrom(c, 13);
   c.outline();
   waterRing(c, 9, 13, 8.5, 2.4, f, 333);
@@ -348,14 +428,14 @@ function seaTurtle(f: number) {
   part(c, (p) => {
     p.line(13, 7, 16, 4 + fl, 'Z', 2);
     p.line(7, 8, 4, 10 - fl, 'Z', 2);
-    p.blob(17, 6.5, 2.2, 1.7, ['H', 'Z', 'g']);
+    p.blob(17, 6.5, 2.8, 2.4, ['H', 'Z', 'g']);
   });
   part(c, (p) => {
     p.blob(10, 7, 6.2, 3.6, ['V', 'H', 'G', 'g']);
     for (const x of [7, 10, 13]) p.line(x, 4.5, x, 9, 'T');
     p.line(5, 7, 15, 7, 'T');
   });
-  c.set(18, 6, 'O');
+  bigEye(c, 16, 5, 'O', 3, 3);
   clearFrom(c, 10);
   c.outline();
   waterRing(c, 10, 10, 9.5, 2.6, f, 344);
@@ -376,7 +456,10 @@ function manta(f: number) {
     p.line(14, 5, 16, 5, 'F');
     p.line(14, 7, 16, 7, 'F');
   });
-  c.set(13, 6, 'W');
+  c.set(13, 5, 'W');
+  c.set(13, 7, 'W');
+  c.set(14, 5, 'O');
+  c.set(14, 7, 'O');
   c.outline();
   waterRing(c, 10, 9.5, 9.5, 2, f, 355);
   return c;
@@ -393,6 +476,7 @@ function piranha(f: number) {
     p.line(6, 2 + j, 8, 1 + j, 'R');
     p.ellipse(8, 6 + j, 2, 1, 'R');
   });
+  c.rect(8, 2 + j, 2, 2, 'W');
   c.set(9, 3 + j, 'O');
   c.set(11, 5 + j, 'W');
   c.set(10, 6 + j, 'W');
@@ -409,7 +493,7 @@ function eel(f: number) {
       const y = 6 + Math.sin(x * 0.55 + f * Math.PI) * 1.6;
       p.ellipse(x, y, 1.4, 1.4 + (x > 14 ? 0.3 : 0), 'F');
     }
-    p.blob(19, 6 + Math.sin(18 * 0.55 + f * Math.PI) * 1.6, 2.2, 1.7, ['#1d2033', 'F', 'D']);
+    p.blob(19.5, 6 + Math.sin(18 * 0.55 + f * Math.PI) * 1.6, 2.6, 2.2, ['#1d2033', 'F', 'D']);
   });
   shadeEdges(c, 'F', 'D', '#1d2033');
   for (let x = 3; x <= 15; x += 3) {
@@ -417,7 +501,7 @@ function eel(f: number) {
     c.set(x, y, 'Y');
   }
   const hy = Math.round(6 + Math.sin(18 * 0.55 + f * Math.PI) * 1.6);
-  c.set(20, hy - 1, 'Y');
+  cuteEye(c, 19, hy - 1, 'Y');
   c.outline();
   for (const [x, y] of f ? [[4, 1], [12, 10], [17, 1]] : [[7, 10], [14, 1], [1, 2]]) {
     c.set(x, y, 'y');
@@ -441,12 +525,14 @@ function hermitCrab(f: number) {
   });
   part(c, (p) => {
     p.blob(11, 8.5, 2.4, 1.8, ['R', 'r', 'r', 'Y']);
-    p.blob(14, 7 + f * 0.5, 1.6, 1.4, ['R', 'r', 'Y']);
+    p.blob(14, 7 + f * 0.5, 2.2, 2, ['R', 'r', 'Y']);
     p.line(12, 7, 12, 4, 'R');
     p.line(13, 7, 14, 4, 'R');
   });
-  c.set(12, 3, 'O');
-  c.set(14, 3, 'O');
+  for (const ex of [11, 14]) {
+    c.rect(ex, 2, 2, 2, 'W');
+    c.set(ex + 1, 3, 'O');
+  }
   c.outline();
   groundShadow(c, 8, 12.6, 6.5, 1);
   return c;
@@ -514,7 +600,7 @@ function naga(f: number) {
     c.set(Math.round(x - r * 0.4), Math.round(y), 'Y');
   }
   // 3 คอแยกจากลำตัว + เศียรหันขวา หงอนทอง (เหมือนนาคหลายเศียร)
-  const heads: [number, number, number][] = [[21 + sx, 7, 2.8], [36 + sx, 9, 2.8], [29 + sx, 4, 3.4]];
+  const heads: [number, number, number][] = [[19 + sx, 8, 4.6], [35 + sx, 10, 4.4], [27 + sx, 5.5, 5.2]];
   for (const [hx, hy] of heads) {
     for (let t = 0; t <= 1.001; t += 0.06) c.ellipse(27 + sx + (hx - 27 - sx) * t, 13 + (hy + 2 - 13) * t - Math.sin(t * Math.PI) * 2, 2.6 - t * 0.6, 2.6 - t * 0.6, 'G');
   }
@@ -527,8 +613,7 @@ function naga(f: number) {
     });
     // หงอนทองแหลม 3 ยอด
     for (let k = -1; k <= 1; k++) c.line(hx + k * 1.4 - 0.5, hy - r * 0.7, hx + k * 2 - 1.5, hy - r - 2.6 + Math.abs(k) * 0.8, k ? '#e0a040' : 'Y');
-    c.set(hx + 0.5, hy - 0.8, 'R');
-    c.set(hx + 1.5, hy - 0.8, 'Y');
+    bigEye(c, hx - 1, hy - 2, 'Y', 3, 4, 1);
     if (f) c.line(hx + r * 2.1, hy + 1, hx + r * 2.1 + 2, hy + 2, 'R');
   }
   c.outline();
@@ -542,35 +627,37 @@ function garuda(f: number) {
   const up = f === 0 ? -1 : f === 1 ? 0 : 1;
   const feathers = ['Y', 'r', 'R', '#7a2633'];
   // ปีกหลัง (ไกล)
-  part(c, (p) => wing(p, 18, 14, 16, up, ['R', '#7a2633', '#7a2633'], 8));
+  part(c, (p) => wing(p, 18, 18, 15, up, ['R', '#7a2633', '#7a2633'], 8));
   // ขา + กรงเล็บ
   part(c, (p) => {
-    p.line(18, 26, 16, 33, GOLD[1], 2);
-    p.line(22, 26, 23, 33, GOLD[1], 2);
-    for (const x of [14, 16, 18, 21, 23, 25]) p.set(x, 34, 'W');
+    p.line(18, 27, 17, 33, GOLD[1], 2);
+    p.line(22, 27, 23, 33, GOLD[1], 2);
+    for (const x of [15, 17, 19, 21, 23, 25]) p.set(x, 34, 'W');
   });
-  // ลำตัว + หาง
+  // ลำตัวจิ๋ว + หาง
   part(c, (p) => {
-    p.blob(20, 20, 5, 7, ['#7a2633', 'R', 'r', 'Y']);
-    p.line(17, 25, 12, 32, 'R', 3);
-    p.line(18, 26, 14, 34, 'r', 2);
-    p.rect(17, 23, 7, 2, GOLD[1]);
-    p.set(20, 18, 'Y');
-    p.set(19, 19, 'Y');
-    p.set(21, 19, 'Y');
+    p.blob(20, 23, 4.6, 5.2, ['#7a2633', 'R', 'r', 'Y']);
+    p.line(17, 26, 12, 33, 'R', 3);
+    p.line(18, 27, 14, 35, 'r', 2);
+    p.rect(17, 25, 7, 2, GOLD[1]);
+    p.set(20, 21, 'Y');
+    p.set(19, 22, 'Y');
+    p.set(21, 22, 'Y');
   });
-  // หัวนกอินทรี + มงกุฎ
+  // หัวนกอินทรีโต + มงกุฎ (จิบิ)
   part(c, (p) => {
-    p.blob(23, 10, 3.6, 3.4, GOLD);
-    p.line(26, 10, 29, 12, '#e0a040', 2);
-    p.set(29, 13, '#a0662a');
-    p.rect(20, 6, 6, 2, '#e0a040');
-    for (let k = 0; k < 3; k++) p.line(20.5 + k * 2.5, 6, 20.5 + k * 2.5, k === 1 ? 2 : 4, k === 1 ? 'Y' : '#e0a040');
+    p.blob(22, 10.5, 7.2, 6.6, GOLD);
+    p.line(28, 12, 32, 14, '#e0a040', 3);
+    p.set(32, 15, '#a0662a');
+    p.set(31, 15, '#a0662a');
+    p.rect(17, 3, 9, 2, '#e0a040');
+    for (let k = 0; k < 4; k++) p.line(17.5 + k * 2.6, 3, 17.5 + k * 2.6, k === 1 || k === 2 ? 0 : 1, k === 1 || k === 2 ? 'Y' : '#e0a040');
+    p.set(21, 4, 'R');
   });
-  c.set(24, 9, 'O');
-  c.set(25, 9, 'R');
+  bigEye(c, 22, 8, 'O', 4, 4, 1);
+  c.set(20, 13, 'p');
   // ปีกหน้า (ใกล้)
-  part(c, (p) => wing(p, 22, 15, 18, up, feathers, 8));
+  part(c, (p) => wing(p, 21, 19, 16, up, feathers, 8));
   c.outline();
   groundShadow(c, 20, 38.6, 9, 1.4, 0.18);
   return c;
@@ -579,35 +666,38 @@ function garuda(f: number) {
 /** กิเลน 36×30 — กายเกล็ดทอง หัวมังกร เขาเดียว แผงคอฟ้า กีบสายฟ้า */
 function qilin(f: number) {
   const c = pc(36, 30);
-  legs(c, [9, 11, 22, 24], 17, 8, f, '#e0a040', '#a0662a', { thick: 2, foot: 'C', swing: 1.5 });
+  legs(c, [8, 10, 18, 20], 20, 6, f, '#e0a040', '#a0662a', { thick: 2, foot: 'C', swing: 1.5 });
   // หางพลิ้ว
   part(c, (p) => {
-    p.line(6, 14, 2, 10 + f, 'C', 2);
-    p.line(2, 10 + f, 1, 6 + f * 2, 'b', 2);
-    p.set(0, 5 + f * 2, 'W');
+    p.line(6, 17, 2, 13 + f, 'C', 2);
+    p.line(2, 13 + f, 1, 9 + f * 2, 'b', 2);
+    p.set(0, 8 + f * 2, 'W');
   });
+  // ลำตัวจิ๋ว + หัวมังกรโต (จิบิ)
   part(c, (p) => {
-    p.blob(16.5, 15, 10, 5, GOLD);
-    p.line(24, 13, 27, 7, '#e0a040', 3);
-    p.blob(29, 6.5, 3.6, 3, GOLD);
-    p.blob(32.5, 7.5, 2.2, 1.6, GOLD);
+    p.blob(14, 18, 8, 4.4, GOLD);
+    p.line(20, 16, 23, 12, '#e0a040', 3);
+    p.blob(26.5, 9, 7.4, 6.6, GOLD);
+    p.blob(33, 11, 2.6, 2, GOLD);
   });
   // ลายเกล็ด
-  for (let y = 12; y <= 18; y += 2) for (let x = 9 + (y % 4 ? 1 : 0); x <= 24; x += 3) if (c.get(x, y) && c.get(x, y) !== 'O') c.set(x, y, '#a0662a');
+  for (let y = 16; y <= 20; y += 2) for (let x = 8 + (y % 4 ? 1 : 0); x <= 20; x += 3) if (c.get(x, y) && c.get(x, y) !== 'O') c.set(x, y, '#a0662a');
   // แผงคอ + เขา + ตา + หนวด
-  for (let i = 0; i < 6; i++) c.line(24 + i * 0.6, 8 + i * 1.2, 21 + i * 0.4, 10 + i * 1.6, i % 2 ? 'b' : 'C');
-  c.line(28, 4, 26, 0, 'W');
-  c.set(27, 2, 'y');
-  c.set(30, 5, 'O');
-  c.set(31, 5, 'C');
-  c.line(34, 8, 35, 11, 'C');
+  for (let i = 0; i < 6; i++) c.line(20 + i * 0.5, 9 + i * 1.3, 18 + i * 0.4, 12 + i * 1.4, i % 2 ? 'b' : 'C');
+  c.line(26, 3, 24, -1, 'W');
+  c.line(27, 3, 26, 0, 'W');
+  c.set(25, 1, 'y');
+  bigEye(c, 26, 7, 'U', 4, 4, 1);
+  c.set(30, 12, 'p');
+  c.set(34, 11, 'O');
+  c.line(35, 12, 35, 15, 'C');
   c.outline();
   // ประกายสายฟ้าที่กีบ
-  for (const [x, y] of f ? [[8, 27], [25, 26], [13, 24]] : [[11, 27], [22, 27], [5, 24]]) {
+  for (const [x, y] of f ? [[7, 27], [21, 26], [12, 25]] : [[10, 27], [19, 27], [4, 25]]) {
     c.set(x, y, 'y');
     c.set(x + 1, y - 1, 'C');
   }
-  groundShadow(c, 17, 27.6, 12, 1.6, 0.3);
+  groundShadow(c, 16, 27.6, 11, 1.6, 0.3);
   return c;
 }
 
@@ -617,20 +707,22 @@ function phoenix(f: number) {
   const up = f === 0 ? -1 : f === 1 ? 0 : 1;
   const rng = new RNG(970 + f);
   const flame = ['R', 'r', 'Y', 'y'];
-  part(c, (p) => wing(p, 18, 14, 15, up, ['R', 'R', '#7a2633'], 8));
+  part(c, (p) => wing(p, 18, 16, 14, up, ['R', 'R', '#7a2633'], 8));
   // หางเปลวไฟยาว
   part(c, (p) => {
-    for (let k = 0; k < 3; k++) p.line(14, 20 + k, 3 + k * 2, 30 + k * 2 - f, k === 1 ? 'Y' : 'r', 2);
+    for (let k = 0; k < 3; k++) p.line(14, 21 + k, 3 + k * 2, 31 + k * 2 - f, k === 1 ? 'Y' : 'r', 2);
   });
+  // ลำตัวจิ๋ว + หัวโต (จิบิ)
   part(c, (p) => {
-    p.blob(19, 18, 5.4, 4.2, flame);
-    p.line(22, 15, 26, 9, 'r', 3);
-    p.blob(27, 8, 2.8, 2.4, flame);
-    p.line(29, 8, 32, 9, 'Y', 2);
-    for (let k = 0; k < 3; k++) p.line(25 + k, 6, 23 + k * 2, 2 - k + f, k === 1 ? 'y' : 'Y');
+    p.blob(18.5, 20, 4.6, 3.6, flame);
+    p.line(21, 17, 24, 14, 'r', 3);
+    p.blob(27, 10, 6.6, 5.8, flame);
+    p.line(33, 11, 36, 12, 'Y', 2);
+    for (let k = 0; k < 3; k++) p.line(24 + k * 2, 5, 22 + k * 3, 1 - (k === 1 ? 1 : 0) + f, k === 1 ? 'y' : 'Y', 2);
   });
-  c.set(28, 7, 'O');
-  part(c, (p) => wing(p, 21, 15, 17, up, flame, 8));
+  bigEye(c, 26, 8, 'O', 4, 4, 1);
+  c.set(25, 13, 'p');
+  part(c, (p) => wing(p, 20, 17, 15, up, flame, 8));
   // ขอบเปลวไฟระยิบ
   for (let i = 0; i < 26; i++) {
     const x = rng.int(0, 39);
@@ -639,7 +731,11 @@ function phoenix(f: number) {
     if (px === 'R' || px === 'r') c.set(x, y, rng.chance(0.5) ? 'Y' : 'y');
   }
   c.outline('#7a2633');
-  for (let i = 0; i < 8; i++) c.set(rng.int(2, 37), rng.int(1, 33), rng.chance(0.5) ? 'Y' : 'r');
+  for (let i = 0; i < 8; i++) {
+    const x = rng.int(2, 37);
+    const y = rng.int(1, 33);
+    if (!c.get(x, y)) c.set(x, y, rng.chance(0.5) ? 'Y' : 'r');
+  }
   groundShadow(c, 19, 34.6, 8, 1.3, 0.18);
   return c;
 }
@@ -672,15 +768,17 @@ function kraken(f: number) {
   }
   // หัวหมึก (แมนเทิล)
   part(c, (p) => {
-    p.blob(22, 16, 8.4, 11, ['P', 'P', 'u', '#c9a6ef']);
+    p.blob(22, 16, 9.6, 11.4, ['P', 'P', 'u', '#c9a6ef']);
     for (let k = 0; k < 4; k++) p.line(17 + k * 3, 27, 16 + k * 3.4, 31, 'P', 3);
   });
-  for (const ex of [17, 25]) {
-    c.rect(ex, 18, 3, 3, 'Y');
-    c.set(ex + 1, 19, 'O');
-    c.set(ex + 1, 20, 'O');
-    c.set(ex, 18, 'y');
+  bigEye(c, 15, 16, 'Y', 5, 5, 1);
+  bigEye(c, 24, 16, 'Y', 5, 5, -1);
+  for (const ex of [17, 26]) {
+    c.set(ex, 18, 'O');
+    c.set(ex, 19, 'O');
   }
+  c.set(15, 22, 'p');
+  c.set(28, 22, 'p');
   for (const [x, y] of [[19, 8], [24, 6], [21, 12], [27, 11]]) c.set(x, y, '#c9a6ef');
   clearFrom(c, WL + 1);
   c.outline();
@@ -692,36 +790,38 @@ function kraken(f: number) {
 function kochasi(f: number) {
   const c = pc(40, 34);
   const lion = ['M', 'N', 'S', 'y'];
-  legs(c, [9, 11, 22, 24], 20, 9, f, 'N', 'M', { thick: 3, foot: 'O', swing: 1 });
+  legs(c, [7, 9, 18, 20], 22, 7, f, 'N', 'M', { thick: 3, foot: 'O', swing: 1 });
   // หางราชสีห์
   part(c, (p) => {
-    p.line(6, 17, 2, 12 - f, 'N', 2);
-    p.blob(2, 10.5 - f, 1.8, 1.8, ['R', 'r', 'r']);
+    p.line(5, 19, 2, 14 - f, 'N', 2);
+    p.blob(2, 12.5 - f, 1.8, 1.8, ['R', 'r', 'r']);
   });
+  // ลำตัวจิ๋ว + ผ้าทรงทอง
   part(c, (p) => {
-    p.blob(16, 17, 10.5, 5.5, lion);
-    p.rect(9, 13, 14, 3, GOLD[1]);
-    p.rect(9, 13, 14, 1, 'Y');
-    for (let x = 10; x <= 22; x += 3) p.set(x, 15, 'R');
+    p.blob(13.5, 19.5, 8.6, 4.6, lion);
+    p.rect(8, 16, 12, 3, GOLD[1]);
+    p.rect(8, 16, 12, 1, 'Y');
+    for (let x = 9; x <= 19; x += 3) p.set(x, 18, 'R');
   });
-  // แผงคอราชสีห์ (แดงส้ม) + หัวช้าง
-  part(c, (p) => p.blob(27, 12, 6, 6.5, ['R', 'R', 'r', 'Y'], new RNG(41), 0.5));
+  // แผงคอราชสีห์ (แดงส้ม) + หัวช้างโต (จิบิ)
+  part(c, (p) => p.blob(24, 14, 7, 7.4, ['R', 'R', 'r', 'Y'], new RNG(41), 0.5));
   part(c, (p) => {
-    p.blob(30, 10, 5, 4.6, ['F', 'D', 'L', 'w']);
-    p.blob(26.5, 10, 2.6, 3.6, ['F', 'D', 'L']); // หู
-    p.line(34, 12, 36, 20, 'D', 3); // งวง
-    p.line(36, 20, 38, 22 - f, 'D', 2);
+    p.blob(29.5, 12, 8, 7.4, ['F', 'D', 'L', 'w']);
+    p.blob(22.5, 12.5, 3.6, 5, ['F', 'D', 'L']); // หู
+    p.line(35, 15, 37, 23, 'D', 3); // งวง
+    p.line(37, 23, 39, 25 - f, 'D', 2);
     // มงกุฎทอง
-    p.rect(27, 4, 7, 2, GOLD[1]);
-    for (let k = 0; k < 4; k++) p.line(27 + k * 2, 4, 27 + k * 2, 1 + (k === 1 || k === 2 ? -1 : 0), 'Y');
+    p.rect(25, 3, 9, 2, GOLD[1]);
+    for (let k = 0; k < 5; k++) p.line(25 + k * 2, 3, 25 + k * 2, k === 2 ? -1 : k % 2 ? 0 : 1, 'Y');
+    p.set(29, 4, 'R');
   });
-  // งา
-  c.line(33, 14, 37, 15, 'W', 2);
-  c.set(38, 14, 'W');
-  c.set(32, 9, 'O');
-  c.set(31, 9, 'Y');
+  // งา + ตาโตคิ้วขมวด
+  c.line(33, 18, 37, 19, 'W', 2);
+  c.set(38, 18, 'W');
+  bigEye(c, 29, 9, 'O', 4, 4, 1);
+  c.set(33, 14, 'p');
   c.outline();
-  groundShadow(c, 18, 31.6, 13, 1.8, 0.32);
+  groundShadow(c, 17, 31.6, 13, 1.8, 0.32);
   return c;
 }
 
@@ -730,36 +830,37 @@ function frostDragon(f: number) {
   const c = pc(44, 38);
   const up = f === 0 ? -1 : f === 1 ? 0 : 1;
   const ice = ['U', 'B', 'b', 'C'];
-  part(c, (p) => wing(p, 20, 15, 17, up, ['B', 'U', 'U'], 8));
+  part(c, (p) => wing(p, 19, 18, 15, up, ['B', 'U', 'U'], 8));
   // หาง
   part(c, (p) => {
-    for (let t = 0; t <= 1; t += 0.05) p.ellipse(14 - t * 12, 22 + Math.sin(t * 3 + f) * 3, 2.6 - t * 1.8, 2.6 - t * 1.8, 'b');
+    for (let t = 0; t <= 1; t += 0.05) p.ellipse(13 - t * 11, 24 + Math.sin(t * 3 + f) * 3, 2.4 - t * 1.6, 2.4 - t * 1.6, 'b');
   });
-  // ขา
+  // ขาป้อม
   part(c, (p) => {
-    p.line(16, 24, 15, 31, 'B', 3);
-    p.line(26, 24, 27, 31, 'B', 3);
-    for (const x of [13, 15, 17, 25, 27, 29]) p.set(x, 32, 'W');
+    p.line(15, 26, 14, 31, 'B', 3);
+    p.line(23, 26, 24, 31, 'B', 3);
+    for (const x of [12, 14, 16, 22, 24, 26]) p.set(x, 32, 'W');
   });
+  // ลำตัวจิ๋ว + หัวโต (จิบิ)
   part(c, (p) => {
-    p.blob(21, 20, 8, 5.2, ice);
-    p.line(27, 17, 32, 9, 'b', 4);
-    p.blob(34, 8, 3.6, 3, ice);
-    p.blob(38, 9, 2.6, 1.8, ice);
+    p.blob(19, 22, 7, 4.6, ice);
+    p.line(24, 19, 28, 14, 'b', 4);
+    p.blob(32.5, 10, 7.6, 6.6, ice);
+    p.blob(39.5, 12.5, 3, 2.2, ice);
     // ท้องเกล็ดขาว
-    for (let x = 15; x <= 27; x++) p.set(x, 24, x % 2 ? 'W' : 'C');
+    for (let x = 14; x <= 24; x++) p.set(x, 26, x % 2 ? 'W' : 'C');
   });
   // หนามน้ำแข็งบนหลัง + เขา
-  for (let x = 10; x <= 28; x += 3) c.line(x, 15 - (x > 18 ? 0 : 1), x - 1, 12 - (x > 18 ? 0 : 1), 'W');
-  c.line(33, 5, 30, 1, 'W');
-  c.line(35, 5, 34, 1, 'W');
-  c.set(35, 7, 'O');
-  c.set(36, 7, 'C');
-  part(c, (p) => wing(p, 23, 15, 19, up, ['W', 'C', 'b', 'B'], 8));
+  for (let x = 11; x <= 23; x += 3) c.line(x, 18 - (x > 16 ? 0 : 1), x - 1, 15 - (x > 16 ? 0 : 1), 'W');
+  c.line(29, 4, 26, 0, 'W');
+  c.line(32, 3, 31, -1, 'W');
+  bigEye(c, 31, 8, 'O', 4, 4, 1);
+  c.set(36, 13, 'p');
+  part(c, (p) => wing(p, 21, 19, 17, up, ['W', 'C', 'b', 'B'], 8));
   c.outline('U');
   // ลมหายใจเย็น
-  if (f !== 1) for (const [x, y] of [[41, 10], [42, 12], [43, 9]]) c.set(x, y, 'w');
-  groundShadow(c, 21, 36.6, 10, 1.4, 0.18);
+  if (f !== 1) for (const [x, y] of [[42, 12], [43, 14], [43, 10]]) c.set(x, y, 'w');
+  groundShadow(c, 20, 36.6, 10, 1.4, 0.18);
   return c;
 }
 
@@ -775,11 +876,13 @@ function stoneTurtle(f: number) {
   }
   // หัว + คอ
   part(c, (p) => {
-    p.line(36, 20, 40, 17, 'D', 4);
-    p.blob(41.5, 16, 3.6, 3, rock);
+    p.line(35, 20, 38, 17, 'D', 4);
+    p.blob(39.5, 14.5, 6.2, 5.6, rock);
   });
-  c.set(42, 15, 'O');
-  c.set(43, 15, 'g');
+  bigEye(c, 38, 11, 'O', 4, 4);
+  c.set(43, 17, 'p');
+  c.set(42, 18, 'O');
+  c.set(44, 17, 'g');
   // กระดอง
   part(c, (p) => {
     p.blob(22, 17, 16, 9.5, rock, rng, 0.15);
@@ -813,6 +916,9 @@ function stoneTurtle(f: number) {
 
 /** id texture → [ท่าแต่ละเฟรม, ลำดับเฟรมใน anim, fps] */
 export const CREATURE_ART: Record<string, { frames: () => PixelCanvas[]; anim: number[]; rate: number }> = {
+  boar: { frames: () => [boar(0), boar(1)], anim: [0, 1], rate: 6 },
+  wolf: { frames: () => [wolf(0), wolf(1)], anim: [0, 1], rate: 8 },
+  rabbit: { frames: () => [rabbit(0), rabbit(1)], anim: [0, 1], rate: 5 },
   deer: { frames: () => [deer(0), deer(1)], anim: [0, 1], rate: 7 },
   buffalo: { frames: () => [buffalo(0), buffalo(1)], anim: [0, 1], rate: 5 },
   fox: { frames: () => [fox(0), fox(1)], anim: [0, 1], rate: 9 },
