@@ -174,20 +174,34 @@ export function installCrispText(game: Phaser.Game) {
 
   // ---- ห่อ GL: ติดตาม framebuffer ที่ผูกอยู่ · วาดลงจอ = คูณ R ----
   let bound: WebGLFramebuffer | null = null;
+  // Phaser บางครั้งตั้ง viewport/scissor "ก่อน" ผูก framebuffer ของ RenderTexture (เช่น ความมืดกลางคืน)
+  // → จำค่าที่ขอไว้ แล้วตั้งใหม่ทุกครั้งที่เปลี่ยนเป้าหมาย (จอ = คูณ R · RenderTexture = ค่าเดิม)
+  //   เดิมคูณ R ผิดตอนวาดลง RenderTexture → วงแสงรอบตัว/คบไฟ/กองไฟไม่ถูกวาด กลางคืนมืดทั้งจอ
+  let vp: [number, number, number, number] | null = null;
+  let sc: [number, number, number, number] | null = null;
   const bind = gl.bindFramebuffer.bind(gl);
-  gl.bindFramebuffer = (target: number, fb: WebGLFramebuffer | null) => {
-    if (target === gl.FRAMEBUFFER || target === (gl as unknown as WebGL2RenderingContext).DRAW_FRAMEBUFFER) bound = fb;
-    bind(target, fb);
-  };
   const viewport = gl.viewport.bind(gl);
-  gl.viewport = (x: number, y: number, w: number, h: number) => {
-    if (bound === null && R !== 1) viewport(Math.round(x * R), Math.round(y * R), Math.round(w * R), Math.round(h * R));
-    else viewport(x, y, w, h);
-  };
   const scissor = gl.scissor.bind(gl);
+  const k = (v: number) => (bound === null && R !== 1 ? Math.round(v * R) : v);
+  const applyVp = () => vp && viewport(k(vp[0]), k(vp[1]), k(vp[2]), k(vp[3]));
+  const applySc = () => sc && scissor(k(sc[0]), k(sc[1]), k(sc[2]), k(sc[3]));
+  gl.bindFramebuffer = (target: number, fb: WebGLFramebuffer | null) => {
+    bind(target, fb);
+    if (target === gl.FRAMEBUFFER || target === (gl as unknown as WebGL2RenderingContext).DRAW_FRAMEBUFFER) {
+      if (bound !== fb) {
+        bound = fb;
+        applyVp();
+        applySc();
+      }
+    }
+  };
+  gl.viewport = (x: number, y: number, w: number, h: number) => {
+    vp = [x, y, w, h];
+    applyVp();
+  };
   gl.scissor = (x: number, y: number, w: number, h: number) => {
-    if (bound === null && R !== 1) scissor(Math.round(x * R), Math.round(y * R), Math.round(w * R), Math.round(h * R));
-    else scissor(x, y, w, h);
+    sc = [x, y, w, h];
+    applySc();
   };
   // Phaser คำนวณ scissor จาก drawingBufferHeight → ให้เห็นเป็นขนาดเกม (960×540)
   const proto2 = Object.getPrototypeOf(gl);

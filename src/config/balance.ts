@@ -28,7 +28,7 @@ export const BALANCE = {
   campfireFuel: 180,
   campfireFuelPerWood: 60,
   campfireLight: 84,
-  playerLight: 26,
+  playerLight: 40, // แสงรอบตัวตอนกลางคืน (ไม่ถือคบไฟ) — ให้เห็นรอบตัวพอเดินได้
   stationRange: 40,
 
   structureHp: { campfire: 60, wood_wall: 100, stone_wall: 260, spike_trap: 60, farm_plot: 40, workbench: 120, furnace: 160, bed: 80 } as Record<string, number>,
