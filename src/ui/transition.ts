@@ -22,6 +22,8 @@ export function fadeTo(scene: Phaser.Scene, key: string, data?: object, ms = 200
     scene.scene.start(key, data);
     return;
   }
+  // ซีนที่ถูก pause อยู่ (เช่น กด "บันทึก & ออก" จากเมนู Esc) กล้องไม่อัปเดต → fade ไม่มีวันจบ = จอค้าง → ปลุกก่อนจาง
+  if (scene.scene.isPaused()) scene.scene.resume();
   cam.fadeOut(ms, ...DARK);
   cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => scene.scene.start(key, data));
 }

@@ -3920,6 +3920,7 @@ export class GameScene extends Phaser.Scene {
   saveAndQuit() {
     this.autosave();
     SaveManager.flush();
+    if (this.scene.isPaused()) this.scene.resume(); // เรียกจากเมนู Esc (เกม pause อยู่) → ต้องปลุกก่อน ไม่งั้น fade ไม่จบ จอค้าง
     this.scene.stop('UIScene');
     fadeTo(this, 'TitleScene', undefined, 240);
   }

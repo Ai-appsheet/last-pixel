@@ -74,8 +74,9 @@ export class ChatPanel {
     // จอเล็ก: ใต้แผงสถานะ+ชิปพับ (136 × k) · คอม: ชิดล่าง
     this.y = c ? Math.round(136 * opts.k + 6) : H - 8 - this.h;
     // ช่องพิมพ์ ≥ 16px บนจอจริง (DOM ถูกย่อตามแคนวาส → ขยายชดเชย กัน iOS ซูมเอง)
-    const inFont = Math.min(24, Math.ceil(Math.max(16, 16 / Math.min(1, displayScale(scene)))));
-    const inH = inFont + 12;
+    // ช่องพิมพ์ตัวเล็ก-บาง (กฎผู้ใช้): ฐาน 12px ขยายเฉพาะตอนจอย่อมาก สูงสุด 15px
+    const inFont = Math.min(15, Math.ceil(Math.max(12, 12 / Math.min(1, displayScale(scene)))));
+    const inH = inFont + 8;
     this.listH = this.h - this.listTop - inH - PAD - 4;
     const listW = this.w - PAD * 2;
     try {
@@ -96,7 +97,7 @@ export class ChatPanel {
     this.maskG = scene.make.graphics({ x: 0, y: 0 }, false).fillStyle(0xffffff).fillRect(this.x + PAD, this.y + this.listTop, listW, this.listH);
     this.list.setMask(this.maskG.createGeometryMask());
     const inW = listW - 36;
-    const send = txt(scene, this.w - PAD, this.h - PAD - inH / 2, '➤', c ? 18 : 16, COLORS.gold).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
+    const send = txt(scene, this.w - PAD, this.h - PAD - inH / 2, '➤', c ? 15 : 14, COLORS.gold).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
     send.on('pointerdown', () => void this.send());
     this.root.add([bg, title, this.statusT, fold, this.list, send]);
 
@@ -112,8 +113,8 @@ export class ChatPanel {
     el.setAttribute('autocorrect', 'off');
     el.setAttribute('enterkeyhint', 'send');
     Object.assign(el.style, {
-      width: `${inW}px`, height: `${inH}px`, fontSize: `${inFont}px`, fontFamily: FONT, fontWeight: '500', padding: '0 8px', borderRadius: '8px',
-      border: '2px solid #41a6f6', background: '#0b0d1f', color: '#f4f4f4', outline: 'none', boxSizing: 'border-box',
+      width: `${inW}px`, height: `${inH}px`, fontSize: `${inFont}px`, fontFamily: FONT, fontWeight: '400', padding: '0 7px', borderRadius: '6px',
+      border: '1px solid #41a6f6', background: '#0b0d1f', color: '#f4f4f4', outline: 'none', boxSizing: 'border-box',
     });
     // ปุ่มในช่องพิมพ์ไม่ไปถึง Phaser (ฟังที่ window) → ไม่เดิน/ไม่เปิดหน้าต่างขณะพิมพ์
     el.addEventListener('keydown', (e) => {
