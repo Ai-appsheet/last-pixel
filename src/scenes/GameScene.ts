@@ -1484,7 +1484,10 @@ export class GameScene extends Phaser.Scene {
       if (node) {
         if (node.spec.harvest === 'pick') this.pick(node);
         else {
-          const power = tool[node.spec.harvest] * (1 + p.stats.gather / 100);
+          // ตัดไม้ง่าย: มือเปล่า/อาวุธอะไรก็ได้ ≥ 5 (ต้นไม้ล้มใน ~2 ที) · ขวาน ×2 (ทีเดียวขาด)
+          const base = tool[node.spec.harvest];
+          const chop = node.spec.harvest === 'tree' ? Math.max(5, base * 2) : base;
+          const power = chop * (1 + p.stats.gather / 100);
           if (power <= 0 || (node.spec.minPower && power < node.spec.minPower)) {
             Sfx.play('error', 300);
             EventBus.emit('toast', node.spec.minPower && power > 0 ? 'ต้องใช้อีเต้อที่ดีกว่านี้ (ดูคู่มือ J)' : node.spec.harvest === 'tree' ? 'ใช้มือหรือขวาน' : 'ต้องใช้อีเต้อทุบ', '#ef7d57');
