@@ -1843,6 +1843,7 @@ export class GameScene extends Phaser.Scene {
     const kind = t.kind ?? 'bomb';
     const atk = p.char.stats.damageMult * (1 + p.stats.atk / 100);
     p.inventory.consumeAt(p.selected);
+    if (!p.held) p.selected = -1; // ของขว้างหมดกอง → มือว่าง (ไม่ค้าง index ไว้ให้ของที่เก็บมาทีหลังโผล่มาอยู่ในมือแล้วโจมตีไม่ได้)
     if (kind === 'knife' || kind === 'shuriken' || kind === 'javelin') {
       p.attackCd = kind === 'javelin' ? 0.6 : 0.28;
       const angles = kind === 'shuriken' ? [-0.15, 0, 0.15] : [0];

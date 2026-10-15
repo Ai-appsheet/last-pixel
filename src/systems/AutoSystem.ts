@@ -188,6 +188,9 @@ export class AutoSystem {
     this.task = null;
     this.target = null;
     this.s.controls.autoMove = null;
+    // แถบหมวด: มือว่างเป็นปกติ — เครื่องมือ/อาวุธที่หยิบมาถือตอนทำงานอัตโนมัติ ปล่อยคืน (ของขว้างที่ผู้เล่นเลือกไว้คงอยู่)
+    const held = this.s.player.held;
+    if (held && ITEMS[held.id].type !== 'throw') this.s.player.selected = -1;
   }
 
   private count(n: number) {
@@ -382,9 +385,8 @@ export class AutoSystem {
     }
     if (best >= 0) p.selected = best;
     else if (belt && p.held && ITEMS[p.held.id].type === 'tool') {
-      // เข็มขัดดีกว่า: ปล่อยเครื่องมือในมือ (GameScene.attack ใช้ของในเข็มขัดเอง)
-      const free = p.inventory.slots.findIndex((sl, i) => i < HOTBAR_SIZE && (!sl || ITEMS[sl.id].type === 'material'));
-      if (free >= 0) p.selected = free;
+      // เข็มขัดดีกว่า: ปล่อยเครื่องมือในมือ = มือว่าง (GameScene.attack ใช้ของในเข็มขัดเอง) — ไม่ชี้ไปช่องว่าง ไม่งั้นของที่เก็บมาทีหลังจะมาอยู่ในมือ
+      p.selected = -1;
     }
   }
 
@@ -408,10 +410,8 @@ export class AutoSystem {
       return;
     }
     const held = p.held ? ITEMS[p.held.id] : undefined;
-    if (p.equip.weapon && held && ['tool', 'weapon', 'ranged'].includes(held.type)) {
-      const free = p.inventory.slots.findIndex((sl, i) => i < HOTBAR_SIZE && (!sl || !['tool', 'weapon', 'ranged', 'throw', 'food', 'heal', 'box', 'elixir'].includes(ITEMS[sl.id].type)));
-      if (free >= 0) p.selected = free;
-    }
+    // อาวุธหลักที่สวมดีกว่าของในมือ → มือว่าง (ใช้อาวุธหลัก) — ไม่ชี้ไปช่องว่าง (index ค้าง)
+    if (p.equip.weapon && held && ['tool', 'weapon', 'ranged'].includes(held.type)) p.selected = -1;
   }
 
   /**
