@@ -66,7 +66,8 @@ export class ChatPanel {
 
   constructor(private scene: Phaser.Scene, private opts: ChatPanelOpts) {
     const c = opts.compact;
-    this.fs = c ? 14 : 12;
+    // ข้อความแชทเล็ก (≈10–11px บนคอม · มือถือ +1)
+    this.fs = c ? 12 : 11;
     this.w = c ? 300 : 256;
     this.h = c ? 168 : 180;
     this.x = 8;
@@ -164,6 +165,14 @@ export class ChatPanel {
     EventBus.on('chat:message', onMsg);
     EventBus.on('chat:status', onStatus);
     this.off.push(() => EventBus.off('chat:message', onMsg), () => EventBus.off('chat:status', onStatus));
+    // กดป้ายชื่อผู้เล่นคนอื่นในโลก (PresenceSystem) = เติม "@ชื่อ " แบบเดียวกับกดชื่อในแชท
+    const onMention = (name: string) => {
+      if (this.paused || chat.state === 'off') return;
+      this.input.value = `@${name} ${this.input.value.replace(/^@\S+\s*/, '')}`.slice(0, CHAT_MAX_LEN);
+      this.focus();
+    };
+    EventBus.on('chat:mention', onMention);
+    this.off.push(() => EventBus.off('chat:mention', onMention));
     scene.events.on('update', this.tick, this);
     scene.events.once('shutdown', () => this.destroy());
 
@@ -186,6 +195,11 @@ export class ChatPanel {
     this.input.focus();
   }
 
+  /** HUD แบบเบา: เริ่มแบบพับเป็นปุ่ม 💬 เล็ก */
+  collapse() {
+    this.setCollapsed(true, false);
+  }
+
   private setCollapsed(v: boolean, sound = true) {
     this.collapsed = v;
     if (sound) Sfx.play('click');
@@ -206,6 +220,19 @@ export class ChatPanel {
     this.renderPill();
   }
 
+  /** ตำแหน่งปุ่มแชท (จุดกลาง) ที่ผู้เล่นจัดเอง — null = ตำแหน่งปกติ */
+  private pillAt: { x: number; y: number } | null = null;
+
+  setPillAt(p: { x: number; y: number } | null) {
+    this.pillAt = p;
+    this.renderPill();
+  }
+
+  /** จุดกลาง + ขนาดปุ่มแชท (ใช้ในหน้าจัดตำแหน่งปุ่ม) */
+  pillRect() {
+    return { x: this.pill.x + this.pillBg.width / 2, y: this.pill.y + this.pillBg.height / 2, w: this.pillBg.width, h: this.pillBg.height };
+  }
+
   private renderPill() {
     const c = this.opts.compact;
     const n = this.unread;
@@ -214,7 +241,8 @@ export class ChatPanel {
     const h = c ? 28 : 26;
     this.pillBg.setSize(w, h);
     // จอเล็ก: ขวาของปุ่ม "▾ สถานะ" ใต้แผงสถานะ (เหนือแผงปักหมุด/จอยสติก) · คอม: มุมซ้ายล่าง
-    if (c) this.pill.setPosition(Math.round(96 * this.opts.k), Math.round(108 * this.opts.k) - 2);
+    if (this.pillAt) this.pill.setPosition(Math.round(this.pillAt.x - w / 2), Math.round(this.pillAt.y - h / 2));
+    else if (c) this.pill.setPosition(Math.round(96 * this.opts.k), Math.round(108 * this.opts.k) - 2);
     else this.pill.setPosition(this.x, H - 8 - h);
   }
 

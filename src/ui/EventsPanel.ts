@@ -28,6 +28,7 @@ export class EventsPanel {
 
   /** จุดบนจออยู่บนแผงนี้ไหม (UIScene.isPointerOverUI — กันคลิกทะลุไปตี) */
   contains(x: number, y: number) {
+    if (!this.root.visible) return false;
     return [this.boxBtn, this.head, this.list, this.odds].some((o) => o.visible && o.getBounds().contains(x, y));
   }
 
@@ -64,6 +65,27 @@ export class EventsPanel {
     this.refresh();
   }
 
+  /** เปิด/พับรายการกิจกรรม (HUD แบบเบา = พับไว้ก่อน) */
+  setOpen(v: boolean) {
+    this.open = v;
+    this.refresh();
+  }
+
+  /** แสดง/ซ่อนทั้งแผง (HUD แบบเบา: เปิดจากเมนู ☰ → กิจกรรม) */
+  setShown(v: boolean) {
+    this.root.setVisible(v);
+    if (v) this.setOpen(true);
+  }
+
+  get shown() {
+    return this.root.visible;
+  }
+
+  /** มีกล่องฟรีให้รับ (จุดแจ้งเตือนบนปุ่ม ☰) */
+  get claimable() {
+    return !!this.gs.daily?.dailyBoxStatus().available;
+  }
+
   private claim() {
     const d = this.gs.daily;
     if (!d.boxAvailable) {
@@ -96,18 +118,23 @@ export class EventsPanel {
     if (showOdds) y += this.odds.height + 2;
     const marks = g.worldEvents.markers();
     const events = marks.filter((m) => m.kind === 'event');
-    const openGates = marks.filter((m) => m.kind !== 'event' && m.open).length;
+    const openGates = marks.filter((m) => m.kind !== 'event' && m.open && !(m.kind === 'center' ? g.center : g.special).always).length;
     this.head.setText(`📣 กิจกรรม${events.length || openGates ? ` (${events.length + openGates} เปิดอยู่)` : ''} ${this.open ? '▾' : '▸'}`).setColor(events.length || openGates ? COLORS.gold : COLORS.sea).setPosition(M, y);
     y += this.head.height + 2;
     this.list.setVisible(this.open).setPosition(M, y);
     if (!this.open) return;
     const lines: string[] = [];
     for (const m of marks) {
-      if (m.kind === 'event') lines.push(`${m.icon} ${m.name} · เหลือ ${fmtLeft(m.msLeft)}`);
+      if (m.kind === 'event') lines.push(`${m.icon} ${m.name} · ${m.msLeft > 0 ? `เหลือ ${fmtLeft(m.msLeft)}` : 'รอคนบนเกาะออกก่อนจม'}`);
       else {
         const st = m.kind === 'center' ? g.center : g.special;
-        lines.push(m.open ? `${m.icon} ${m.name}: เปิด · เหลือ ${fmtLeft(m.msLeft)}` : `🔒 ${m.name}: ปิด · เปิด ${bkkClock(st.nextOpen)} น.`);
+        lines.push(st.always ? `${m.icon} ${m.name}: เปิดตลอด` : m.open ? `${m.icon} ${m.name}: เปิด · เหลือ ${fmtLeft(m.msLeft)}` : `🔒 ${m.name}: ปิด · เปิด ${bkkClock(st.nextOpen)} น.`);
       }
+    }
+    // มอนที่ฆ่าแล้วตายจริงจนถึงรอบใหม่ทุกต้นชั่วโมง + สถานะดันเจี้ยนแต่ละชั้น
+    if (g.mobRespawn) {
+      lines.push(g.mobRespawn.refreshText);
+      for (const pt of g.world.portals) lines.push(`  ${g.interiors.floorStatus(pt.interior).cleared ? '✔' : '⛏'} ${g.world.slots[pt.interior]?.name ?? 'ดันเจี้ยน'}: ${g.interiors.floorText(pt.interior)}`);
     }
     const next = g.worldEvents.upcoming();
     if (next) {

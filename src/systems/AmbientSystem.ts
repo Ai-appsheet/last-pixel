@@ -50,6 +50,7 @@ export class AmbientSystem {
     const p = s.player;
     // คุณภาพกลาง/ต่ำ: อนุภาคบรรยากาศน้อยลง (ช่วงห่างขึ้น / จำนวนสูงสุดน้อยลง)
     const q = qualityKnobs().particles;
+    const indoor = !!s.homes?.inside; // อยู่ในห้องบ้าน: ไม่มีเงาเมฆ/หิ่งห้อย
 
     // ---------- เงาเมฆ ----------
     for (const c of this.clouds) {
@@ -61,11 +62,11 @@ export class AmbientSystem {
         c.x = view.x - w / 2 - Math.random() * 120;
         c.y = view.y + Math.random() * view.height;
       }
-      c.setAlpha(0.12 * (1 - dark));
+      c.setAlpha(indoor ? 0 : 0.12 * (1 - dark));
     }
 
     // ---------- หิ่งห้อยตอนกลางคืน ----------
-    if (dark > 0.4 && this.fireflies.length < 18 * q && Math.random() < dt * 6) {
+    if (dark > 0.4 && !indoor && this.fireflies.length < 18 * q && Math.random() < dt * 6) {
       const img = s.add.image(0, 0, 'firefly').setBlendMode(Phaser.BlendModes.ADD).setDepth(ABOVE_DARK).setAlpha(0);
       this.fireflies.push({
         img, life: Phaser.Math.FloatBetween(4, 9), phase: Math.random() * 10,

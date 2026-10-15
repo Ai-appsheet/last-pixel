@@ -1184,6 +1184,75 @@ export class CombatFx {
     }
   }
 
+  /** ละอองแสงลอยขึ้นจากออร่าอุปกรณ์ (fx/GearAura) */
+  auraMote(x: number, y: number, color: number, big = false) {
+    const p = this.spawn(this.top, big ? 'fx_cross' : 'fx_spark4', x, y, rnd(0.7, 1.1));
+    if (!p) return;
+    p.vx = rnd(-4, 4);
+    p.vy = -rnd(14, 26);
+    p.s0 = big ? 1 : 0.8;
+    p.s1 = 0.2;
+    p.fade = 2;
+    p.img.setTint(color); // ไม่ใช้ ADD → อ่านออกบนพื้นสว่างกลางวัน
+  }
+
+  /** อนุภาคหมุนวนเข้าหาจุดกลาง (ร่ายแปลงร่าง/สวมอุปกรณ์) — r = รัศมีเริ่ม · t = เวลาถึงกลาง */
+  spiralIn(x: number, y: number, color: number, n: number, r: number, t: number) {
+    const c = this.n(n);
+    for (let i = 0; i < c; i++) {
+      const a = (i / c) * Math.PI * 2 + rnd(-0.2, 0.2);
+      const life = t * rnd(0.8, 1);
+      const sx = x + Math.cos(a) * r;
+      const sy = y + Math.sin(a) * r * 0.6;
+      const p = this.spawn(this.top, i % 3 ? 'fx_spark4' : 'fx_cross', sx, sy, life);
+      if (!p) return;
+      // เข้ากลาง + เฉียงไปทางสัมผัสวง → เป็นเกลียว
+      p.vx = (x - sx) / life - Math.sin(a) * r * 0.9;
+      p.vy = (y - sy) / life + Math.cos(a) * r * 0.5;
+      p.s0 = 1.1;
+      p.s1 = 0.3;
+      p.fade = 2;
+      p.img.setTint(i % 2 ? color : 0xffffff);
+    }
+  }
+
+  /** ประกายตกโปรยรอบตัว (หลังแปลงร่าง) */
+  fallSparkles(x: number, y: number, color: number, n: number, spread = 22) {
+    const c = this.n(n);
+    for (let i = 0; i < c; i++) {
+      const p = this.spawn(this.top, i % 2 ? 'fx_cross' : 'fx_spark4', x + rnd(-spread, spread), y - rnd(14, 30), rnd(0.7, 1.1));
+      if (!p) return;
+      p.vx = rnd(-8, 8);
+      p.vy = rnd(-20, 5);
+      p.g = 40;
+      p.s0 = rnd(0.7, 1.1);
+      p.s1 = 0.2;
+      p.fade = 1;
+      p.flick = true;
+      p.img.setTint(i % 3 ? color : 0xffffff);
+    }
+  }
+
+  /** แสงวาบรูปดาวตรงจุด (ขยายตามขนาด) */
+  burst(x: number, y: number, size: number) {
+    const f = this.spawn(this.top, 'fx_muzzle', x, y, 0.22);
+    if (!f) return;
+    f.s0 = size;
+    f.s1 = size * 0.3;
+    f.vr = 3;
+    f.img.setBlendMode(Phaser.BlendModes.ADD);
+  }
+
+  /** ภาพติดตาตอนวิ่ง (ผ้าคลุม/ออร่าระดับสูง) — สำเนาเฟรมปัจจุบันสีอ่อนแล้วจาง */
+  afterImage(src: Phaser.GameObjects.Sprite, color: number) {
+    const p = this.spawn(this.world, src.texture.key, src.x, src.y, 0.28);
+    if (!p) return;
+    p.img.setTexture(src.texture.key, src.frame.name).setFlipX(src.flipX).setDepth(src.depth - 0.05).setTint(color);
+    p.s0 = p.s1 = Math.abs(src.scaleX);
+    p.sy = Math.abs(src.scaleY) / p.s0;
+    p.a0 = 0.35;
+  }
+
   /** ล้มบอส/สัตว์ในตำนาน: คลื่นกระแทกใหญ่ + ภาพช้า 0.4 วิ + เหรียญทองพุ่ง + จอวาบ (≤ 0.25) */
   bossDeath(x: number, y: number) {
     this.ring(x, y + 4, 0xffffff, 90, 4, 0.55, 0.6);

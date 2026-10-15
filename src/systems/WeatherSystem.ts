@@ -52,7 +52,8 @@ export class WeatherSystem {
     }
     const target = this.state === 'clear' ? 0 : this.state === 'rain' ? 0.6 : 1;
     this.intensity += (target - this.intensity) * Math.min(1, dt * 0.3);
-    Sfx.setRain(biome === 'desert' || biome === 'snow' ? 0 : this.intensity);
+    const indoor = biome === 'indoor'; // อยู่ในบ้าน: ไม่มีเม็ดฝน/ฟ้าแลบ ได้ยินฝนแผ่วๆ
+    Sfx.setRain(biome === 'desert' || biome === 'snow' ? 0 : this.intensity * (indoor ? 0.3 : 1));
 
     const s = this.scene;
     const view = s.cameras.main.worldView;
@@ -68,7 +69,7 @@ export class WeatherSystem {
     } else if (biome === 'savanna' && this.state === 'clear') {
       kind = 'sand';
       want = 14;
-    } else want = this.intensity * 160;
+    } else want = indoor ? 0 : this.intensity * 160;
     // คุณภาพกลาง/ต่ำ: เม็ดน้อยลง
     want = Math.round(want * qualityKnobs().weather);
     while (this.drops.length < want) this.drops.push(this.spawn(kind, view));
@@ -93,7 +94,7 @@ export class WeatherSystem {
       this.lightning -= dt;
       if (this.lightning <= 0) {
         this.lightning = Phaser.Math.FloatBetween(6, 14);
-        s.cameras.main.flash(140, 230, 240, 255);
+        if (!indoor) s.cameras.main.flash(140, 230, 240, 255);
         s.time.delayedCall(Phaser.Math.Between(300, 1200), () => Sfx.play('thunder'));
       }
     }

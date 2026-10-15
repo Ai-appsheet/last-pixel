@@ -13,12 +13,19 @@ export interface GameSettings {
   shake: boolean;
   /** คุณภาพภาพ (ดู core/Quality.ts) */
   quality: QualityPref;
+  /** เดินด้วยเมาส์ (กดค้าง/คลิกพื้น — systems/MouseMove) */
+  mouseMove: boolean;
+  /** ตำแหน่ง/ขนาด/ความทึบปุ่มสัมผัส แยกตามสัดส่วนจอ (ui/TouchLayout.ts) — ไม่มี = ค่าเริ่มต้น */
+  touchLayouts?: Record<string, Record<string, { x: number; y: number; s: number; a: number }>>;
+  /** จอย: ลอยตามนิ้ว / คงที่ · เดดโซน 0–0.4 */
+  joyMode?: 'floating' | 'fixed';
+  joyDead?: number;
 }
 
 export type QualityPref = 'auto' | 'high' | 'medium' | 'low';
 
 const KEY = 'lastpixel.game.settings.v1';
-const DEFAULTS: GameSettings = { tilt: 0, zoom: 3, infoCards: true, shake: true, quality: 'auto' };
+const DEFAULTS: GameSettings = { tilt: 0, zoom: 3, infoCards: true, shake: true, quality: 'auto', mouseMove: true };
 let cache: GameSettings | null = null;
 
 export function getSettings(): GameSettings {

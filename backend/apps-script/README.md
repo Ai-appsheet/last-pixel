@@ -59,6 +59,14 @@
 | เกมขึ้น "เข้าสู่ระบบด้วย Google ไม่สำเร็จ" ทุกครั้ง | Client ID บน GitHub กับใน Script Property ไม่ตรงกัน · ดูชีต `Log` แถว `google.fail` (`aud` = client id ไม่ตรง) |
 | ขึ้น "อีเมลนี้ผูกกับบัญชี Google อื่นแล้ว" | บัญชีนั้นผูกกับบัญชี Google คนละอันไว้แล้ว — ถ้าเป็นเจ้าของจริง ลบค่าในช่อง `googleSub` ของแถวนั้นแล้วให้กดใหม่ |
 
+## ⚡ อัปเดตเพิ่ม "เห็นผู้เล่นคนอื่นเดินในโลก" (เซิร์ฟเวอร์ที่ใช้อยู่แล้ว ~1 นาที)
+
+ข้อมูลเดิมไม่หาย URL เดิมไม่เปลี่ยน · **ไม่มีชีตใหม่ ไม่ต้องรัน `setup` ไม่ขอสิทธิ์เพิ่ม** (ตำแหน่งผู้เล่นเก็บใน CacheService ของสคริปต์ ไม่เขียนลงชีต — CacheService ไม่ต้องใช้สิทธิ์ OAuth เพิ่ม `appsscript.json` เหมือนเดิม) · ถ้ายังไม่ทำ เกมเวอร์ชันใหม่ก็เล่นได้ปกติ แค่ยังไม่เห็นตัวผู้เล่นคนอื่น (เกมเงียบไว้เอง)
+
+1. เปิดชีต `LastPixel-DB` → **ส่วนขยาย → Apps Script** → คลิก `Code.gs` → ลบโค้ดเดิมทั้งหมด → วาง `backend/apps-script/Code.gs` ใหม่ทั้งไฟล์ → 💾 บันทึก
+2. **ทำให้ใช้งานได้ → จัดการการทำให้ใช้งานได้** → ✏ ที่รายการเดิม → **เวอร์ชัน: เวอร์ชันใหม่** → **ทำให้ใช้งานได้** (URL เดิม · ถ้าขึ้นหน้าขอสิทธิ์ให้กดอนุญาตตามปกติ — ไม่ควรขึ้น)
+3. ทดสอบ: เปิดเกม 2 เครื่อง (หรือ 2 เบราว์เซอร์คนละบัญชี) → ทั้งคู่ไปเกาะกลาง → จะเห็นอีกคนเดิน มีชื่อสีฟ้าเหนือหัว + จุดฟ้าบนมินิแมป (ช้ากว่าจริงประมาณ 4 วินาที — ปกติ)
+
 ## ⚡ อัปเดตเพิ่มแชทโลก (เซิร์ฟเวอร์ที่ใช้อยู่แล้ว ~2 นาที)
 
 ข้อมูลเดิมไม่หาย URL เดิมไม่เปลี่ยน · ถ้าไม่ทำ เกมเวอร์ชันใหม่จะขึ้น "แชทต้องออนไลน์"/ส่งไม่สำเร็จ ส่วนอื่นเล่นได้ปกติ
@@ -177,8 +185,8 @@
 
 - **รูปแบบคำขอ**: `POST` ไปที่ URL เว็บแอป body เป็น JSON ส่งแบบ `Content-Type: text/plain;charset=utf-8` (เบราว์เซอร์จะไม่ยิง CORS preflight ซึ่ง Apps Script ตอบไม่ได้) เช่น `{"action":"save.get","token":"t..."}`
 - **คำตอบ**: `{ "ok": true, ... }` หรือ `{ "ok": false, "error": "ข้อความภาษาไทย", "code": "auth" }`
-- **action**: `ping` · บัญชี `register` `verify` `resend` `login` `forgot` `reset` `auth.google` `account.setName` `email.attach` `email.confirm` `logout` `me` · `save.get` `save.put` `save.clear` · `meta.get` `meta.put` · `world.get` `world.join` `world.leave` `world.heartbeat` · `market.list` `market.post` `market.buy` `market.cancel` `market.claim` · `leaderboard.get` `leaderboard.submit` · แชทโลก `chat.get` `chat.post` (ทุกอันยกเว้น `ping` `register` `verify` `resend` `login` `forgot` `reset` `auth.google` ต้องมี `token`)
-- **code ที่ใช้บ่อย**: `auth` (token หมดอายุ) · `stale` (มีเซฟใหม่กว่าจากเครื่องอื่น) · `rate` (ลองรหัสผิด/ขอรหัสบ่อยเกิน/ส่งแชทถี่เกิน + `wait` วินาที) · `invalid` · `taken` (ชื่อในเกมซ้ำ) · `email_taken` · `bad_login` · `unverified` · `use_email` · `bad_code` · `expired` · `too_many` · `cooldown` (+ `wait` วินาที) · `mail` · `mail_quota` · `has_email` · `sold` · `full` · `busy` · `too_large` · `too_long` (แชทเกิน 140 ตัว) · Google: `google_off` (ยังไม่ตั้ง GOOGLE_CLIENT_ID) `google_bad` `google_expired` `google_unverified` `google_linked` `google_down` `name_set`
+- **action**: `ping` · บัญชี `register` `verify` `resend` `login` `forgot` `reset` `auth.google` `account.setName` `email.attach` `email.confirm` `logout` `me` · `save.get` `save.put` `save.clear` · `meta.get` `meta.put` · `world.get` `world.join` `world.leave` `world.heartbeat` · `market.list` `market.post` `market.buy` `market.cancel` `market.claim` · `leaderboard.get` `leaderboard.submit` · แชทโลก `chat.get` `chat.post` · ผู้เล่นในโลก `presence.sync` `presence.put` `presence.get` (ทุกอันยกเว้น `ping` `register` `verify` `resend` `login` `forgot` `reset` `auth.google` ต้องมี `token`)
+- **code ที่ใช้บ่อย**: `auth` (token หมดอายุ) · `stale` (มีเซฟใหม่กว่าจากเครื่องอื่น) · `rate` (ลองรหัสผิด/ขอรหัสบ่อยเกิน/ส่งแชทถี่เกิน/ส่งตำแหน่งเกิน 1 ครั้งต่อวิ + `wait` วินาที) · `invalid` · `taken` (ชื่อในเกมซ้ำ) · `email_taken` · `bad_login` · `unverified` · `use_email` · `bad_code` · `expired` · `too_many` · `cooldown` (+ `wait` วินาที) · `mail` · `mail_quota` · `has_email` · `sold` · `full` · `busy` · `too_large` · `too_long` (แชทเกิน 140 ตัว) · Google: `google_off` (ยังไม่ตั้ง GOOGLE_CLIENT_ID) `google_bad` `google_expired` `google_unverified` `google_linked` `google_down` `name_set`
 
 **แชทโลก** (ชีต `Chat`)
 
@@ -188,6 +196,16 @@
 | `chat.get` 🔑 | since (time ของข้อความที่เห็นล่าสุด · 0 = ทั้งหมด), channel? | `{ messages[] (≤ 50 เก่า→ใหม่), serverTime, latest }` — อ่านจากแคช 10 วิ แทบไม่แตะชีต |
 
 `message` = `{ id, time, accountId, name, text, channel }` · `time` ไม่ซ้ำและเพิ่มขึ้นเสมอ (ใช้เป็น `since`) · ชีตเก็บไม่เกิน ~2,200 แถว (ลบ 200 แถวเก่าสุดเมื่อเกิน) · `world.heartbeat` แถม `chat: { latestId, latest }` · เกมโพล `chat.get` ทุก 6 วิ (ซ่อนแท็บ 20 วิ) — 30 คนออนไลน์ ≈ 330 คำขอแชท/นาที (ดู DESIGN.md 10.6)
+
+**ผู้เล่นในโลก (live)** — CacheService อย่างเดียว ไม่มีชีต (ดู DESIGN.md 10.7)
+
+| action | ส่ง | ได้ |
+|---|---|---|
+| `presence.sync` 🔑 | ตำแหน่งของเรา: x, y, s (ช่องเกาะ), f, fl, a, c, o, h, k, lv, hp, al, z, rd, alt, hid, name, tr (เส้นทาง `[ms ก่อนส่ง, x, y][]`) + area? (ห่างไม่เกินกี่ช่อง) | `{ players[], serverTime, rated }` — คนอื่นที่ส่งภายใน 20 วิ (ไม่รวมเรา/คนที่ `hid`) · ส่งถี่เกิน 1 ครั้ง/วิ → ไม่บันทึก (`rated: true`) แต่ยังได้รายชื่อ |
+| `presence.put` 🔑 | เหมือนข้างบน หรือ `bye: true` (ออกจากโลก ลบทันที) | `{ serverTime }` · ถี่เกิน → `rate` + `wait` |
+| `presence.get` 🔑 | s?, area? (ไม่ส่ง = ทั้งโลก) | `{ players[], serverTime }` |
+
+ค่าปรับได้ใน `CFG`: `PRESENCE_TTL_SEC` 60 · `PRESENCE_FRESH_MS` 20000 · `PRESENCE_GAP_MS` 1000 · `PRESENCE_MAX` 150 · `PRESENCE_TRAIL_MS` 6000 · `PRESENCE_TRAIL_MAX` 12 · เกมส่งทุก 2.5 วิ (`PRESENCE_SYNC_MS` ใน `src/systems/PresenceSystem.ts`) — 30 คน ≈ 720 คำขอ/นาที
 
 **บัญชีและอีเมล**
 

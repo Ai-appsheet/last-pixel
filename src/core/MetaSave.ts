@@ -1,4 +1,5 @@
 import { CHARACTERS } from '../data/characters';
+import { ALL_ITEMS } from '../config/allItems';
 import { scopedKey } from './AccountService';
 import { Sync } from './backend/Sync';
 
@@ -90,7 +91,7 @@ export const MetaSave = {
   },
 
   isUnlocked(data: MetaData, charId: string): boolean {
-    if (new URLSearchParams(location.search).has('unlockall')) return true;
+    if (ALL_ITEMS || new URLSearchParams(location.search).has('unlockall')) return true; // โหมดของครบ = ปลดล็อกทุกตัว
     // ตัวละครต่างกันแค่หน้าตา — แบบ default เปิดให้ทุกคน
     if (CHARACTERS.find((c) => c.id === charId)?.unlock.type === 'default') return true;
     return data.unlocked.includes(charId);

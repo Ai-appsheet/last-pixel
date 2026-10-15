@@ -64,6 +64,31 @@ function slot(border: string, light: string, fill: string): PixelCanvas {
   });
 }
 
+/**
+ * กล่องพิกเซลแบบเรียบ (ยุค 90): มุมตัด cut · ชั้นที่ระดับความลึก lv จากขอบ (0 = เส้นนอก) — วาดที่ความละเอียดจริง (ไม่ขยาย)
+ * shadow = เงาตกขวา-ล่าง (พิกเซล) อยู่ในภาพเดียวกัน
+ */
+function chamferBox(w: number, h: number, cut: number, color: (lv: number) => string | null, shadow = 0): PixelCanvas {
+  const c = new PixelCanvas(w, h);
+  const bw = w - shadow;
+  const bh = h - shadow;
+  const depth = (x: number, y: number, W: number, H: number) =>
+    Math.min(x, y, W - 1 - x, H - 1 - y, x + y - cut, W - 1 - x + y - cut, x + H - 1 - y - cut, W - 1 - x + H - 1 - y - cut);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const d = depth(x, y, bw, bh);
+      if (d >= 0) {
+        const col = color(d);
+        if (col) c.set(x, y, col);
+      } else if (shadow && depth(x - shadow, y - shadow, bw, bh) >= 0) c.set(x, y, 'rgba(5,8,10,0.55)');
+    }
+  }
+  return c;
+}
+
+/** สีชุด UI เรียบ (ดู src/ui/retro.ts) */
+const R = { edge: '#5f7380', edgeHi: '#9fb2ba', edgeOff: '#3a4650', inner: '#0e1418', fill: 'rgba(31,42,51,0.93)', fill2: '#26343e', gold: '#e3c178' };
+
 function barFrame(): PixelCanvas {
   return rounded(8, 8, 3.2, (lv) => (lv === 0 ? 'O' : lv === 1 ? 'F' : '#0b0d1f'));
 }
@@ -220,14 +245,21 @@ const DIGITS: Record<string, string[]> = {
 
 export function buildUiTextures(scene: Phaser.Scene) {
   // หน้าต่าง = ขอบครีม/ทอง · HUD = ขอบฟ้าทะเล (พื้นมืดอมน้ำเงินทั้งคู่ ให้ตัวหนังสือสว่างอ่านง่าย)
-  addScaled(scene, 'ui_panel', panel('#1d2242', '#222850', 'y', 'N', '#2a1f3a'));
-  addScaled(scene, 'ui_panel_dark', panel('rgba(16,22,46,0.93)', 'rgba(20,27,54,0.93)', 'C', 'B', '#0b0d1f'));
-  addScaled(scene, 'ui_btn', button('C', 'b', 'B', 'U'));
-  addScaled(scene, 'ui_btn_hover', button('y', 'Y', '#f0a050', '#c2602e'));
-  addScaled(scene, 'ui_btn_off', button('L', 'D', 'F', '#1d2238'));
-  addScaled(scene, 'ui_slot', slot('#0b0d1f', 'L', 'rgba(14,16,30,0.82)'));
-  addScaled(scene, 'ui_slot_sel', slot('Y', 'y', 'rgba(70,52,24,0.7)'));
-  addScaled(scene, 'ui_bar', barFrame());
+  // ชุด UI แบบเรียบ (ยุค 90): ทึบสีเทาอมเขียวเข้ม · เส้นขอบนอกสว่าง 1 + เส้นในเข้ม 1 · มุมตัด 2 · เงาตก 2 — ขนาดภาพเท่าเดิม (ค่า slice ของ NineSlice ไม่เปลี่ยน)
+  const box = (W: number, cut: number, edge: string, fill: string, shadow: number) => chamferBox(W, W, cut, (lv) => (lv === 0 ? edge : lv === 1 ? R.inner : fill), shadow);
+  addScaled(scene, 'ui_panel', box(32, 2, R.edge, R.fill, 2), 1);
+  addScaled(scene, 'ui_panel_dark', box(32, 2, R.edge, R.fill, 2), 1);
+  addScaled(scene, 'ui_btn', box(24, 2, R.edge, '#1f2a33', 1), 1);
+  addScaled(scene, 'ui_btn_hover', box(24, 2, R.edgeHi, R.fill2, 1), 1);
+  addScaled(scene, 'ui_btn_off', box(24, 2, R.edgeOff, '#192127', 1), 1);
+  addScaled(scene, 'ui_slot', box(24, 2, '#4a5a64', 'rgba(16,23,28,0.88)', 0), 1);
+  addScaled(scene, 'ui_slot_sel', box(24, 2, R.gold, 'rgba(58,50,32,0.85)', 0), 1);
+  addScaled(scene, 'ui_bar', chamferBox(16, 16, 1, (lv) => (lv === 0 ? R.edge : R.inner)), 1);
+  // แบบเดิม (เก็บไว้เผื่อสลับกลับ)
+  void panel;
+  void button;
+  void slot;
+  void barFrame;
   for (const [name, rows] of Object.entries(TOOL_ICONS)) {
     addScaled(scene, `tb_${name}`, new PixelCanvas(16, 16).rows(rows, 1, 1).outline('O', true));
   }

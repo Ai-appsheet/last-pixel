@@ -30,7 +30,13 @@ export class BodyPanel {
   private bg: Phaser.GameObjects.Rectangle;
 
   /** จุดบนจออยู่บนแผงนี้ไหม (UIScene.isPointerOverUI — กันคลิกทะลุไปตี) */
+  /** HUD แบบเบา: ซ่อนชิป/แถบ (มีไอคอนเตือนเล็กข้างหัวใจแทน) */
+  hide() {
+    this.root.setVisible(false);
+  }
+
   contains(x: number, y: number) {
+    if (!this.root.visible) return false;
     const hit = (o: Phaser.GameObjects.GameObject & { visible: boolean; getBounds: () => Phaser.Geom.Rectangle }) => o.visible && o.getBounds().contains(x, y);
     return hit(this.chip) || (this.row.visible && hit(this.bg)) || (this.tip.visible && this.tipText.getBounds().contains(x, y));
   }

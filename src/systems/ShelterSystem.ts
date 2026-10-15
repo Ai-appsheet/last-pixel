@@ -79,8 +79,10 @@ export class ShelterSystem {
     if (p.hp < this.lastHp - 0.01) this.calm = 0;
     else this.calm += dt;
     const was = this.inside;
-    this.inside = !p.dead && !s.riding && s.interiors.current === null ? this.at(p.x, p.feetY) : null;
-    if (this.inside && !was && s.worldTime - this.toastAt > 30) {
+    // อยู่ในห้องบ้าน (HomeSystem) = อยู่ในเขตของบ้านหลังนั้น (ภัย/อากาศข้างนอกไม่มีผล)
+    const room = s.homes?.house;
+    this.inside = room ? this.list.find((h) => h.st === room) ?? null : !p.dead && !s.riding && s.interiors.current === null ? this.at(p.x, p.feetY) : null;
+    if (this.inside && !was && !room && s.worldTime - this.toastAt > 30) {
       this.toastAt = s.worldTime;
       EventBus.emit('toast', `🏠 อยู่ในเขตปลอดภัยของ${this.inside.st.def.name} — ไม่มีมอนเกิด · ภัยกลางวันไม่เข้ามา · พักแล้วฟื้นพลัง`, '#a7f070');
     }

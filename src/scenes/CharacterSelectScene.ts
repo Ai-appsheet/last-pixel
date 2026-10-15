@@ -3,8 +3,10 @@ import { Sfx } from '../core/AudioManager';
 import { MetaSave } from '../core/MetaSave';
 import { CHARACTERS, HERO_CARDS, type CharacterDef, type HeroTier } from '../data/characters';
 import { CLASS_LOOKS, buildHeroTexture, heroKey } from '../gfx/art/heroes';
+import { PortraitView } from '../gfx/art/heroPortrait';
 import { setWorldScale } from '../gfx/hd';
 import { button, COLORS, FONT, heading, txt } from '../ui/widgets';
+import { drawRetroBox, RETRO } from '../ui/retro';
 import { artGroup, coverImage, queueArt } from '../ui/art';
 import { fadeIn, fadeTo } from '../ui/transition';
 import { applyUiScale } from '../ui/layout';
@@ -21,14 +23,14 @@ const RANDOM_NAMES = ['นักล่าคลื่น', 'เจ้าเก�
 
 /** สีกรอบ/ตราตามระดับการ์ด (tier/role/badge มาจาก data/characters.ts) — แค่หน้าตา ไม่มีผลต่อค่าพลัง */
 type Tier = HeroTier;
-const TIER_HEX: Record<Tier, number> = { gold: 0xe2b85a, red: 0xc0262d, special: 0xb9b4d8 };
-const TIER_CSS: Record<Tier, string> = { gold: '#b8862c', red: '#c0262d', special: '#7b4bb5' };
-const BADGE_HEX: Record<Tier, number> = { gold: 0xe2b85a, red: 0xc0262d, special: 0x7b4bb5 };
-const CREAM = 0xf6efe2;
-const INK = '#2a2340';
+// สีหม่นตามชุด UI เรียบ (ระดับ: ทอง · แดง · พิเศษ)
+const TIER_HEX: Record<Tier, number> = { gold: 0xb59a5e, red: 0x9a5a52, special: 0x7f7399 };
+const TIER_CSS: Record<Tier, string> = { gold: '#e3c178', red: '#d98a7e', special: '#a991c9' };
+const BADGE_HEX: Record<Tier, number> = { gold: 0x8a7444, red: 0x7a3f3a, special: 0x5e5478 };
+const INK = '#eef0e6';
 
 // ---- ขนาดการ์ด (4 ใบ/แถว · 2 แถว) ----
-// 7 ใบ = 4 + 3 (แถวล่างอยู่กลาง) จัดกลางพื้นที่ซ้ายของแผงรายละเอียด · จอเล็กย่อตามแคนวาส
+// 8 ใบ = 4 + 4 จัดกลางพื้นที่ซ้ายของแผงรายละเอียด · จอเล็กย่อตามแคนวาส
 const PER_ROW = 4;
 const CW = 108;
 const CH = 152;
@@ -72,6 +74,8 @@ export class CharacterSelectScene extends Phaser.Scene {
 
   preload() {
     queueArt(this, [...artGroup('char_'), 'keyart']);
+    // ตัวละครที่ 8 (ไลฟ์การ์ด) ไม่ได้อยู่ในรายการ ART หลัก — โหลดภาพการ์ดตรง ๆ (ไม่มีไฟล์ = ข้าม ใช้รูปวาดจากโค้ดแทน)
+    if (!this.textures.exists('art_char_lifeguard')) this.load.image('art_char_lifeguard', 'art/char_lifeguard.jpg');
   }
 
   create(data: { play?: boolean; name?: string }) {
@@ -92,7 +96,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const meta = MetaSave.load();
     this.chosen = CHARACTERS.find((c) => c.id === meta.lastCharacter && MetaSave.isUnlocked(meta, c.id)) ?? CHARACTERS[0];
 
-    // เรียงตาม HERO_CARDS: 4 ใบแถวบน 3 ใบแถวล่าง (กลาง) ในพื้นที่ GRID_X..แผงรายละเอียด
+    // เรียงตาม HERO_CARDS: 4 ใบแถวบน 4 ใบแถวล่าง (กลาง) ในพื้นที่ GRID_X..แผงรายละเอียด
     const order = HERO_CARDS.map((h) => CHARACTERS.find((c) => c.id === h.id)!).filter(Boolean);
     const areaW = DETAIL_X - 24 - GRID_X;
     order.forEach((c, i) => {
@@ -136,22 +140,10 @@ export class CharacterSelectScene extends Phaser.Scene {
     return t;
   }
 
-  /** กรอบการ์ดคู่: ขอบนอกหนาสีระดับ + ตัวครีม + เส้นในบาง + วงเล็บมุม + รอยบากบน/ล่าง */
+  /** กรอบการ์ดแบบเรียบ (ชุด UI ยุค 90): แผงทึบสีเทาอมเขียว ขอบพิกเซลสีตามระดับ (หม่น) มุมตัด · เลือกอยู่ = ขอบสว่าง */
   private drawFrame(g: Phaser.GameObjects.Graphics, w: number, h: number, tier: Tier, selected: boolean) {
-    const col = TIER_HEX[tier];
     g.clear();
-    g.fillStyle(0x0b0d1f, 0.35).fillRoundedRect(3, 6, w, h, 12);
-    g.fillStyle(col, 1).fillRoundedRect(0, 0, w, h, 12);
-    if (selected) g.lineStyle(3, 0xffffff, 0.9).strokeRoundedRect(-1, -1, w + 2, h + 2, 13);
-    g.fillStyle(CREAM, 1).fillRoundedRect(4, 4, w - 8, h - 8, 9);
-    g.lineStyle(1, col, 0.8).strokeRoundedRect(8, 8, w - 16, h - 16, 6);
-    g.lineStyle(2, col, 1);
-    const L = 8;
-    for (const [cx, cy, sx, sy] of [[10, 10, 1, 1], [w - 10, 10, -1, 1], [10, h - 10, 1, -1], [w - 10, h - 10, -1, -1]]) {
-      g.lineBetween(cx, cy, cx + sx * L, cy);
-      g.lineBetween(cx, cy, cx, cy + sy * L);
-    }
-    g.fillStyle(col, 1).fillCircle(w / 2, 4, 3).fillCircle(w / 2, h - 4, 3);
+    drawRetroBox(g, 0, 0, w, h, { edge: selected ? RETRO.edgeHi : TIER_HEX[tier], fill: selected ? RETRO.panel2 : RETRO.panel, cut: 3 });
   }
 
   private makeCard(c: CharacterDef, x: number, y: number, unlocked: boolean, i: number) {
@@ -166,7 +158,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const pw = CW - 24;
     const ph = 84;
     const panel = this.add.graphics();
-    panel.fillStyle(0xebe7f0, 1).fillRoundedRect(px, py, pw, ph, 6);
+    panel.fillStyle(0x26343e, 1).fillRect(px, py, pw, ph);
     const parts: Phaser.GameObjects.GameObject[] = [glow, frame, panel];
     const key = `art_char_${c.id}`;
     if (this.textures.exists(key)) {
@@ -184,15 +176,13 @@ export class CharacterSelectScene extends Phaser.Scene {
     const badge = this.add.circle(bx, by, 11, BADGE_HEX[info.tier]).setStrokeStyle(2, 0xffffff, 1);
     const badgeT = this.ink(bx, by, info.badge, info.badge === 'AI' ? 9 : 11, '#ffffff', { fontStyle: '700' }).setOrigin(0.5);
     parts.push(badge, badgeT);
-    // ชื่อ + บทบาท (เส้นบางสองข้าง) + แถวท้าย
-    const name = this.ink(CW / 2, py + ph + 6, unlocked ? c.name : '???', 16, INK, { fontStyle: '600' }).setOrigin(0.5, 0);
-    const role = this.ink(CW / 2, py + ph + 29, unlocked ? info.role : 'ยังไม่ปลดล็อก', 10, TIER_CSS[info.tier]).setOrigin(0.5, 0);
+    // บทบาท (ไม่แสดงชื่อตัวละครตามที่ผู้ใช้ขอ) — เส้นบางสองข้าง
+    const role = this.ink(CW / 2, py + ph + 14, unlocked ? info.role : 'ยังไม่ปลดล็อก', 15, unlocked ? TIER_CSS[info.tier] : INK, { fontStyle: '600' }).setOrigin(0.5, 0);
     const lines = this.add.graphics();
-    const half = Math.min(role.width / 2 + 6, 44);
-    const ly = py + ph + 29 + role.height / 2;
+    const half = Math.min(role.width / 2 + 8, 48);
+    const ly = py + ph + 14 + role.height + 6;
     lines.lineStyle(1, TIER_HEX[info.tier], 0.9).lineBetween(12, ly, CW / 2 - half, ly).lineBetween(CW / 2 + half, ly, CW - 12, ly);
-    // (เอาข้อความท้ายการ์ดออก — การ์ดเตี้ย ข้อความไปทับเส้นกรอบใน)
-    parts.push(name, role, lines);
+    parts.push(role, lines);
     if (!unlocked) parts.push(this.ink(CW / 2, py + ph / 2, '🔒', 26, '#ffffff').setOrigin(0.5));
     cont.add(parts);
     const hit = this.add.zone(CW / 2, CH / 2, CW, CH).setInteractive({ useHandCursor: true });
@@ -244,7 +234,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     const pw = 118;
     const ph = 140;
     const pane = this.add.graphics();
-    pane.fillStyle(0xebe7f0, 1).fillRoundedRect(x + 16, y + 16, pw, ph, 8);
+    pane.fillStyle(0x26343e, 1).fillRect(x + 16, y + 16, pw, ph);
     d.add(pane);
     const key = `art_char_${c.id}`;
     if (this.textures.exists(key)) {
@@ -252,16 +242,15 @@ export class CharacterSelectScene extends Phaser.Scene {
       if (!unlocked) img.setTint(0x6a6a7a);
       d.add(img);
     } else {
-      const big = setWorldScale(this.add.sprite(x + 16 + pw / 2, y + 16 + ph - 10, heroTex(this, c.id), 0).setOrigin(0.5, 1), 5);
-      if (unlocked) big.play(`${key}_walk_down`);
-      else big.setTintFill(0x555566);
+      const big = new PortraitView(this, x + 16 + pw / 2, y + 16 + ph - 14, 1).show(CLASS_LOOKS[c.id as keyof typeof CLASS_LOOKS]).sprite; // รูปเหมือนละเอียด (gfx/art/heroPortrait)
+      if (!unlocked) big.setTintFill(0x555566);
       d.add(big);
     }
     const tx = x + 16 + pw + 14;
     const tw = w - (tx - x) - 18;
-    d.add(this.ink(tx, y + 14, unlocked ? c.name : '???', 24, INK, { fontStyle: '600' }));
-    d.add(this.ink(tx, y + 50, unlocked ? `— ${info.role} —` : 'ยังไม่ปลดล็อก', 13, TIER_CSS[info.tier]));
-    d.add(this.ink(tx, y + 72, unlocked ? c.desc : '', 13, '#4a445c', { wordWrap: { width: tw }, lineSpacing: 3, maxLines: 3 }));
+    // ไม่แสดงชื่อตัวละคร — ใช้ "บทบาท" เป็นหัวข้อหลักแทน
+    d.add(this.ink(tx, y + 18, unlocked ? info.role : 'ยังไม่ปลดล็อก', 22, unlocked ? TIER_CSS[info.tier] : INK, { fontStyle: '600' }));
+    d.add(this.ink(tx, y + 72, unlocked ? c.desc : '', 13, '#9aa7a4', { wordWrap: { width: tw }, lineSpacing: 3, maxLines: 3 }));
     if (!unlocked) return;
     // แถวค่าสถานะ (ทุกตัวเริ่มเท่ากัน)
     const s = c.stats;
@@ -271,7 +260,7 @@ export class CharacterSelectScene extends Phaser.Scene {
     let ry = y + 16 + ph + 14;
     rows.forEach(([k, v], i) => {
       const rg = this.add.graphics();
-      rg.fillStyle(i % 2 ? 0xffffff : 0xebe7f0, 0.9).fillRoundedRect(x + 16, ry, w - 32, 24, 6);
+      rg.fillStyle(i % 2 ? 0x2b3a45 : 0x26343e, 0.9).fillRect(x + 16, ry, w - 32, 24);
       d.add(rg);
       d.add(this.ink(x + 26, ry + 12, k, 12, '#8a8498').setOrigin(0, 0.5));
       const vt = this.ink(x + w - 26, ry + 12, v, 13, INK, { fontStyle: '600' }).setOrigin(1, 0.5);

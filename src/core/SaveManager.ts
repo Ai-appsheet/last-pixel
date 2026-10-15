@@ -18,8 +18,10 @@ export interface RunSave {
   player: {
     x: number; y: number; hp: number; hunger: number; thirst: number; stamina: number; temp: number; sanity: number;
     selected: number; slots: (Slot | null)[]; armor: Slot | null; cosmetic: { outfit?: string; helmet?: string; cape?: string };
-    /** อุปกรณ์สวมใส่ 12 ช่อง */
+    /** อุปกรณ์สวมใส่ 12 ช่อง + ช่องใช้งาน tool1/tool2/lamp */
     equip?: Partial<Record<string, Slot | null>>;
+    /** ช่องใช้งาน: v = รุ่น (ไม่มี = เซฟเก่า → จัดของเข้าช่องให้ตอนโหลด) · quick = id ของใช้ด่วน */
+    loadout?: { v: number; quick?: string | null; buff?: string | null };
     /** ค่าที่อัปจากผลึกพลัง */
     trained?: Partial<Record<string, number>>;
     level?: number;
@@ -27,6 +29,8 @@ export interface RunSave {
     blueprints?: string[];
     /** ดันเจี้ยน: วันที่เกิดมอนล่าสุด + ที่พิชิตแล้ว */
     interiors?: { spawnedDay?: [number, number][]; conquered?: number[] };
+    /** เซฟตอนอยู่ในบ้าน: tile ซ้ายบนของบ้านหลังนั้น (โหลดแล้วกลับเข้าบ้าน) */
+    home?: [number, number];
     /** ซื้อชีวิตไปแล้วกี่ครั้ง */
     revives?: number;
     xp?: number;
@@ -62,8 +66,12 @@ export interface RunSave {
   pinned?: string;
   /** กิจกรรมตามเวลาจริง: เกาะกิจกรรมที่เคยขึ้น (id '2026-10-14#2') + ประกาศที่แสดงแล้ว */
   worldEvents?: { seen: string[]; announced: string[] };
+  /** มอนที่ฆ่าแล้วในชั่วโมงนี้ (เกิดใหม่ทุก :00) — kills = [`เกาะ|ประเภท`, จำนวน] · dead = id จุดเกิดดันเจี้ยน/สัตว์ในตำนาน */
+  respawn?: { hour: number; kills?: [string, number][]; dead?: string[] };
   /** ซากเครื่องบินรื้อได้อีกกี่ครั้ง (0 = รื้อหมดแล้ว) */
   wreckLeft?: number;
+  /** โหมดของครบ: แจกชุดเริ่มต้นไปแล้วรุ่นไหน (ไม่มี = ยังไม่ได้ → ได้ตอนโหลด 1 ครั้ง) */
+  allItems?: number;
 }
 
 /** เซฟแยกตามบัญชี (ออนไลน์: localStorage เป็นแคช แล้ว Sync ส่งขึ้นเซิร์ฟเวอร์เบื้องหลัง) */

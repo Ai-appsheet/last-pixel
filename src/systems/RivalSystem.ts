@@ -9,6 +9,7 @@ import { RARITY, type BoxTier } from '../data/loot';
 import type { MobDef } from '../data/mobs';
 import { RIVAL, RIVAL_DROPS, RIVAL_LOOT, RIVAL_NAMES_TH, RIVAL_WEAPONS, rivalLevel, rivalStats, rivalTier, type RivalInfo } from '../data/rivals';
 import { Mob } from '../entities/Mob';
+import { GearAura, rivalAura } from '../fx/GearAura';
 import { CAPES, CLASS_LOOKS, HELMETS, OUTFITS, buildHeroTexture, heroKey, type HeroLook } from '../gfx/art/heroes';
 import { txt } from '../ui/widgets';
 import { isWater } from '../world/tiles';
@@ -38,6 +39,7 @@ export class Rival extends Mob {
   constructor(scene: GameScene, x: number, y: number, def: MobDef, info: RivalInfo) {
     super(scene, x, y, def);
     this.info = info;
+    new GearAura(scene, this, () => rivalAura(info), { fx: scene.fx }); // ออร่าตามอาวุธคู่แข่ง
     this.setData('rival', true);
     this.tag = txt(scene, x, y, `${info.ranged ? '🏹' : '⚔'} ${info.name} Lv.${info.level}`, 6, '#ef7d57', { fontStyle: '600' })
       .setOrigin(0.5, 1).setStroke('#0b0d1f', 2).setShadow(0, 1, '#0b0d1f', 0, true, true).setResolution(4).setDepth(1e6 - 2);
@@ -195,10 +197,13 @@ export class RivalSystem {
     const t = s.worldTime;
     if (!this.next.has(here)) this.next.set(here, t + (this.force ? 2 : between(RIVAL.firstDelay)));
     const alive = this.list.filter((r) => r.info.slot === here).length;
-    if (alive >= RIVAL.maxPerIsland(BIOMES[is.biome].danger) || t < this.next.get(here)!) return;
+    const max = RIVAL.maxPerIsland(BIOMES[is.biome].danger);
+    if (alive >= max || t < this.next.get(here)!) return;
+    // ล้มแล้วไม่เกิดใหม่จนถึงรอบชั่วโมงหน้า (RespawnSystem) — เกาะละ max คนต่อชั่วโมง
+    if (!s.mobRespawn.canSpawn(here, 'rival', max)) return;
     const pos = this.spawnPoint(here);
     if (!pos) return;
-    this.spawn(this.makeInfo(here), pos.x, pos.y);
+    s.mobRespawn.tag(this.spawn(this.makeInfo(here), pos.x, pos.y), here, 'rival');
     this.next.set(here, t + between(RIVAL.stagger));
   }
 

@@ -99,6 +99,17 @@ class AudioManagerImpl {
       this.pageHidden = false;
       this.syncRunning();
     });
+    // ปลดล็อกเสียงทันทีที่ผู้ใช้แตะ/คลิก/กดปุ่มครั้งแรกที่ไหนก็ได้ (รวมถึงตอนยังอยู่หน้าโหลด)
+    // → เพลงหลัก (ตั้งไว้ตั้งแต่ BootScene ด้วย startMusic) จะเริ่มเล่นเร็วที่สุดเท่าที่เบราว์เซอร์ยอม แล้วต่อเนื่องเข้าเกม
+    const firstGesture = () => {
+      window.removeEventListener('pointerdown', firstGesture);
+      window.removeEventListener('touchstart', firstGesture);
+      window.removeEventListener('keydown', firstGesture);
+      this.unlock();
+    };
+    window.addEventListener('pointerdown', firstGesture, { passive: true });
+    window.addEventListener('touchstart', firstGesture, { passive: true });
+    window.addEventListener('keydown', firstGesture);
     // ปุ่มลัด 0 = เปิด/ปิดเสียง (M ใช้เปิดแผนที่) — ไม่ทำงานตอนพิมพ์ในช่องกรอก
     window.addEventListener('keydown', (e) => {
       if (e.key !== '0' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;

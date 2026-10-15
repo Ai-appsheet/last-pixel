@@ -1,196 +1,359 @@
 import { RNG } from '../../core/RNG';
 import { PixelCanvas, dither } from '../PixelCanvas';
+import { LEAF4, PINE4, WP } from '../palette';
 
-const LEAF = ['V', 'T', 'G', 'g'];
+const LEAF = LEAF4;
 
-/** ต้นไม้ใบกลม (โอ๊ก) 32×34 — บางต้นมีผล */
+// สไตล์ต้นไม้: พุ่มใบเป็นก้อนกลมซ้อนกัน (แต่ละก้อนแรเงาเอง แสงซ้ายบน) 3 เฉด + จุดไฮไลต์ · เส้นขอบเข้มอมเขียว · เงานุ่มสองชั้น
+
+/** เงานุ่มสองชั้นใต้วัตถุ (วงนอกจาง วงในเข้ม) */
+export function softShadow(c: PixelCanvas, cx: number, cy: number, rx: number, ry: number) {
+  c.ellipse(cx, cy, rx + 1.5, ry + 0.8, 'rgba(16,30,36,0.14)');
+  c.ellipse(cx, cy, rx, ry, 'rgba(16,30,36,0.26)');
+  return c;
+}
+
+/**
+ * พุ่มใบแบบก้อนกลมซ้อน (ใช้กับต้นไม้ใบกว้าง/พุ่มไม้)
+ * shades = [มืด, กลาง, สว่าง, ไฮไลต์] · ก้อนล่างวาดทีหลัง (อยู่หน้า) ขอบล่างของแต่ละก้อนเข้มให้เห็นแยกก้อน
+ */
+export function clump(c: PixelCanvas, cx: number, cy: number, rx: number, ry: number, shades: string[], rng: RNG, lobes = 0) {
+  const n = lobes || Math.max(5, Math.round((rx + ry) / 2.4));
+  const r0 = Math.min(rx, ry);
+  const pts: [number, number, number][] = [[cx, cy - ry * 0.1, r0 * 0.72]];
+  const spin = rng.range(0, Math.PI * 2);
+  for (let i = 0; i < n; i++) {
+    const a = spin + (i / n) * Math.PI * 2 + rng.range(-0.25, 0.25);
+    pts.push([cx + Math.cos(a) * rx * 0.58, cy + Math.sin(a) * ry * 0.55, r0 * rng.range(0.42, 0.55)]);
+  }
+  pts.sort((p, q) => p[1] - q[1]);
+  for (const [px, py, pr] of pts) {
+    const rxl = pr * (rx / r0);
+    const ryl = pr * (ry / r0) * 0.92;
+    for (let y = Math.floor(py - ryl); y <= Math.ceil(py + ryl); y++) {
+      for (let x = Math.floor(px - rxl); x <= Math.ceil(px + rxl); x++) {
+        const nx = (x + 0.5 - px) / rxl;
+        const ny = (y + 0.5 - py) / ryl;
+        const d2 = nx * nx + ny * ny;
+        if (d2 > 1) continue;
+        const lit = -(nx * 0.5 + ny * 0.85) * 0.8 + (1 - d2) * 0.25 + dither(x, y) * 0.12;
+        let col = lit > 0.42 ? shades[2] : lit > -0.18 ? shades[1] : shades[0];
+        if (d2 > 0.72 && ny > 0.35) col = shades[0]; // ขอบล่างของก้อน
+        c.set(x, y, col);
+      }
+    }
+  }
+  // จุดไฮไลต์บนก้อนด้านบน
+  for (let i = 0; i < Math.round((rx * ry) / 9); i++) {
+    const x = Math.round(cx + rng.range(-rx * 0.75, rx * 0.4));
+    const y = Math.round(cy + rng.range(-ry * 0.85, ry * 0.1));
+    if (c.get(x, y) === shades[2] && c.get(x + 1, y) === shades[2]) {
+      c.set(x, y, shades[3]);
+      if (rng.chance(0.5)) c.set(x + 1, y, shades[3]);
+    }
+  }
+  return c;
+}
+
+/** ลำต้นเข้มมีรากแผ่ (ซ้ายสว่าง ขวามืด) */
+function rootTrunk(c: PixelCanvas, cx: number, top: number, base: number, hw: number) {
+  for (let y = top; y <= base; y++) {
+    const flare = y > base - 3 ? (y - (base - 3)) * 0.8 : 0;
+    const l = Math.round(cx - hw - flare);
+    const r = Math.round(cx + hw + flare);
+    for (let x = l; x <= r; x++) {
+      const rel = (x - l) / Math.max(1, r - l);
+      c.set(x, y, rel < 0.25 ? WP.bark2 : rel < 0.7 ? WP.bark1 : WP.bark0);
+    }
+  }
+  // รากโผล่สองข้าง
+  c.set(cx - hw - 3, base, WP.bark1);
+  c.set(cx + hw + 3, base, WP.bark0);
+}
+
+/** ต้นไม้ใบกลม (โอ๊ก) 32×34 — พุ่มก้อนกลมใหญ่ บางต้นมีผล */
 export function oak(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(32, 34);
-  c.shadow(16, 31, 12, 3);
-  for (let y = 19; y <= 31; y++) for (let x = 13; x <= 18; x++) c.set(x, y, x <= 13 ? 'N' : x >= 17 ? 'm' : 'M');
-  c.set(12, 31, 'M');
-  c.set(19, 31, 'm');
-  c.set(12, 30, 'N');
-  c.set(19, 30, 'm');
-  for (let i = 0; i < 7; i++) c.set(rng.int(14, 17), rng.int(21, 30), 'm');
-  c.line(15, 22, 11, 18, 'M', 1); // กิ่ง
-  c.blob(9, 16, 7, 6, LEAF, rng, 0.3);
-  c.blob(23, 16, 7, 6, LEAF, rng, 0.3);
-  c.blob(16, 12, 11, 9, LEAF, rng, 0.22);
-  c.blob(13 + rng.int(0, 5), 6, 7, 5, LEAF, rng, 0.3);
-  // ช่อใบเล็กๆ ให้ดูเป็นพุ่มใบ
-  for (let i = 0; i < 22; i++) {
-    const x = rng.int(4, 27);
-    const y = rng.int(3, 21);
-    if (c.get(x, y) === 'G' && c.get(x + 1, y) === 'G') {
-      c.set(x, y, 'g');
-      c.set(x + 1, y + 1, 'T');
-    }
-  }
+  softShadow(c, 16, 31, 12, 2.6);
+  rootTrunk(c, 15.5, 18, 31, 2.5);
+  // เงาพุ่มบนลำต้น
+  c.rect(13, 18, 6, 2, WP.bark0);
+  clump(c, 16, 12, 13, 10, LEAF, rng);
   if (rng.chance(0.35)) {
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0, t = 0; i < 6 && t < 40; t++) {
       const x = rng.int(6, 25);
-      const y = rng.int(8, 20);
-      if (c.get(x, y) && c.get(x, y) !== 'V') {
-        c.set(x, y, 'r');
-        c.set(x, y + 1, 'R');
-      }
+      const y = rng.int(5, 18);
+      if (c.get(x, y) !== LEAF[1] && c.get(x, y) !== LEAF[2]) continue;
+      c.set(x, y, '#d06850');
+      c.set(x, y + 1, '#9a3e3c');
+      i++;
     }
   }
-  return c.outline();
+  return c.outline(WP.leaf0);
 }
 
-/** ต้นสน 24×38 */
+/** ชั้นใบสนทรงสามเหลี่ยม ขอบล่างหยักโค้ง (ซ้ายสว่าง ขวามืด) */
+function pineTier(c: PixelCanvas, cx: number, top: number, bottom: number, half: number, tones: string[], snow = 0) {
+  for (let y = top; y <= bottom + 1; y++) {
+    const k = (y - top) / (bottom - top);
+    const hw = 0.6 + Math.min(1, k) * half;
+    for (let x = Math.floor(cx - hw); x <= Math.ceil(cx + hw); x++) {
+      const rel = (x + 0.5 - cx) / hw;
+      if (Math.abs(rel) > 1) continue;
+      // ขอบล่างเป็นลอนโค้ง
+      const lobe = Math.abs(Math.sin(((x - cx) / 3) * Math.PI));
+      if (y > bottom - 1 + lobe * 1.6) continue;
+      const v = -rel * 0.7 + (1 - k) * 0.25 + dither(x, y) * 0.1;
+      let col = v > 0.4 ? tones[2] : v > -0.15 ? tones[1] : tones[0];
+      if (y >= bottom - 1 + lobe * 1.6 - 1) col = tones[0];
+      if (snow && k < snow + (rel < 0 ? 0.12 : 0)) col = rel < 0.1 ? WP.snowLight : WP.snowShade;
+      c.set(x, y, col);
+    }
+  }
+  // ไฮไลต์ขอบซ้าย
+  for (let y = top + 2; y < bottom - 1; y += 2) {
+    const k = (y - top) / (bottom - top);
+    const x = Math.round(cx - (0.6 + k * half) * 0.55);
+    if (c.get(x, y) === tones[2]) c.set(x, y, tones[3]);
+  }
+}
+
+/** ต้นสน 24×38 — ใบซ้อนเป็นชั้น ลอนโค้ง */
 export function pine(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(24, 38);
-  c.shadow(12, 35, 8, 2.5);
-  for (let y = 29; y <= 35; y++) for (let x = 11; x <= 13; x++) c.set(x, y, x === 11 ? 'N' : x === 13 ? 'm' : 'M');
-  const tiers = [
-    { top: 1, bottom: 12, half: 5 },
-    { top: 7, bottom: 19, half: 8 },
-    { top: 13, bottom: 26, half: 10 },
-    { top: 19, bottom: 32, half: 11 },
-  ];
-  for (const t of tiers) {
-    for (let y = t.top; y <= t.bottom; y++) {
-      const k = (y - t.top) / (t.bottom - t.top);
-      const hw = 0.8 + k * t.half;
-      for (let x = Math.floor(12 - hw); x <= Math.ceil(12 + hw); x++) {
-        const rel = (x + 0.5 - 12) / hw;
-        if (Math.abs(rel) > 1) continue;
-        if (y === t.bottom && (x + t.top) % 2 === 0) continue; // ขอบล่างหยัก
-        const v = -rel * 0.6 + (1 - k) * 0.35 + dither(x, y) * 0.45 + (rng.next() - 0.5) * 0.15;
-        c.set(x, y, v > 0.5 ? 'G' : v > 0.05 ? 'H' : v > -0.4 ? 'T' : 'V');
-      }
-    }
-  }
-  if (rng.chance(0.4)) for (let i = 0; i < 4; i++) c.set(rng.int(6, 18), rng.int(12, 30), 'M'); // ลูกสน
-  return c.outline();
+  softShadow(c, 12, 35, 8, 2.3);
+  rootTrunk(c, 11.5, 28, 35, 1.5);
+  const tiers = [[20, 33, 11], [14, 27, 9.5], [8, 21, 7.5], [2, 14, 5.5]];
+  for (const [top, bottom, half] of tiers) pineTier(c, 12, top + rng.int(0, 1), bottom, half, PINE4);
+  if (rng.chance(0.4)) for (let i = 0; i < 3; i++) c.set(rng.int(7, 16), rng.int(14, 30), WP.bark2); // ลูกสน
+  return c.outline(WP.pine0);
 }
 
-/** ต้นมะพร้าว (ชายหาด) 36×42 */
+/** สนหิมะ 24×38 */
+export function snowPine(seed: number): PixelCanvas {
+  const rng = new RNG(seed);
+  const c = new PixelCanvas(24, 38);
+  softShadow(c, 12, 35, 8, 2.3);
+  rootTrunk(c, 11.5, 28, 35, 1.5);
+  const tiers = [[20, 33, 11], [14, 27, 9.5], [8, 21, 7.5], [2, 14, 5.5]];
+  for (const [top, bottom, half] of tiers) pineTier(c, 12, top + rng.int(0, 1), bottom, half, PINE4, 0.42);
+  return c.outline(WP.pine0);
+}
+
+/** ต้นมะพร้าว (ชายหาด) 36×42 — ลำต้นอ้วนพันเป็นปล้อง ใบกว้างแผ่ */
 export function palm(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(36, 42);
-  c.shadow(18, 39, 10, 2.5);
+  softShadow(c, 18, 39, 10, 2.4);
   const lean = rng.chance(0.5) ? 1 : -1;
-  const trunkX = (y: number) => 18 + lean * ((39 - y) / 26) ** 2 * 6;
+  const trunkX = (y: number) => 18 + lean * ((39 - y) / 26) ** 2 * 5;
   for (let y = 39; y >= 13; y--) {
-    const x = Math.round(trunkX(y));
-    const ring = (39 - y) % 3 === 0;
-    c.set(x - 1, y, ring ? 'M' : 'N');
-    c.set(x, y, ring ? 'm' : 'M');
-    c.set(x + 1, y, 'm');
+    const x = trunkX(y);
+    const hw = y > 34 ? 3 : 2.2;
+    const band = (39 - y) % 4;
+    for (let dx = -Math.ceil(hw); dx <= Math.ceil(hw); dx++) {
+      if (Math.abs(dx) > hw) continue;
+      const rel = dx / hw;
+      let col: string = rel < -0.4 ? WP.bark3 : rel < 0.4 ? WP.bark2 : WP.bark1;
+      if (band === 0) col = rel < 0 ? WP.bark1 : WP.bark0; // ร่องปล้องพัน
+      c.set(x + dx, y, col);
+    }
   }
   const tx = Math.round(trunkX(13));
   const ty = 12;
-  const fronds: [number, number, number][] = [
-    [-1, 0.5, 13], [-1, -0.1, 12], [-0.45, 0.9, 10], [0.45, 0.9, 10], [1, -0.1, 12], [1, 0.5, 13], [-0.15, 1.1, 7],
+  // ใบกว้าง: [ทิศ x, ยกขึ้น, ยาว, หน้า/หลัง]
+  const fronds: [number, number, number, number][] = [
+    [-1, 0.2, 13, 0], [1, 0.2, 13, 0], [-0.55, 1, 9, 0], [0.55, 1, 9, 0],
+    [-1, 0.75, 12, 1], [1, 0.75, 12, 1], [-0.3, -0.6, 8, 1], [0.35, -0.6, 8, 1],
   ];
-  for (const [dx, lift, len] of fronds) {
+  for (const [dx, lift, len, front] of fronds) {
+    const tones = front ? [WP.leaf2, WP.leaf3, WP.leaf4] : [WP.leaf1, WP.leaf2, WP.leaf3];
     for (let i = 0; i <= len; i++) {
       const t = i / len;
       const x = tx + dx * len * t;
-      const y = ty - lift * 7 * t + 8 * t * t;
-      c.set(x, y, 'G');
-      if (t < 0.85) c.set(x, y - 1, 'g');
-      if (i % 2 === 0 && i > 1) {
-        c.set(x, y + 1, 'H');
-        c.set(x + (dx > 0 ? -1 : 1) * 0.5, y + 2, 'T');
+      const y = ty - lift * 6 * t + 7 * t * t;
+      const w = Math.sin(Math.PI * Math.min(1, t * 1.15)) * 2.6;
+      for (let k = -Math.ceil(w); k <= Math.ceil(w); k++) {
+        if (Math.abs(k) > w) continue;
+        c.set(x, y + k, k < 0 ? tones[2] : k === 0 ? tones[1] : tones[0]);
       }
     }
   }
-  c.blob(tx - 2, ty + 3, 1.7, 1.7, ['m', 'M', 'N']);
-  c.blob(tx + 1, ty + 4, 1.7, 1.7, ['m', 'M', 'N']);
-  return c.outline();
+  c.blob(tx - 2, ty + 3, 1.7, 1.7, [WP.bark0, WP.bark1, WP.bark2]);
+  c.blob(tx + 1, ty + 4, 1.7, 1.7, [WP.bark0, WP.bark1, WP.bark2]);
+  return c.outline(WP.leaf0);
+}
+
+/** ก้อนหิน/ก้อนกลมเรียบ (แรเงานุ่ม noise ต่ำ) */
+function boulder(c: PixelCanvas, cx: number, cy: number, rx: number, ry: number, tones: string[]) {
+  for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) {
+    for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+      const nx = (x + 0.5 - cx) / rx;
+      const ny = (y + 0.5 - cy) / ry;
+      const d2 = nx * nx + ny * ny;
+      if (d2 > 1) continue;
+      const lit = -(nx * 0.55 + ny * 0.8) * 0.75 + (1 - d2) * 0.3 + dither(x, y) * 0.1;
+      c.set(x, y, tones[lit > 0.55 ? 3 : lit > 0.15 ? 2 : lit > -0.3 ? 1 : 0]);
+    }
+  }
 }
 
 /** ก้อนหิน 20×16 (บางก้อนมีมอส) */
 export function rock(seed: number, mossy: boolean): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(20, 16);
-  c.shadow(10, 13.5, 9, 2.5);
-  const shades = ['F', 'D', 'L', 'W'];
-  c.blob(10, 9, 8, 5.5, shades, rng, 0.15);
-  c.blob(5 + rng.int(0, 8), 6, 4, 3, shades, rng, 0.2);
+  softShadow(c, 10, 13.5, 8.5, 2.2);
+  const tones = [WP.rockFace, WP.rockDark, WP.rock, WP.rockLight];
+  boulder(c, 10, 9, 8, 5.5, tones);
+  boulder(c, 5 + rng.int(0, 8), 6, 4, 3, tones);
   const cx = rng.int(7, 12);
-  c.line(cx, 7, cx + 2, 10, 'F');
-  c.line(cx + 2, 10, cx + 1, 12, 'F');
+  c.line(cx, 8, cx + 1, 10, WP.rockFace);
   if (mossy) {
     for (let x = 0; x < 20; x++) {
       for (let y = 0; y < 16; y++) {
         const p = c.get(x, y);
-        if (p && !p.startsWith('rgba') && !c.get(x, y - 1) && rng.chance(0.7)) {
-          c.set(x, y, 'G');
-          if (rng.chance(0.6)) c.set(x, y + 1, 'H');
+        if (p && !p.startsWith('rgba')) {
+          if (rng.chance(0.75)) {
+            c.set(x, y, WP.leaf3);
+            c.set(x, y + 1, rng.chance(0.6) ? WP.leaf2 : WP.leaf3);
+          }
           break;
         }
       }
     }
   }
-  return c.outline();
+  return c.outline(WP.rockLine);
+}
+
+/** หินแร่ 20×18: ก้อนหินเรียบ + ก้อนแร่ใหญ่ 2×2 มีประกาย (คริสตัล = แท่งผลึกโผล่) */
+export function oreRock(kind: 'iron' | 'gold' | 'crystal' | 'coal' | 'sulfur' | 'meteor', seed: number): PixelCanvas {
+  const rng = new RNG(seed);
+  const c = new PixelCanvas(20, 18);
+  softShadow(c, 10, 15.5, 8.5, 2.2);
+  const body = kind === 'meteor' ? ['#2c2436', '#41344e', '#5a4868', '#76648a'] : kind === 'coal' ? [WP.rockLine, '#3a3c38', '#52554e', '#6c6f66'] : [WP.rockFace, WP.rockDark, WP.rock, WP.rockLight];
+  boulder(c, 10, 11, 8, 5.5, body);
+  boulder(c, 7, 8, 4.5, 3.5, body);
+  if (kind === 'crystal') {
+    for (const [x, h, col] of [[6, 9, '#b49ad6'], [10, 12, '#9fdce0'], [14, 8, '#7fb0d8']] as [number, number, string][]) {
+      for (let y = 0; y < h; y++) {
+        const hw = y < 2 ? 0 : 1;
+        for (let dx = -hw; dx <= hw; dx++) c.set(x + dx, 13 - h + y, dx < 0 ? '#f2f4ef' : dx === 0 ? col : '#6a5a90');
+      }
+    }
+  } else {
+    const [a, b, hi] = kind === 'iron' ? ['#c47a52', '#8e5236', '#f0b48a'] : kind === 'coal' ? ['#1e2024', '#2c2f33', '#8a8f96'] : kind === 'meteor' ? ['#e0845c', '#a8483a', '#f6d28a'] : ['#f0c870', '#c8963e', '#fff2c8'];
+    for (let i = 0, t = 0; i < 4 && t < 40; t++) {
+      const x = rng.int(4, 14);
+      const y = rng.int(6, 13);
+      if (c.get(x, y) !== body[2] && c.get(x, y) !== body[1]) continue;
+      if (c.get(x + 1, y + 1) !== body[2] && c.get(x + 1, y + 1) !== body[1]) continue;
+      c.set(x, y, a);
+      c.set(x + 1, y, a);
+      c.set(x, y + 1, b);
+      c.set(x + 1, y + 1, b);
+      c.set(x, y, hi);
+      i++;
+    }
+  }
+  return c.outline(WP.rockLine);
 }
 
 /** พุ่มไม้ 20×18 (มีเบอร์รี่หรือไม่ก็ได้) */
 export function bush(seed: number, berries: boolean): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(20, 18);
-  c.shadow(10, 15.5, 9, 2.5);
-  c.blob(6, 11, 5, 4.5, LEAF, rng, 0.3);
-  c.blob(14, 11, 5, 4.5, LEAF, rng, 0.3);
-  c.blob(10, 8, 6, 5.5, LEAF, rng, 0.3);
-  const n = berries ? 9 : 0;
+  softShadow(c, 10, 15.5, 8.5, 2.2);
+  clump(c, 10, 9.5, 8.5, 6, LEAF, rng, 5);
+  const n = berries ? 6 : 0;
   for (let i = 0, tries = 0; i < n && tries < 80; tries++) {
     const x = rng.int(3, 15);
     const y = rng.int(4, 13);
     if (!c.get(x, y) || !c.get(x + 1, y + 1)) continue;
-    c.set(x, y, 'p');
-    c.set(x + 1, y, 'R');
-    c.set(x, y + 1, 'R');
-    c.set(x + 1, y + 1, 'P');
+    c.set(x, y, '#f09a8a');
+    c.set(x + 1, y, '#c4504c');
+    c.set(x, y + 1, '#c4504c');
+    c.set(x + 1, y + 1, '#8a3040');
     i++;
   }
-  if (!berries) for (let i = 0; i < 5; i++) c.set(rng.int(4, 15), rng.int(5, 13), 'g');
-  return c.outline();
+  return c.outline(WP.leaf0);
 }
 
-/** กอหญ้าแห้ง 16×14 */
+/** กอหญ้า/พืชใบแหลม 16×14 — ใบแผ่เป็นพัด 3–4 เฉด (บางใบสีฟาง) */
 export function tuft(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(16, 14);
-  c.shadow(8, 12.5, 6, 1.5, 0.2);
-  for (let i = 0; i < 9; i++) {
-    const bx = 3 + i * 1.2 + rng.range(-0.5, 0.5);
-    const h = rng.int(5, 10);
-    const lean = rng.range(-2.5, 2.5);
-    const straw = rng.chance(0.5);
-    c.line(bx, 12, bx + lean, 12 - h, straw ? 'N' : 'G');
-    c.set(bx + lean, 12 - h, straw ? 'Y' : 'g');
-    c.set(bx, 12, 'H');
-  }
-  return c;
+  softShadow(c, 8, 12.5, 5.5, 1.3);
+  const blades: [number, number][] = [[-1.25, 7], [-0.9, 9], [-0.5, 10], [-0.15, 11], [0.2, 10], [0.55, 9], [0.95, 8], [1.3, 6]];
+  blades.forEach(([ang, len], i) => {
+    const a = -Math.PI / 2 + ang * 0.9 + rng.range(-0.1, 0.1);
+    const straw = i % 4 === 1 && rng.chance(0.6);
+    const tones = straw ? [WP.bark2, WP.bark3, '#d8b878'] : i % 2 ? [WP.leaf1, WP.leaf2, WP.leaf3] : [WP.leaf2, WP.leaf3, WP.leaf4];
+    for (let k = 0; k <= len; k++) {
+      const t = k / len;
+      const x = 8 + Math.cos(a) * k + (ang > 0 ? 1 : -1) * t * t * 1.5;
+      const y = 12.5 + Math.sin(a) * k + t * t * 2;
+      c.set(x, y, t > 0.7 ? tones[2] : tones[1]);
+      if (t < 0.6) c.set(x + (ang < 0 ? 1 : -1), y, tones[0]);
+    }
+  });
+  return c.outline(WP.leaf0);
 }
 
 /** ตอไม้ 16×12 */
 export function stump(): PixelCanvas {
   const c = new PixelCanvas(16, 12);
-  c.shadow(8, 10, 6, 2);
-  for (let y = 4; y <= 9; y++) for (let x = 4; x <= 11; x++) c.set(x, y, x <= 5 ? 'N' : x >= 10 ? 'm' : 'M');
-  c.ellipse(8, 4, 4.5, 2, 'N');
-  c.ellipse(8, 4, 2.5, 1, 'M');
-  c.set(8, 4, 'N');
-  c.set(3, 9, 'M');
-  c.set(12, 9, 'm');
-  return c.outline();
+  softShadow(c, 8, 10, 6, 1.8);
+  for (let y = 4; y <= 9; y++) for (let x = 4; x <= 11; x++) c.set(x, y, x <= 5 ? WP.bark2 : x >= 10 ? WP.bark0 : WP.bark1);
+  c.ellipse(8, 4, 4.5, 2, WP.bark3);
+  c.ellipse(8, 4, 2.5, 1, WP.bark2);
+  c.set(8, 4, WP.bark3);
+  c.set(3, 9, WP.bark1);
+  c.set(12, 9, WP.bark0);
+  return c.outline(WP.lineWood);
+}
+
+/** กระบองเพชร 18×26 — ลำกลมเขียวสด หนามจุดเล็ก ดอกแดง */
+export function cactus(seed: number, fruit: boolean): PixelCanvas {
+  const rng = new RNG(seed);
+  const c = new PixelCanvas(18, 26);
+  softShadow(c, 9, 24, 6, 1.6);
+  const T = [WP.leaf1, WP.leaf2, WP.leaf3, WP.leaf4];
+  const col = (x: number, y0: number, y1: number, hw: number) => {
+    for (let y = y0 - hw; y <= y1; y++) {
+      for (let dx = -hw; dx <= hw; dx++) {
+        const top = y < y0 ? Math.hypot(dx, y - y0) > hw + 0.3 : false;
+        if (top) continue;
+        const rel = dx / (hw + 0.5);
+        c.set(x + dx, y, rel < -0.45 ? T[2] : rel < 0.35 ? T[1] : T[0]);
+      }
+      if ((y - y0) % 4 === 1 && y >= y0) c.set(x - Math.round(hw * 0.5), y, T[3]); // หนาม
+    }
+  };
+  const armL = rng.int(10, 14);
+  col(4, armL - 6, armL, 1);
+  for (let x = 4; x <= 8; x++) c.rect(x, armL - 1, 1, 3, x < 6 ? T[2] : T[1]);
+  const armR = rng.int(7, 11);
+  col(14, armR - 4, armR, 1);
+  for (let x = 10; x <= 14; x++) c.rect(x, armR - 1, 1, 3, T[1]);
+  col(9, 5, 23, 2);
+  if (fruit) {
+    for (const [x, y] of [[9, 2], [4, armL - 8]] as [number, number][]) {
+      c.set(x - 1, y, '#e0605a');
+      c.set(x + 1, y, '#e0605a');
+      c.set(x, y - 1, '#e0605a');
+      c.set(x, y, '#f0c870');
+    }
+  }
+  return c.outline(WP.leaf0);
 }
 
 // ---------------- ของตกแต่งพื้น (ไม่มีการชน) ----------------
 
+/** ดอกไม้เล็กกลีบ 4 (แบบดอกเดซี่) */
 function flower(c: PixelCanvas, x: number, y: number, petal: string, center: string) {
-  c.set(x, y + 1, 'H');
-  c.set(x, y + 2, 'H');
+  c.set(x, y + 2, WP.leaf2);
   c.set(x - 1, y, petal);
   c.set(x + 1, y, petal);
   c.set(x, y - 1, petal);
@@ -204,108 +367,112 @@ export function decorTiles(): PixelCanvas[] {
   const tiles: PixelCanvas[] = [];
   const flowers = (petal: string, center: string) => {
     const c = new PixelCanvas(16, 16);
-    const n = rng.int(2, 4);
-    for (let i = 0; i < n; i++) flower(c, rng.int(3, 12), rng.int(3, 12), petal, center);
+    const n = rng.int(2, 3);
+    for (let i = 0; i < n; i++) flower(c, rng.int(3, 12), rng.int(3, 11), petal, center);
     return c;
   };
-  tiles.push(flowers('R', 'Y')); // 0 แดง
-  tiles.push(flowers('Y', 'r')); // 1 เหลือง
-  tiles.push(flowers('W', 'Y')); // 2 ขาว
-  tiles.push(flowers('u', 'W')); // 3 ม่วง
+  tiles.push(flowers('#e6828a', '#f6e8b8')); // 0 แดง/ชมพู
+  tiles.push(flowers('#f0c870', '#e0845c')); // 1 เหลือง
+  tiles.push(flowers('#f6f8f2', '#f0c870')); // 2 ขาว
+  tiles.push(flowers('#b49ad6', '#f6f8f2')); // 3 ม่วง
 
   let c = new PixelCanvas(16, 16); // 4 กรวด
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 3; i++) {
     const x = rng.int(2, 12);
     const y = rng.int(3, 12);
-    c.set(x, y, 'L');
-    c.set(x + 1, y, 'W');
-    c.set(x, y + 1, 'D');
-    c.set(x + 1, y + 1, 'D');
+    c.set(x, y, WP.rockLight);
+    c.set(x + 1, y, WP.rock);
+    c.set(x, y + 1, WP.rockDark);
+    c.set(x + 1, y + 1, WP.rockFace);
   }
   tiles.push(c);
 
-  for (let k = 0; k < 2; k++) { // 5,6 ใบหญ้า
+  for (let k = 0; k < 2; k++) { // 5,6 กอหญ้าเล็ก
     c = new PixelCanvas(16, 16);
-    for (let i = 0; i < 5; i++) {
-      const x = rng.int(2, 13);
-      const y = rng.int(5, 14);
-      c.line(x, y, x + rng.int(-1, 1), y - rng.int(2, 4), k ? 'g' : 'T');
+    for (let i = 0; i < 2; i++) {
+      const x = rng.int(2, 10);
+      const y = rng.int(4, 12);
+      const col = k ? WP.grassLight : WP.grassDeep;
+      c.set(x, y, col);
+      c.set(x + 2, y - 1, col);
+      c.set(x + 4, y, col);
+      c.rect(x + 1, y + 1, 3, 1, col);
     }
     tiles.push(c);
   }
 
   c = new PixelCanvas(16, 16); // 7 เห็ด
   for (const [x, y, big] of [[5, 10, 1], [9, 12, 0]]) {
-    c.rect(x, y, 1, 2 + big, 'W');
-    c.rect(x - 1 - big, y - 1, 3 + big * 2, 1, 'R');
-    c.rect(x - big, y - 2, 1 + big * 2, 1, 'R');
-    c.set(x, y - 1, 'W');
+    c.rect(x, y, 1, 2 + big, '#ece6d8');
+    c.rect(x - 1 - big, y - 1, 3 + big * 2, 1, '#c4605a');
+    c.rect(x - big, y - 2, 1 + big * 2, 1, '#d87a6a');
+    c.set(x - big, y - 2, '#f6e8d8');
   }
-  tiles.push(c);
+  tiles.push(c.outline(WP.lineWood));
 
-  c = new PixelCanvas(16, 16); // 8 เฟิร์น
-  for (const a of [-2.4, -1.9, -1.5, -1.1, -0.7]) {
+  c = new PixelCanvas(16, 16); // 8 เฟิร์น (ใบพัดเขียวอมฟ้า)
+  for (const a of [-2.6, -2.15, -1.75, -1.4, -1.0, -0.55]) {
     for (let i = 0; i < 7; i++) {
       const x = 8 + Math.cos(a) * i;
-      const y = 13 + Math.sin(a) * i + i * i * 0.06;
-      c.set(x, y, i > 4 ? 'g' : 'G');
-      if (i % 2) c.set(x, y + 1, 'T');
+      const y = 13 + Math.sin(a) * i + i * i * 0.07;
+      c.set(x, y, i > 4 ? WP.leaf4 : i > 2 ? WP.leaf3 : WP.leaf2);
+      if (i % 2 && i > 1) c.set(x + (a < -1.57 ? 1 : -1), y + 1, WP.leaf1);
     }
   }
-  tiles.push(c);
+  tiles.push(c.outline(WP.leaf0));
 
   c = new PixelCanvas(16, 16); // 9 ใบไม้ร่วง
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 4; i++) {
     const x = rng.int(1, 13);
     const y = rng.int(2, 13);
-    const col = rng.pick(['r', 'Y', 'N', 'M']);
+    const col = rng.pick(['#e0845c', '#f0c870', WP.bark3]);
     c.set(x, y, col);
     c.set(x + 1, y, col);
-    c.set(x + 1, y + 1, 'm');
+    c.set(x + 1, y + 1, WP.bark1);
   }
   tiles.push(c);
 
   c = new PixelCanvas(16, 16); // 10 เปลือกหอย
-  c.ellipse(8, 9, 3.5, 2.5, 'p');
-  for (const x of [6, 8, 10]) c.line(8, 11, x, 7, 'k');
-  c.set(8, 11, 'W');
-  tiles.push(c.outline());
+  c.ellipse(8, 9, 3.5, 2.5, '#efc0b8');
+  for (const x of [6, 8, 10]) c.line(8, 11, x, 7, '#c99080');
+  c.set(8, 11, '#f6f0e8');
+  tiles.push(c.outline(WP.lineWood));
 
   c = new PixelCanvas(16, 16); // 11 ปลาดาว
   for (let a = 0; a < 5; a++) {
     const ang = -Math.PI / 2 + (a * Math.PI * 2) / 5;
-    c.line(8, 8, 8 + Math.cos(ang) * 4, 8 + Math.sin(ang) * 4, 'r');
+    c.line(8, 8, 8 + Math.cos(ang) * 4, 8 + Math.sin(ang) * 4, '#e0845c');
   }
-  c.set(8, 8, 'Y');
-  c.set(7, 7, 'Y');
-  tiles.push(c.outline());
+  c.set(8, 8, '#f0c870');
+  c.set(7, 7, '#f0c870');
+  tiles.push(c.outline(WP.lineWood));
 
   c = new PixelCanvas(16, 16); // 12 ใบบัว
-  c.ellipse(8, 9, 5, 3.5, 'G');
-  c.ellipse(7, 8, 3, 2, 'g');
-  c.line(8, 9, 12, 7, 'B');
-  c.set(10, 8, 'p');
-  c.set(11, 8, 'W');
-  c.set(10, 7, 'p');
-  tiles.push(c.outline('T'));
+  c.ellipse(8, 9, 5, 3.5, WP.leaf2);
+  c.ellipse(7, 8, 3, 2, WP.leaf3);
+  c.line(8, 9, 12, 7, WP.shallow);
+  c.set(10, 8, '#efa8b0');
+  c.set(11, 8, '#f6f8f2');
+  c.set(10, 7, '#efa8b0');
+  tiles.push(c.outline(WP.leaf0));
 
-  c = new PixelCanvas(16, 16); // 13 กก
+  c = new PixelCanvas(16, 16); // 13 กก/ธูปฤๅษี
   for (const x of [5, 7, 9, 11]) {
     const h = rng.int(6, 10);
-    c.line(x, 14, x, 14 - h, 'H');
-    if (rng.chance(0.6)) c.rect(x, 14 - h - 2, 1, 3, 'M');
-    else c.set(x + 1, 14 - h, 'g');
+    c.line(x, 14, x, 14 - h, WP.leaf2);
+    if (rng.chance(0.6)) c.rect(x, 14 - h - 2, 1, 3, WP.bark2);
+    else c.set(x + 1, 14 - h, WP.leaf3);
   }
   tiles.push(c);
 
   c = new PixelCanvas(16, 16); // 14 กิ่งไม้ลอยมาเกยหาด
-  c.line(3, 10, 12, 7, 'M', 1);
-  c.line(3, 9, 12, 6, 'N', 1);
-  c.line(8, 8, 10, 11, 'M');
-  tiles.push(c.outline());
+  c.line(3, 10, 12, 7, WP.bark1, 1);
+  c.line(3, 9, 12, 6, WP.bark3, 1);
+  c.line(8, 8, 10, 11, WP.bark1);
+  tiles.push(c.outline(WP.lineWood));
 
   c = new PixelCanvas(16, 16); // 15 ลายทราย
-  for (const y of [5, 10]) for (let x = 2; x < 14; x++) if (Math.sin(x * 0.9 + y) > 0.2) c.set(x, y + Math.round(Math.sin(x * 0.6)), 's');
+  for (const y of [5, 10]) for (let x = 3; x < 13; x++) if (Math.sin(x * 0.9 + y) > 0.35) c.set(x, y + Math.round(Math.sin(x * 0.6)), WP.sandDark);
   tiles.push(c);
 
   return tiles;
@@ -348,7 +515,7 @@ export function birch(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(28, 38);
   const LEAVES = ['H', 'G', 'g', 'y'];
-  c.shadow(14, 35, 9, 2.5);
+  softShadow(c, 14, 35, 9, 2.5);
   const twin = seed % 2 === 1;
   const stems: [number, number][] = twin ? [[11, 13], [16, 22]] : [[13, 15]];
   for (const [sx, top] of stems) {
@@ -368,11 +535,11 @@ export function birch(seed: number): PixelCanvas {
   // กิ่งเล็ก
   c.line(14, 22, 9, 17, 'L');
   c.line(15, 20, 20, 15, 'L');
-  c.blob(14, 11, 9, 9.5, LEAVES, rng, 0.3);
-  c.blob(8, 17, 5.5, 5, LEAVES, rng, 0.35);
-  c.blob(20, 16, 5.5, 5, LEAVES, rng, 0.35);
-  c.blob(13 + rng.int(-1, 2), 4, 5, 3.5, LEAVES, rng, 0.35);
-  c.blob(14, 20, 4.5, 3, LEAVES, rng, 0.4);
+  clump(c, 14, 11, 9, 9.5, LEAVES, rng);
+  clump(c, 8, 17, 5.5, 5, LEAVES, rng);
+  clump(c, 20, 16, 5.5, 5, LEAVES, rng);
+  clump(c, 13 + rng.int(-1, 2), 4, 5, 3.5, LEAVES, rng);
+  clump(c, 14, 20, 4.5, 3, LEAVES, rng);
   dapple(c, rng, 30, 4, 23, 2, 22, 'G', 'y', 'H');
   dapple(c, rng, 14, 4, 23, 2, 22, 'g', 'W', 'G');
   // ลำต้นโผล่ตามช่องใบ
@@ -387,7 +554,7 @@ const PINK = ['#a8486a', '#de7a98', 'p', '#ffd3dd'];
 export function sakura(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(34, 34);
-  c.shadow(17, 31, 13, 2.8);
+  softShadow(c, 17, 31, 13, 2.8);
   // ลำต้นคดเคี้ยวสีน้ำตาลเข้ม
   for (let y = 18; y <= 31; y++) {
     const sway = Math.round(Math.sin(y * 0.45 + seed) * 1);
@@ -400,11 +567,11 @@ export function sakura(seed: number): PixelCanvas {
   c.line(18, 21, 26, 14, 'n', 2);
   c.line(17, 19, 17, 10, 'm', 2);
   // ปุยดอกไม้
-  c.blob(8, 14, 7.5, 6, PINK, rng, 0.35);
-  c.blob(26, 14, 7.5, 6, PINK, rng, 0.35);
-  c.blob(17, 10, 11, 8.5, PINK, rng, 0.25);
-  c.blob(12 + rng.int(0, 6), 4.5, 6.5, 4, PINK, rng, 0.35);
-  c.blob(17, 18, 6, 3, PINK, rng, 0.4);
+  clump(c, 8, 14, 7.5, 6, PINK, rng);
+  clump(c, 26, 14, 7.5, 6, PINK, rng);
+  clump(c, 17, 10, 11, 8.5, PINK, rng);
+  clump(c, 12 + rng.int(0, 6), 4.5, 6.5, 4, PINK, rng);
+  clump(c, 17, 18, 6, 3, PINK, rng);
   // กิ่งโผล่ระหว่างปุย
   c.line(10, 16, 7, 18, 'n');
   c.line(24, 16, 27, 18, 'n');
@@ -432,17 +599,17 @@ export function maple(seed: number, golden: boolean): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(32, 34);
   const A = golden ? ['#9a4a1c', 'r', 'Y', 'y'] : ['#6e1f35', 'R', 'r', 'Y'];
-  c.shadow(16, 31, 12, 3);
+  softShadow(c, 16, 31, 12, 3);
   trunk(c, 13, 18, 20, 31, ['N', 'M', 'm']);
   c.set(12, 31, 'M');
   c.set(19, 31, 'm');
   for (let i = 0; i < 6; i++) c.set(rng.int(14, 17), rng.int(22, 30), 'm');
   c.line(15, 23, 10, 18, 'M');
   c.line(17, 22, 22, 18, 'm');
-  c.blob(8, 15, 7, 6, A, rng, 0.35);
-  c.blob(24, 15, 7, 6, A, rng, 0.35);
-  c.blob(16, 11, 11, 9, A, rng, 0.25);
-  c.blob(14 + rng.int(0, 4), 5, 7, 4.5, A, rng, 0.35);
+  clump(c, 8, 15, 7, 6, A, rng);
+  clump(c, 24, 15, 7, 6, A, rng);
+  clump(c, 16, 11, 11, 9, A, rng);
+  clump(c, 14 + rng.int(0, 4), 5, 7, 4.5, A, rng);
   // ใบสีต่างแซม (ให้ดูหลายโทนแบบใบไม้เปลี่ยนสี)
   const mix = golden ? ['R', 'r', 'y'] : ['Y', 'y', '#c2502a'];
   for (let i = 0; i < 30; i++) {
@@ -468,7 +635,7 @@ export function maple(seed: number, golden: boolean): PixelCanvas {
 export function willow(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(36, 36);
-  c.shadow(18, 33, 15, 2.8);
+  softShadow(c, 18, 33, 15, 2.8);
   const frond = (x: number, top: number, len: number, back: boolean) => {
     const drift = (x - 18) * 0.06;
     for (let i = 0; i <= len; i++) {
@@ -490,8 +657,8 @@ export function willow(seed: number): PixelCanvas {
   c.set(22, 32, 'm');
   for (let i = 0; i < 6; i++) c.set(rng.int(17, 19), rng.int(18, 31), 'm');
   // พุ่มโดมด้านบน
-  c.blob(18, 10, 15, 8, ['V', 'T', 'H', 'G'], rng, 0.2);
-  c.blob(18, 6, 10, 5, ['T', 'H', 'G', 'g'], rng, 0.25);
+  clump(c, 18, 10, 15, 8, [WP.leaf0, WP.leaf1, WP.leaf2, WP.leaf3], rng);
+  clump(c, 18, 6, 10, 5, LEAF, rng);
   // ระย้าด้านหน้า — เว้นกลางให้เห็นลำต้น
   for (let x = 3; x <= 33; x++) {
     const mid = Math.abs(x - 18);
@@ -506,7 +673,7 @@ export function willow(seed: number): PixelCanvas {
 export function bigOak(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(48, 52);
-  c.shadow(24, 48, 22, 3.6, 0.3);
+  softShadow(c, 24, 48, 21, 3.4);
   // รากแผ่
   for (const [x0, x1, s] of [[19, 9, 1], [21, 14, 0], [28, 38, 1], [26, 33, 0]] as [number, number, number][]) {
     c.line(x0, 41, x1, 48, s ? 'M' : 'm', 3);
@@ -534,14 +701,14 @@ export function bigOak(seed: number): PixelCanvas {
   c.line(20, 29, 10, 22, 'M', 3);
   c.line(28, 28, 38, 21, 'm', 3);
   // พุ่มใบหนา
-  c.blob(10, 23, 10, 8, LEAF, rng, 0.25);
-  c.blob(38, 23, 10, 8, LEAF, rng, 0.25);
-  c.blob(24, 17, 20, 13, LEAF, rng, 0.18);
-  c.blob(15, 9, 10, 7.5, LEAF, rng, 0.25);
-  c.blob(33, 9, 10, 7.5, LEAF, rng, 0.25);
-  c.blob(24, 5, 9, 5, LEAF, rng, 0.3);
-  c.blob(17, 28, 7, 4, LEAF, rng, 0.35);
-  c.blob(32, 28, 7, 4, LEAF, rng, 0.35);
+  clump(c, 10, 23, 10, 8, LEAF, rng);
+  clump(c, 38, 23, 10, 8, LEAF, rng);
+  clump(c, 24, 17, 20, 13, LEAF, rng);
+  clump(c, 15, 9, 10, 7.5, LEAF, rng);
+  clump(c, 33, 9, 10, 7.5, LEAF, rng);
+  clump(c, 24, 5, 9, 5, LEAF, rng);
+  clump(c, 17, 28, 7, 4, LEAF, rng);
+  clump(c, 32, 28, 7, 4, LEAF, rng);
   // ช่อใบ: เงาใต้ช่อ + ไฮไลต์บนช่อ
   for (let i = 0; i < 70; i++) {
     const x = rng.int(2, 45);
@@ -583,7 +750,7 @@ export function deadTree(seed: number, brown: boolean): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(26, 34);
   const [l, m, d] = brown ? ['N', 'M', 'm'] : ['L', 'D', 'F'];
-  c.shadow(13, 31, 9, 2.4);
+  softShadow(c, 13, 31, 9, 2.4);
   const branch = (x: number, y: number, ang: number, len: number, th: number, depth: number) => {
     let cx = x;
     let cy = y;
@@ -641,7 +808,7 @@ export function mushTree(seed: number, glowing: boolean): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(30, 36);
   const CAP = glowing ? ['P', '#7b3fa0', 'u', '#d9b8ff'] : ['#7a1f30', 'R', 'r', '#ffb08a'];
-  c.shadow(15, 33, 10, 2.6);
+  softShadow(c, 15, 33, 10, 2.6);
   // ก้าน (โค้งเล็กน้อย โคนป่อง) + วงแหวน
   for (let y = 15; y <= 33; y++) {
     const off = Math.round(Math.sin((y - 15) * 0.17));
@@ -708,15 +875,15 @@ export function mushTree(seed: number, glowing: boolean): PixelCanvas {
 export function acacia(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(38, 34);
-  c.shadow(19, 31, 14, 2.6);
+  softShadow(c, 19, 31, 14, 2.6);
   for (let y = 18; y <= 31; y++) for (let x = 18; x <= 20; x++) c.set(x, y, x === 18 ? 'N' : x === 20 ? 'm' : 'M');
   c.line(19, 20, 10, 11, 'M', 2);
   c.line(19, 19, 28, 10, 'm', 2);
   c.line(19, 22, 19, 11, 'M', 1);
   const LEAVES = ['V', 'H', '#7f9a46', '#b5c46a'];
-  c.blob(19, 8, 17, 4, LEAVES, rng, 0.25);
-  c.blob(10 + rng.int(-1, 1), 6, 7, 3, LEAVES, rng, 0.3);
-  c.blob(27 + rng.int(-1, 1), 6.5, 7, 3, LEAVES, rng, 0.3);
+  clump(c, 19, 8, 17, 4, LEAVES, rng);
+  clump(c, 10 + rng.int(-1, 1), 6, 7, 3, LEAVES, rng);
+  clump(c, 27 + rng.int(-1, 1), 6.5, 7, 3, LEAVES, rng);
   for (let x = 4; x < 34; x++) if (c.get(x, 10) && rng.chance(0.5)) c.set(x, 11, 'V');
   return c.outline();
 }
@@ -725,7 +892,7 @@ export function acacia(seed: number): PixelCanvas {
 export function mangrove(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(32, 34);
-  c.shadow(16, 31, 12, 2.6);
+  softShadow(c, 16, 31, 12, 2.6);
   for (let y = 16; y <= 26; y++) for (let x = 15; x <= 17; x++) c.set(x, y, x === 15 ? 'N' : x === 17 ? 'n' : 'm');
   // รากค้ำ
   for (const [ex, k] of [[7, -1], [11, -1], [21, 1], [25, 1]] as [number, number][]) {
@@ -737,9 +904,9 @@ export function mangrove(seed: number): PixelCanvas {
     }
   }
   const LEAVES = ['V', 'T', 'H', '#5f8a3a'];
-  c.blob(16, 11, 12, 8, LEAVES, rng, 0.25);
-  c.blob(9, 13, 6, 4.5, LEAVES, rng, 0.3);
-  c.blob(23, 13, 6, 4.5, LEAVES, rng, 0.3);
+  clump(c, 16, 11, 12, 8, LEAVES, rng);
+  clump(c, 9, 13, 6, 4.5, LEAVES, rng);
+  clump(c, 23, 13, 6, 4.5, LEAVES, rng);
   for (let i = 0; i < 5; i++) c.line(rng.int(8, 24), 15, rng.int(8, 24), 18 + rng.int(0, 3), 'V'); // รากอากาศ
   return c.outline();
 }
@@ -748,7 +915,7 @@ export function mangrove(seed: number): PixelCanvas {
 export function bambooClump(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(22, 40);
-  c.shadow(11, 37, 8, 2.2);
+  softShadow(c, 11, 37, 8, 2.2);
   const stems = [4 + rng.int(0, 1), 8, 12 + rng.int(-1, 0), 16];
   stems.forEach((x0, i) => {
     const top = 2 + rng.int(0, 8) + (i % 2) * 3;
@@ -773,7 +940,7 @@ export function bambooClump(seed: number): PixelCanvas {
 export function coral(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(20, 16);
-  c.shadow(10, 13.5, 8, 2.2);
+  softShadow(c, 10, 13.5, 8, 2.2);
   const tones = [['#a8344a', '#ef5f6a', '#ff9fb0'], ['#b5641f', '#ff9a4a', '#ffd08a'], ['#6a3fa0', '#a77bdb', '#e0c8ff']][seed % 3];
   c.blob(10, 11, 7, 3, ['#c9b48a', '#e4d6b0', '#f2e3c4'], rng, 0.2);
   for (let i = 0; i < 5; i++) {
@@ -795,7 +962,7 @@ export function coral(seed: number): PixelCanvas {
 export function shroomPatch(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(16, 14);
-  c.shadow(8, 12, 6, 1.6);
+  softShadow(c, 8, 12, 6, 1.6);
   const caps = seed % 2 ? ['#7b3fa0', 'u', '#e6ccff'] : ['#1f6f7a', 'C', '#d8fbff'];
   for (const [x, y, r] of [[5, 7, 3], [11, 8, 2.4], [8, 10, 1.8]] as [number, number, number][]) {
     c.rect(x, y, 1, 12 - y, 'w');
@@ -811,7 +978,7 @@ export function shroomPatch(seed: number): PixelCanvas {
 export function crystalCluster(seed: number): PixelCanvas {
   const rng = new RNG(seed);
   const c = new PixelCanvas(20, 22);
-  c.shadow(10, 19.5, 8, 2.2);
+  softShadow(c, 10, 19.5, 8, 2.2);
   const shards: [number, number, number][] = [[10, 2, 3], [5, 8, 2], [15, 7, 2], [8, 10, 1.5], [13, 11, 1.5]];
   for (const [x, top, hw] of shards) {
     for (let y = top; y <= 19; y++) {

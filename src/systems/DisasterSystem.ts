@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { Sfx } from '../core/AudioManager';
 import { EventBus } from '../core/EventBus';
 import { DISASTERS, disasterForDay, resolveDisaster, type DisasterDef } from '../data/disasters';
+import { NIGHT_HOUSE_THREAT, hazardPower } from '../data/homes';
 import type { BoxTier } from '../data/loot';
 import type { GameScene } from '../scenes/GameScene';
 import { isWater } from '../world/tiles';
@@ -74,7 +75,9 @@ export class DisasterSystem {
     this.wave = 0;
     this.waveTimer = 0;
     this.bossSpawned = false;
-    EventBus.emit('ui:splash', { art: this.current.art ?? 'raid_night', title: `🌙 ${this.current.name}`, sub: `${this.current.warning} — ป้องกันฐานให้รอดถึงเช้า`, color: this.current.color });
+    const th = this.current.special ? NIGHT_HOUSE_THREAT[this.current.special] : undefined;
+    const rec = th ? hazardPower(th, this.scene.hazards?.level ?? 1) : 0; // ภัยที่ซัดตัวบ้านด้วย → บอกเลเวลบ้านที่แนะนำ
+    EventBus.emit('ui:splash', { art: this.current.art ?? 'raid_night', title: `🌙 ${this.current.name}`, sub: `${this.current.warning} — ป้องกันฐานให้รอดถึงเช้า${rec ? ` · 🏠 แนะนำบ้าน Lv.${rec}+` : ''}`, color: this.current.color });
   }
 
   onDawn() {
@@ -104,7 +107,7 @@ export class DisasterSystem {
   update(dt: number) {
     const s = this.scene;
     const d = this.current;
-    this.fog.update(dt, 0xa8b0c8, this.active && d?.special === 'fog' ? (s.shelter.inside ? 0.12 : 0.3) : 0);
+    this.fog.update(dt, 0xa8b0c8, this.active && d?.special === 'fog' ? (s.homes.inside ? 0 : s.shelter.inside ? 0.12 : 0.3) : 0);
     if (!this.active || !d) return;
     const day = s.dayNight.day;
 
@@ -166,7 +169,7 @@ export class DisasterSystem {
     const p = s.player;
     // ลอยอยู่บนบก (ยานบิน) ไม่นับว่าปลอดภัย — ต้องอยู่เหนือน้ำจริง
     const overWater = isWater(s.tileAt(Math.floor(p.x / 16), Math.floor(p.y / 16)));
-    const atSafe = s.playerSafe || (s.boatRiding && overWater) || s.interiors.current !== null;
+    const atSafe = s.playerSafe || (s.boatRiding && overWater) || s.interiors.current !== null || s.homes.inside;
     const is = atSafe ? s.world.homeIsland : s.world.slots[Math.max(0, s.world.islandAt(Math.floor(p.x / 16), Math.floor(p.y / 16)))] ?? s.world.homeIsland;
     const cx = atSafe ? is.cx * 16 : p.x;
     const cy = atSafe ? is.cy * 16 : p.y;

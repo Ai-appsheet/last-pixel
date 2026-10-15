@@ -16,6 +16,8 @@ import type { ResourceNode } from '../entities/ResourceNode';
 import { RAIN_WATER_CAP, type Structure } from '../entities/Structure';
 import type { GameScene } from '../scenes/GameScene';
 import { MATERIAL_NAME, materialOf, shelterTiles } from './ShelterSystem';
+import { HAZARDS } from './HazardSystem';
+import { isDwelling, worstHazard } from '../data/homes';
 import { nutriLine } from './BodySystem';
 
 /** การ์ดข้อมูลของสิ่งที่ "จิ้ม/ชี้" หรือ "เดินเข้าใกล้" */
@@ -234,6 +236,11 @@ export class InspectSystem {
     } else lines.push(hpTxt);
     // บรรทัดสำคัญ (แสดงเสมอ): HP/ซ่อม + ช่องเก็บของ · ที่เหลือพับไว้
     if (st.storage) lines.push(`📦 เก็บของ ${st.storage.slots.filter(Boolean).length}/${st.storage.slots.length} ช่อง`);
+    // บ้านที่เข้าไปอยู่ได้: ทนภัยตามเลเวล vs ภัยหนักสุดตอนนี้ (data/homes.ts)
+    if (isDwelling(def) && !foreign && this.s.world.slotIndexAt(st.tx, st.ty) === this.s.world.home) {
+      const worst = worstHazard(HAZARDS, this.s.dayNight.day, this.s.hazards?.level ?? 1);
+      lines.push(`🚪 [E] ที่ประตู = เข้าบ้าน (ปลอดภัย) · บ้าน Lv.${st.lv}${worst ? ` · ภัยหนักสุดตอนนี้ (${worst.name}) แนะนำ Lv.${worst.power}+${st.lv >= worst.power ? ' ✔' : ' ⚠'}` : ''}`);
+    } else if (isDwelling(def) && foreign) lines.push(`🔒 บ้านของ ${this.s.world.slots[this.s.world.slotIndexAt(st.tx, st.ty)]?.ownerName || 'ผู้เล่นอื่น'} — ประตูล็อก`);
     const keep = lines.length;
     lines.push(def.desc);
     // บ้าน: เขตปลอดภัย + วัสดุ (ทนแผ่นดินไหว/ไฟป่า)

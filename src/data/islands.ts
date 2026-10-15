@@ -1,4 +1,5 @@
 import type { NodeType } from '../world/WorldGenerator';
+import { OPEN_ALL } from '../config/openWorld';
 
 export type Biome =
   | 'home' | 'forest' | 'snow' | 'desert' | 'jungle' | 'volcanic' | 'ruins' | 'central' | 'special' | 'dungeon'
@@ -27,8 +28,8 @@ export const BIOMES: Record<Biome, BiomeDef> = {
   desert: { id: 'desert', name: 'เกาะทะเลทราย', desc: 'ร้อนจัด — ทอง กำมะถัน กระบองเพชร', temp: [40, 14], danger: 1.2, color: '#ef7d57', wildlife: ['crab', 'scorpion', 'cobra', 'hermit_crab'], nightMobs: ['mummy', 'skeleton'] },
   jungle: { id: 'jungle', name: 'เกาะป่าดิบ', desc: 'พืชป่า เมล็ดหายาก และสไลม์', temp: [30, 22], danger: 1.1, color: '#257179', wildlife: ['boar', 'slime', 'monkey', 'parrot', 'cobra', 'firefly_swarm'], nightMobs: ['slime', 'bat'] },
   volcanic: { id: 'volcanic', name: 'เกาะภูเขาไฟ', desc: 'ถ่านหิน กำมะถัน คริสตัล — อิมป์และโกเลม', temp: [38, 28], danger: 1.5, color: '#b13e53', wildlife: ['imp'], nightMobs: ['imp', 'golem'] },
-  central: { id: 'central', name: 'เกาะกลาง (ตลาดแลกเปลี่ยน)', desc: 'เขตปลอดภัย — ห้ามต่อสู้ วางขาย/ซื้อของกับผู้เล่นอื่น · เปิดวันละ 2 รอบ รอบละ 60 นาที', temp: [27, 20], danger: 0, color: '#ffcd75', wildlife: [], nightMobs: [] },
-  special: { id: 'special', name: 'เกาะมหาสมบัติ', desc: 'แร่หายาก หีบสมบัติ · มอนดรอปกล่อง ×2 · เปิดวันละ 2 รอบ รอบละ 60 นาที (เวลาสุ่มทุกวัน)', temp: [25, 16], danger: 1.8, color: '#ffcd75', wildlife: ['golem', 'skeleton', 'mummy'], nightMobs: ['golem', 'shade', 'skeleton'] },
+  central: { id: 'central', name: 'เกาะกลาง (ตลาดแลกเปลี่ยน)', desc: `เขตปลอดภัย — ห้ามต่อสู้ วางขาย/ซื้อของกับผู้เล่นอื่น · ${OPEN_ALL ? 'เปิดตลอด' : 'เปิดวันละ 2 รอบ รอบละ 60 นาที'}`, temp: [27, 20], danger: 0, color: '#ffcd75', wildlife: [], nightMobs: [] },
+  special: { id: 'special', name: 'เกาะมหาสมบัติ', desc: `แร่หายาก หีบสมบัติ · มอนดรอปกล่อง ×2 · ${OPEN_ALL ? 'เปิดตลอด (ทรัพยากรรีเซ็ตทุกเที่ยงคืน)' : 'เปิดวันละ 2 รอบ รอบละ 60 นาที (เวลาสุ่มทุกวัน)'}`, temp: [25, 16], danger: 1.8, color: '#ffcd75', wildlife: ['golem', 'skeleton', 'mummy'], nightMobs: ['golem', 'shade', 'skeleton'] },
   dungeon: { id: 'dungeon', name: 'ดันเจี้ยน', desc: 'มืดมิด อันตราย — มอนสเตอร์ หีบสมบัติ บอส', temp: [16, 14], danger: 0, color: '#a77bdb', wildlife: [], nightMobs: [] },
   ruins: { id: 'ruins', name: 'เกาะซากโบราณ', desc: 'ซากอารยธรรม หีบสมบัติ และโครงกระดูก', temp: [24, 14], danger: 1.4, color: '#a77bdb', wildlife: ['skeleton', 'cobra'], nightMobs: ['skeleton', 'mummy'] },
   // ---------- ไบโอมชุดใหม่ ----------

@@ -15,6 +15,8 @@ export interface LightSource {
 export class LightingSystem {
   private rt: Phaser.GameObjects.RenderTexture;
   private flicker = 0;
+  /** แสงอุ่นเรืองรอบโคมไฟ/คบเพลิง (บวกแสงทับความมืด) — พูลใช้ซ้ำ ไม่สร้างใหม่ทุกเฟรม */
+  private warm: Phaser.GameObjects.Image[] = [];
 
   constructor(private scene: Phaser.Scene) {
     const cam = scene.cameras.main;
@@ -27,6 +29,7 @@ export class LightingSystem {
   update(dt: number, darkness: number, bloodMoon: boolean, lights: LightSource[], tint?: number) {
     if (darkness <= 0.01) {
       this.rt.setVisible(false);
+      for (const g of this.warm) g.setVisible(false);
       return;
     }
     this.flicker += dt;
@@ -59,5 +62,20 @@ export class LightingSystem {
       const key = ensureLight(this.scene, r);
       this.rt.erase(key, Math.round(l.x - r - ox), Math.round(l.y - r - oy));
     }
+    // แอ่งแสงอุ่น (ไม่รวมแสงรอบตัวผู้เล่น = ตัวแรก) → ห้องมืดมีจุดไฟส้มนวล ๆ แบบโคมแขวน
+    let n = 0;
+    for (let i = 1; i < seen.length; i++) {
+      const l = seen[i];
+      if (l.radius < 20) continue;
+      let g = this.warm[n];
+      if (!g) {
+        g = this.scene.add.image(0, 0, 'glow').setBlendMode(Phaser.BlendModes.ADD).setDepth(1e6 + 1);
+        this.warm.push(g);
+      }
+      n++;
+      const f = 1 + Math.sin(this.flicker * 7 + l.x * 0.3) * 0.04;
+      g.setVisible(true).setPosition(l.x, l.y).setDisplaySize(l.radius * 2.1 * f, l.radius * 1.8 * f).setAlpha(Math.min(0.55, darkness * 0.42));
+    }
+    for (let i = n; i < this.warm.length; i++) this.warm[i].setVisible(false);
   }
 }

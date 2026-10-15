@@ -5,7 +5,6 @@ import { MetaSave } from '../core/MetaSave';
 import type { GameScene } from '../scenes/GameScene';
 import { isLand } from '../world/tiles';
 import { GOLD_BOX_GEMS } from '../data/loot';
-import { ITEMS } from '../data/items';
 import { bkkDayKey, msToMidnight, shiftDayKey } from '../core/WorldClock';
 
 /**
@@ -158,9 +157,9 @@ export class DailySystem {
     s.spawnDrop(x ?? s.player.x, (y ?? s.player.y) + 6, tier, 1);
     Sfx.play('levelUp');
     s.fx.sparks(x ?? s.player.x, (y ?? s.player.y) - 6, 0xffcd75, 14, 22);
-    const next = streak % 7 === 6 ? ' · พรุ่งนี้การันตีกล่องทอง!' : streak < 3 ? ` · ต่อเนื่องครบ 3 วันโอกาสกล่องทองเพิ่ม` : '';
-    EventBus.emit('banner', `🎁 กล่องฟรีวันนี้: ${ITEMS[tier].name}!`, `รับต่อเนื่อง ${streak} วัน${next}`, tier === 'box_legend' ? '#73eff7' : tier === 'box_gold' ? '#ffcd75' : '#a7f070');
-    EventBus.emit('dailybox:claimed', tier, streak);
+    const next = streak % 7 === 6 ? 'พรุ่งนี้การันตีกล่องทอง!' : streak < 3 ? 'ครบ 3 วันโอกาสกล่องทองเพิ่ม' : '';
+    // 🎰 UI เล่นวงล้อสุ่มกล่อง (fx/RewardFx.dailyRoll) แล้วโชว์ผล + คำใบ้วันถัดไป
+    EventBus.emit('dailybox:claimed', tier, streak, next);
     return tier;
   }
 

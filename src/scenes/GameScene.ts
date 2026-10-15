@@ -13,13 +13,19 @@ import { RECIPES } from '../data/recipes';
 import { SPECIAL_SLOT, centerState, specialState, type SpecialState } from '../core/SpecialIsland';
 import { WorldEventSystem } from '../systems/WorldEventSystem';
 import { GatherSystem } from '../systems/GatherSystem';
+import { RespawnSystem } from '../systems/RespawnSystem';
+import { PAID_RESPAWN, respawnFee } from '../config/openWorld';
+import { WaypointSystem } from '../systems/WaypointSystem';
+import { MouseMove } from '../systems/MouseMove';
+import { LoadoutSystem } from '../systems/LoadoutSystem';
+import { presence } from '../systems/PresenceSystem';
 import { BUILD, hasAnvil, type BuildDef } from '../data/buildables';
 import { getCharacter } from '../data/characters';
 import { BIOMES } from '../data/islands';
 import { CROPS, ITEMS, type ItemDef } from '../data/items';
 import { STATUS_INFO, classOf, statusPower, type WeaponClass } from '../data/weapons';
 import { RARITY, mobBoxDrop, plusMult, rollBox, type BoxTier } from '../data/loot';
-import { BUILD_LEVEL } from '../data/upgrade';
+import { BUILD_LEVEL, levelOfSlot } from '../data/upgrade';
 import { UpgradeSystem, migrateUpgradeSave, savedLevel, type ItemRef } from '../systems/UpgradeSystem';
 import { ADVENTURE_LOOT, DUNGEON_BOSS_BOXES, capBoxTier, isBoxTier, ruinChestBox, type BoxSource, type LootZone } from '../data/loot';
 import { MOBS, mobFreeMove, type MobDef } from '../data/mobs';
@@ -45,8 +51,12 @@ import { IMPACT_MULT, ShelterSystem, burnable, materialOf } from '../systems/She
 import { HazardSystem } from '../systems/HazardSystem';
 import { BiomeSystem } from '../systems/BiomeSystem';
 import { AmbientSystem } from '../systems/AmbientSystem';
+import { AtmosphereSystem } from '../systems/AtmosphereSystem';
 import { BuildSystem } from '../systems/BuildSystem';
 import { CombatFx, itemEl, motionOk, projEl, type FxShot } from '../fx/CombatFx';
+import { HealthBars } from '../fx/HealthBars';
+import { GearAura, auraOf } from '../fx/GearAura';
+import { EquipFx } from '../fx/EquipFx';
 import { DailySystem } from '../systems/DailySystem';
 import { DayNightSystem } from '../systems/DayNightSystem';
 import { DisasterSystem } from '../systems/DisasterSystem';
@@ -66,6 +76,10 @@ import { fadeIn, fadeTo } from '../ui/transition';
 import { FpsWatch, qualityKnobs } from '../core/Quality';
 import { GRACE_DAYS, STARTER_BASES, STARTER_WEAPONS } from '../data/starter';
 import { GuideSystem } from '../systems/GuideSystem';
+import { HomeSystem } from '../systems/HomeSystem';
+import { HOME } from '../data/homes';
+import { setupAllItems } from '../systems/AllItemsSystem';
+import { ALL_ITEMS } from '../config/allItems';
 import { NODE_NAMES } from '../data/encyclopedia';
 import { drinkRaw, eatNutri, freshBody, restCure, robotCharge, ROBOT_FUEL } from '../systems/BodySystem';
 import { eventChestBox } from '../data/worldEvents';
@@ -99,6 +113,10 @@ export class GameScene extends Phaser.Scene {
   world!: World;
   room!: RoomInfo;
   fx!: CombatFx;
+  /** หลอดเลือดเล็กบนหัว (เฉพาะตอนต่อสู้) */
+  hpBars!: HealthBars;
+  /** เอฟเฟกต์แปลงร่างตอนสวมของ */
+  equipFx!: EquipFx;
   market!: MarketSystem;
   daily!: DailySystem;
   weather!: WeatherSystem;
@@ -107,13 +125,23 @@ export class GameScene extends Phaser.Scene {
   upgrades!: UpgradeSystem;
   /** เขตปลอดภัยรอบบ้าน + วัสดุทนภัย */
   shelter!: ShelterSystem;
+  /** เข้าไปอยู่ในบ้าน (ห้องข้างในบ้านที่นอนได้) */
+  homes!: HomeSystem;
   /** แปลนที่ปักหมุดไว้ (b:<id> / r:<recipeId>) — HUD แสดงของที่ยังขาด */
   pinned: string | null = null;
   disaster!: DisasterSystem;
   /** กิจกรรมตามเวลาจริง (เกาะกลาง/มหาสมบัติเปิด-ปิด · เกาะกิจกรรม) */
   worldEvents!: WorldEventSystem;
+  /** มอนที่ฆ่าแล้วตายจริงจนถึงรอบเกิดใหม่ทุก 1 ชม. */
+  mobRespawn!: RespawnSystem;
+  /** จุดหมายจากแผนที่ (คลิกหมุด) + ลูกศรนำทาง */
+  waypoints!: WaypointSystem;
   /** เก็บของตกแต่ง/ซากเครื่องบิน */
   gather!: GatherSystem;
+  /** เมาส์: กดค้าง/คลิกเดิน + คลิกของ = ทำแบบกด E (systems/MouseMove) */
+  mouseMove!: MouseMove;
+  /** ช่องใช้งานพร้อมกัน: อาวุธ · เข็มขัดเครื่องมือ · แสง · มือรอง · ใช้ด่วน */
+  loadout!: LoadoutSystem;
   quests: QuestSystem | null = null;
   guide!: GuideSystem;
   achievements!: AchievementSystem;
@@ -138,6 +166,10 @@ export class GameScene extends Phaser.Scene {
   mailboxSprite: Phaser.GameObjects.Image | null = null;
   /** 📦 ท่าส่งของ (ร้านค้าทางไกล) ข้างตู้จดหมาย */
   postSprite: Phaser.GameObjects.Image | null = null;
+  /** ♾ หีบคลังเสบียงไม่จำกัด (โหมดของครบ) ข้างตู้จดหมาย */
+  supplySprite: Phaser.GameObjects.Image | null = null;
+  /** โหมดของครบ: แจกชุดเริ่มต้นไปแล้วรุ่นไหน (เซฟใน RunSave.allItems) */
+  allItemsGrant = 0;
   merchantSprite: Phaser.GameObjects.Sprite | null = null;
   stalls: { x: number; y: number; index: number }[] = [];
   visited = new Set<string>();
@@ -177,6 +209,7 @@ export class GameScene extends Phaser.Scene {
   /** อยู่ในเขตผจญภัยตอนนี้ (อัปเดตทุก 0.4 วิใน updateZones) */
   private adventure = false;
   private ambient!: AmbientSystem;
+  private atmos!: AtmosphereSystem;
   private gameOverFlag = false;
   private ui!: UIScene;
   private zoneTimer = 0;
@@ -274,12 +307,17 @@ export class GameScene extends Phaser.Scene {
     cam.setBackgroundColor('#29366f');
 
     this.fx = new CombatFx(this);
+    this.hpBars = new HealthBars(this);
+    this.equipFx = new EquipFx(this);
+    new GearAura(this, this.player, () => auraOf(this.player), { fx: this.fx, weapon: () => this.player.heldSprite }); // ออร่าจากอุปกรณ์/ชุด
     this.dayNight = new DayNightSystem();
     this.lighting = new LightingSystem(this);
     this.spawner = new SpawnSystem(this);
     this.creatures = new CreatureSystem(this);
     this.rivals = new RivalSystem(this);
     this.ambient = new AmbientSystem(this);
+    this.worldPost();
+    this.atmos = new AtmosphereSystem(this);
     this.weather = new WeatherSystem(this);
     this.market = new MarketSystem();
     this.market.refresh(this.room.seed, 1);
@@ -293,10 +331,16 @@ export class GameScene extends Phaser.Scene {
     this.auto = new AutoSystem(this);
     this.interiors = new InteriorSystem(this);
     this.shelter = new ShelterSystem(this);
+    this.homes = new HomeSystem(this);
     this.quests = new QuestSystem(STORY, (items) => this.giveItems(items));
     this.guide = new GuideSystem(this);
     this.worldEvents = new WorldEventSystem(this);
+    this.mobRespawn = new RespawnSystem();
+    this.waypoints = new WaypointSystem(this);
     this.gather = new GatherSystem(this);
+    this.mouseMove = new MouseMove(this);
+    this.loadout = new LoadoutSystem(this);
+    presence.attach(this); // ผู้เล่นคนอื่นในโลก (live · ออนไลน์เท่านั้น)
 
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', this.onPointerDown, this);
@@ -339,7 +383,10 @@ export class GameScene extends Phaser.Scene {
     if (save) this.applySave(save);
     else this.daily.setMailbox(true);
     if (this.showcase && !save) buildShowcase(this);
+    setupAllItems(this, save); // โหมดของครบ: เงิน/แปลน/วัสดุไม่จำกัด + ชุดเริ่มต้น (ครั้งแรก)
+    this.loadout.init(save); // เซฟเก่า/เกมใหม่: จัดอาวุธ/เครื่องมือ/คบไฟเข้าช่องใช้งาน
     this.interiors.init();
+    this.homes.init(save?.player.home); // เซฟตอนอยู่ในบ้าน → กลับเข้าบ้านหลังเดิม
     this.hazards = new HazardSystem(this);
     this.biomeFx = new BiomeSystem(this);
     // เกาะใหม่: เซฟทันที (กลับมาเข้าเกาะเดิมได้แม้ปิดเกมเร็ว)
@@ -439,6 +486,8 @@ export class GameScene extends Phaser.Scene {
     this.wreckSprite = null;
     this.mailboxSprite = null;
     this.postSprite = null;
+    this.supplySprite = null;
+    this.allItemsGrant = 0;
     this.merchantSprite = null;
     this.visited = new Set();
     this.wallet = new Wallet();
@@ -476,6 +525,13 @@ export class GameScene extends Phaser.Scene {
     const [px, py] = ([[-2, 0], [0, 2], [-2, -2], [-2, 2]] as [number, number][]).map(([dx, dy]) => [m.tx + dx, m.ty + dy]).find(([x, y]) => land3(x, y)) ?? [m.tx - 2, m.ty];
     this.postSprite = this.add.image(px * 16 + 8, py * 16 + 16, 'trading_post').setOrigin(0.5, 1).setDepth(py * 16 + 16);
     this.signs.push({ x: px * 16 + 8, y: py * 16 + 16, text: '📦 ท่าส่งของ — ซื้อ/ขายทางไกลได้ตลอด (แพงกว่าเกาะกลาง)' });
+    // ♾ คลังเสบียงไม่จำกัด (โหมดของครบ): หีบทองอีกฝั่งของตู้จดหมาย — คิดจากจุดเกิดเหมือนท่าส่งของ (เซฟเก่าก็ได้ ไม่ต้องเซฟ)
+    if (ALL_ITEMS) {
+      const [sx, sy] = ([[2, 0], [0, -2], [2, 2], [2, -2], [0, 2]] as [number, number][]).map(([dx, dy]) => [m.tx + dx, m.ty + dy]).find(([x, y]) => !isWater(this.tileAt(x, y)) && (x !== px || y !== py)) ?? [m.tx + 2, m.ty];
+      this.supplySprite = this.add.image(sx * 16 + 8, sy * 16 + 16, 'reward_chest').setOrigin(0.5, 1).setDepth(sy * 16 + 16);
+      this.tweens.add({ targets: this.supplySprite, scaleY: 1.06, yoyo: true, repeat: -1, duration: 700, ease: 'Sine.easeInOut' });
+      this.signs.push({ x: sx * 16 + 8, y: sy * 16 + 16, text: '♾ คลังเสบียงไม่จำกัด — หยิบของได้ทุกชิ้นในเกม ไม่มีวันหมด' });
+    }
   }
 
   /** เกาะกลาง: แผงร้าน 12 แผงรอบลาน + พ่อค้า + เตาไฟ + ป้าย */
@@ -648,7 +704,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   isSafeTile(tx: number, ty: number) {
-    return this.world.islandAt(tx, ty) === CENTER_SLOT;
+    return this.world.islandAt(tx, ty) === CENTER_SLOT || !!this.homes?.isRoomTile(tx, ty);
   }
 
   isTileBlocked(tx: number, ty: number): boolean {
@@ -840,7 +896,7 @@ export class GameScene extends Phaser.Scene {
     const list = this.structures
       .filter((st) => st.storage && !st.def.prod && !st.getData('foreign') && (home ? this.world.slotIndexAt(st.tx, st.ty) === this.world.home : d2(st) < R2))
       .sort((a, b) => d2(a) - d2(b));
-    const pool = new MaterialPool(p.inventory, list.map((st) => st.storage!));
+    const pool = new MaterialPool(p.inventory, list.map((st) => st.storage!), ALL_ITEMS);
     this.poolCache = { at: this.time.now, n: this.structures.length, slot, pool };
     return pool;
   }
@@ -990,7 +1046,7 @@ export class GameScene extends Phaser.Scene {
     const inv = this.player.inventory;
     inv.add(weaponId, 1);
     const at = inv.slots.findIndex((s) => s?.id === weaponId);
-    if (at >= 0 && at < HOTBAR_SIZE) this.player.selected = at;
+    if (at >= 0) this.loadout.equip(at, 'weapon'); // ลงช่อง ⚔ อาวุธบนแถบหมวด
     const ammo = ITEMS[weaponId]?.ranged?.ammo;
     if (ammo) inv.add(ammo, 40);
     this.freeBuilds.add(baseId);
@@ -1004,7 +1060,7 @@ export class GameScene extends Phaser.Scene {
 
   /** รู้แปลนนี้หรือยัง (b:<id> / i:<id>) */
   knows(key: string) {
-    return this.creative || DEFAULT_KNOWN.has(key) || this.learned.has(key) || !BLUEPRINT_ITEM.has(key);
+    return this.creative || ALL_ITEMS || DEFAULT_KNOWN.has(key) || this.learned.has(key) || !BLUEPRINT_ITEM.has(key);
   }
 
   /** เก็บแปลน → เรียนรู้ทันที · ซ้ำ = แปลงเป็นเหรียญครึ่งราคา */
@@ -1051,7 +1107,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   setTilt(t: number) {
-    const cam = this.cameras.main;
     const webgl = this.renderer.type === Phaser.WEBGL;
     // คุณภาพต่ำ: ไม่มีมุม 2.5D (ประหยัด post-effect ทั้งจอ)
     if (t > 0 && !qualityKnobs().tilt) {
@@ -1059,17 +1114,24 @@ export class GameScene extends Phaser.Scene {
       t = 0;
     }
     this.tilt = webgl ? Phaser.Math.Clamp(t, 0, 0.9) : 0;
-    if (this.tilt > 0) {
-      let p = cam.getPostPipeline('TiltPipeline') as TiltPipeline | TiltPipeline[] | undefined;
-      if (!p || (Array.isArray(p) && !p.length)) {
-        cam.setPostPipeline('TiltPipeline');
-        p = cam.getPostPipeline('TiltPipeline') as TiltPipeline | TiltPipeline[];
-      }
-      const inst = Array.isArray(p) ? p[0] : p;
-      if (inst) inst.tilt = this.tilt;
-    } else cam.resetPostPipeline();
+    const inst = this.worldPost();
+    if (inst) inst.tilt = this.tilt;
     this.applyCamera();
     EventBus.emit('toast', this.tilt > 0 ? '🎥 มุมมอง 2.5D (V เพื่อสลับ)' : '🎥 มุมมองบนลงล่าง', '#94b0c2');
+  }
+
+  /** post-effect ทั้งจอของกล้องโลก (มุม 2.5D + ปรับโทน + ลำแสง) — ติดไว้ตลอด (tilt 0 = ไม่บิด) */
+  private worldPost(): TiltPipeline | null {
+    if (this.renderer.type !== Phaser.WEBGL) return null;
+    const cam = this.cameras.main;
+    let p = cam.getPostPipeline('TiltPipeline') as unknown as TiltPipeline | TiltPipeline[] | undefined;
+    if (!p || (Array.isArray(p) && !p.length)) {
+      cam.setPostPipeline('TiltPipeline');
+      p = cam.getPostPipeline('TiltPipeline') as unknown as TiltPipeline | TiltPipeline[];
+      const fresh = Array.isArray(p) ? p[0] : p;
+      if (fresh) fresh.tilt = this.tilt;
+    }
+    return (Array.isArray(p) ? p[0] : p) ?? null;
   }
 
   private applyCamera() {
@@ -1144,11 +1206,12 @@ export class GameScene extends Phaser.Scene {
         if (t && (c.touch.held.has('attack') || c.touch.pressed.has('attack'))) p.aimAt(t.x, t.y);
       } else if (wp) p.aimAt(wp.x, wp.y);
       const hb = c.hotbarPressed();
-      if (hb >= 0) p.selected = hb;
+      if (hb >= 0) this.loadout.press(hb); // แถบหมวด: 1 อาวุธ · 2 เครื่องมือ · 3 ฟื้นเลือด · 4 บัฟ · 5 แสง
       const cyc = c.hotbarCycle();
-      if (cyc) p.selected = (p.selected + cyc + HOTBAR_SIZE) % HOTBAR_SIZE;
+      if (cyc) this.loadout.cycle('weapon', cyc); // จอย LB/RB = สลับอาวุธ
     }
 
+    this.mouseMove.update(dt);
     this.tickVehicles(dt);
     if (this.riding) this.updateBoat(dt);
     else p.update(dt, c, uiOpen, this.environment());
@@ -1158,7 +1221,7 @@ export class GameScene extends Phaser.Scene {
       if (c.pressed('skill')) this.useSkill();
       if (c.pressed('use')) this.useHeld();
       const overUI = this.ui?.isPointerOverUI(pointer) ?? false;
-      const mouseAttack = !c.touchMode && !c.padMode && pointer.leftButtonDown() && !overUI && !this.build.on;
+      const mouseAttack = !c.touchMode && !c.padMode && pointer.leftButtonDown() && !overUI && !this.build.on && !this.mouseMove.busy;
       const touchAttack = c.touch.held.has('attack') || c.touch.pressed.delete('attack');
       const heldDef = p.held ? ITEMS[p.held.id] : undefined;
       const attackish = !this.build.on && (!heldDef || ['tool', 'weapon', 'ranged', 'material', 'light', 'seed', 'ammo'].includes(heldDef.type));
@@ -1174,11 +1237,14 @@ export class GameScene extends Phaser.Scene {
     this.buffTimer -= dt;
     if (this.buffTimer <= 0) this.refreshBaseBuffs();
     this.worldEvents.update(dt);
+    this.mobRespawn.update(dt);
+    this.waypoints.update(dt);
     this.gather.update(dt);
     this.interiors.update();
+    this.homes.update(dt);
     this.hazards.update(dt);
     this.biomeFx.update(dt);
-    this.player.thirstMult = this.shelter.inside ? 1 : this.hazards.thirstMult; // ในบ้าน: คลื่นความร้อนไม่ทำให้กระหาย
+    this.player.thirstMult = this.homes.inside ? HOME.drain : this.shelter.inside ? 1 : this.hazards.thirstMult; // ในบ้าน: คลื่นความร้อนไม่ทำให้กระหาย · อยู่ในห้อง = กระหายช้าลงครึ่ง
     this.player.envSpeed = this.biomeFx.speedMult * (this.shelter.inside ? 1 : this.hazards.speedMult); // โคลน · น้ำท่วม · พายุทราย/หิมะ
     const view = this.cameras.main.worldView;
     this.chunksR.update(dt, view);
@@ -1209,16 +1275,17 @@ export class GameScene extends Phaser.Scene {
     }
     this.inspect.update(dt);
     this.upgrades.update(dt);
-    this.hint = this.computeHint();
-    this.weather.update(dt, this.currentBiome);
+    this.hint = this.mouseMove.hoverHint ?? this.computeHint();
+    this.weather.update(dt, this.homes.inside ? 'indoor' : this.currentBiome);
 
     const lights: LightSource[] = [{ x: p.x, y: p.y, radius: p.lightRadius }];
     for (const f of this.fireSources()) lights.push({ x: f.x, y: f.y - 6, radius: BALANCE.campfireLight });
     for (const s of this.structures) if (s.def.id !== 'campfire' && s.lightRadius > 0) lights.push({ x: s.x, y: s.y - 10, radius: s.lightRadius });
-    lights.push(...this.interiors.lights(), ...this.biomeFx.lights(), ...this.hazards.lights());
-    const dark = Math.max(this.dayNight.darkness, this.weather.intensity * 0.35, p.sanity < 30 ? 0.3 : 0, this.interiors.darkness, this.hazards.darkness, this.biomeFx.darkness);
+    lights.push(...this.interiors.lights(), ...this.homes.lights(), ...this.biomeFx.lights(), ...this.hazards.lights());
+    const dark = Math.max(this.dayNight.darkness, this.weather.intensity * 0.35, p.sanity < 30 ? 0.3 : 0, this.interiors.darkness, this.homes.darkness, this.hazards.darkness, this.biomeFx.darkness);
     this.lighting.update(dt, dark, this.dayNight.isBloodMoon || (this.disaster.active && this.disaster.current?.id === 'demon_night'), lights, this.hazards.darkTint ?? this.disaster.darkTint);
     this.ambient.update(dt);
+    this.atmos.update(dt, dark);
 
     this.autosaveTimer -= dt;
     if (this.autosaveTimer <= 0) {
@@ -1283,7 +1350,8 @@ export class GameScene extends Phaser.Scene {
     }
     for (const b of this.braziers) if (Phaser.Math.Distance.Between(p.x, p.y, b.x, b.y) < 90) lit = true;
     const raining = this.weather.raining && is?.biome !== 'desert' && is?.biome !== 'snow' && is?.biome !== 'glacier';
-    return { ambient, warmth, raining, dark: dn.darkness > 0.5, lit, survival: !this.creative, grace: this.inGrace };
+    const env = { ambient, warmth, raining, dark: dn.darkness > 0.5, lit, survival: !this.creative, grace: this.inGrace };
+    return this.homes?.inside ? this.homes.indoorEnv(env) : env;
   }
 
   private updateZones(dt: number) {
@@ -1341,7 +1409,7 @@ export class GameScene extends Phaser.Scene {
   // ======================================================================
   private onPointerDown(pointer: Phaser.Input.Pointer) {
     Sfx.unlock();
-    if (this.gameOverFlag || this.ui.isPointerOverUI(pointer)) return;
+    if (this.gameOverFlag || this.ui.isPointerOverUI(pointer) || this.mouseMove.claimed) return;
     const wp = this.pointerWorld(pointer);
     if (!wp) return;
     if (this.controls.touchMode) {
@@ -1387,7 +1455,9 @@ export class GameScene extends Phaser.Scene {
     const ranged = !!weapon && !!ITEMS[weapon.slot.id].ranged;
     if (def?.type === 'throw') this.throwBomb();
     else if (!def || ['tool', 'weapon', 'ranged', 'material', 'light', 'seed', 'ammo'].includes(def.type)) {
-      if (ranged) this.shoot();
+      if (this.fishAhead()) return; // 🎣 คันเบ็ดในเข็มขัด + หันเข้าน้ำ = ตกปลา
+      // ธนู/ปืน: ศัตรูไม่อยู่ใกล้ + ตรงหน้าเป็นต้นไม้/หิน = ตัด/ขุด (ใช้เครื่องมือในเข็มขัด)
+      if (ranged && !(this.nodeAhead() && !this.hostileNear(140))) this.shoot();
       else this.attack();
     }
     else if (touch) {
@@ -1395,6 +1465,65 @@ export class GameScene extends Phaser.Scene {
       else this.useHeld();
       this.controls.touch.held.delete('attack');
     }
+  }
+
+  // ---------------------------------------------------------------- ช่องใช้งาน: เลือกเครื่องมือตามเป้า (systems/LoadoutSystem.ts)
+  private hostileNear(r: number) {
+    const p = this.player;
+    return this.mobList().some((m) => m.active && m.hostile && Phaser.Math.Distance.Between(p.x, p.y, m.x, m.y) < r);
+  }
+
+  /** ต้นไม้/หินตรงหน้าที่ตีถึง (null = มีศัตรูในวงฟันก่อน หรือไม่มี) */
+  nodeAhead(): ResourceNode | null {
+    const p = this.player;
+    const tool = p.tool;
+    const w = p.weaponRef?.slot;
+    const cls = classOf(w ? ITEMS[w.id] : undefined);
+    if (!this.playerSafe && this.mobsInArc(p.x, p.y, p.aim.angle(), tool.range + 12, cls.arc ?? 1.1, 1).length) return null;
+    const nr = Math.min(tool.range, 24) * 0.8;
+    return this.nearestNode(p.x + p.aim.x * nr, p.y + 3 + p.aim.y * nr, 15, (n) => n.available);
+  }
+
+  /** ⛏ ตรงหน้าเป็นต้นไม้/หิน → ชิ้นในช่องเครื่องมือ (สลับเป็นชิ้นที่เหมาะจากกระเป๋าเอง) ถ้าแรงกว่าของในมือ */
+  private beltToolAhead() {
+    const p = this.player;
+    const held = p.held;
+    if (held && ITEMS[held.id].type === 'tool') return null;
+    const node = this.nodeAhead();
+    if (!node || node.spec.harvest === 'pick') return null;
+    const kind = node.spec.harvest;
+    const best = this.loadout.toolFor(kind);
+    return best && best.tool[kind] > p.tool[kind] ? best : null;
+  }
+
+  /** 🎣 ปุ่มโจมตีหันเข้าน้ำ (ไม่มีศัตรูใกล้ ไม่มีต้นไม้/หินตรงหน้า) + มีคันเบ็ด = ช่องเครื่องมือสลับเป็นเบ็ดแล้วเหวี่ยง · ปลากิน = ดึง */
+  private fishAhead(): boolean {
+    const p = this.player;
+    if (this.riding || this.hostileNear(36)) return false;
+    if (this.fishing) {
+      if (!p.beltRod) return false;
+      if (this.fishing.state === 'bite') this.reelIn();
+      return true;
+    }
+    if (p.attackCd > 0 || this.nodeAhead()) return false;
+    const x = p.x + p.aim.x * 26;
+    const y = p.feetY + p.aim.y * 26;
+    if (!isWater(this.tileAt(Math.floor(x / 16), Math.floor(y / 16))) || !this.loadout.ensureRod()) return false;
+    p.attackCd = 0.6;
+    p.flashTool(p.equip.tool1!);
+    this.castLine();
+    return true;
+  }
+
+  /** คลิก/เดินถึงน้ำ (MouseMove): มีคันเบ็ดในเข็มขัด = ตกปลา · ไม่งั้นเหมือนกด E */
+  waterAct() {
+    const p = this.player;
+    const heldRod = !!p.held && ITEMS[p.held.id].type === 'rod';
+    if (!heldRod && this.loadout.hasRod()) {
+      p.attackCd = 0;
+      if (this.fishAhead()) return;
+    }
+    this.waterInteract(); // คลิกน้ำ = ทำกับน้ำเท่านั้น (ไม่ไปเปิดหีบ/เก็บหญ้าที่อยู่ใกล้กว่า)
   }
 
   private autoTarget(): Mob | null {
@@ -1430,7 +1559,9 @@ export class GameScene extends Phaser.Scene {
 
   attack() {
     const p = this.player;
-    const held = p.weaponRef?.slot ?? null;
+    // ⛏ เข็มขัดเครื่องมือ: ตีต้นไม้ = ขวาน · ตีหิน/แร่ = อีเต้อ (อาวุธยังเป็นอาวุธหลัก ไม่ต้องสลับ)
+    const belt = this.beltToolAhead();
+    const held = belt?.slot ?? p.weaponRef?.slot ?? null;
     const def = held ? ITEMS[held.id] : undefined;
     const cls = classOf(def);
     const stam = BALANCE.attackStamina * (cls.stamina ?? 1);
@@ -1438,8 +1569,9 @@ export class GameScene extends Phaser.Scene {
     p.attackCd = p.attackCooldown / (cls.speed ?? 1);
     p.stamina -= stam;
     p.startSwing();
+    if (belt) p.flashTool(belt.slot);
     Sfx.play('swing');
-    const tool = p.tool;
+    const tool = belt?.tool ?? p.tool;
     const atkMult = p.char.stats.damageMult * (1 + p.stats.atk / 100);
     const reach = tool.range + 12;
     const angle = p.aim.angle();
@@ -1506,7 +1638,9 @@ export class GameScene extends Phaser.Scene {
         }
       } else if (!hitMob && this.playerSafe) this.noFight();
     }
-    if (used && held && def?.tool && p.wearWeapon(1)) EventBus.emit('toast', `${def.name} พังแล้ว!`, '#b13e53');
+    if (used && belt) {
+      if (p.wearLoadout(belt.key, 1)) EventBus.emit('toast', `${def!.name} พังแล้ว!`, '#b13e53');
+    } else if (used && held && def?.tool && p.wearWeapon(1)) EventBus.emit('toast', `${def.name} พังแล้ว!`, '#b13e53');
   }
 
   /** มอนในวงฟัน (กรวยตามทิศเล็ง) เรียงใกล้→ไกล · ชิดตัวมากโดนเสมอ */
@@ -1562,6 +1696,7 @@ export class GameScene extends Phaser.Scene {
     const crit = Math.random() < BALANCE.critChance + critPct / 100;
     const dmg = base * (crit ? BALANCE.critMult : 1) * Phaser.Math.FloatBetween(0.9, 1.1);
     m.hurt(dmg, p, { crit, knock: (cls.knock ?? 1) * (def?.knockback ?? 1), armorPierce: cls.armorPierce });
+    this.hpBars.poke(p);
     if (p.stats.lifesteal > 0) p.heal(dmg * p.stats.lifesteal / 100);
     // ประกาย+ดาวตรงจุดโดน · hit-stop เฉพาะคริ/อาวุธหนัก · คริจอสั่นนิดๆ
     const heavy = (cls.speed ?? 1) < 0.8;
@@ -1931,6 +2066,7 @@ export class GameScene extends Phaser.Scene {
     // ธาตุหลัก → สีธาตุ · เวทไม่มีธาตุ (อาร์เคน/เงา) → ม่วง
     const color = el ? STATUS_INFO[el.kind].color : fxEl === 'arcane' || fxEl === 'dark' ? 0xc58cff : undefined;
     mob.hurt(sdmg, shot, { crit, knock: def ? (cls.knock ?? 1) * (def.knockback ?? 1) : 1, color });
+    this.hpBars.poke(this.player);
     if (this.player.stats.lifesteal > 0) this.player.heal(sdmg * this.player.stats.lifesteal / 100);
     this.applyWeaponStatus(mob, def, sdmg);
     if (def?.chain) this.chainLightning(mob, sdmg * 0.6, def.chain);
@@ -2085,12 +2221,19 @@ export class GameScene extends Phaser.Scene {
     return d < BALANCE.reach + 12 && (!m || d < Phaser.Math.Distance.Between(p.x, p.feetY, m.x, m.y));
   }
 
+  /** ยืนใกล้หีบคลังเสบียง (โหมดของครบ) */
+  private supplyNear(): boolean {
+    const s = this.supplySprite;
+    return !!s && Phaser.Math.Distance.Between(this.player.x, this.player.feetY, s.x, s.y) < BALANCE.reach + 12;
+  }
+
   // ---------- โต้ตอบ (E) ----------
-  private interact() {
+  interact() {
     const p = this.player;
     const R = BALANCE.reach;
     if (this.fishing) return this.reelIn();
     if (this.riding) return this.ridingInteract();
+    if (this.homes.inside) return this.homes.interact();
     const portal = this.interiors.interactAt();
     if (portal) return portal.run();
     const near = (x: number, y: number, r = R + 4) => Phaser.Math.Distance.Between(p.x, p.feetY, x, y) < r;
@@ -2101,12 +2244,15 @@ export class GameScene extends Phaser.Scene {
     const grave = this.graves.find((g) => near(g.x, g.y));
     if (grave) return this.openGrave(grave);
     if (this.postNear()) return EventBus.emit('ui:market', { remote: true });
+    if (this.supplyNear()) return EventBus.emit('ui:supply');
     if (this.mailboxSprite && (this.daily.mailboxReady || this.daily.boxAvailable) && near(this.mailboxSprite.x, this.mailboxSprite.y)) return this.daily.claim();
     if (this.merchantSprite && near(this.merchantSprite.x, this.merchantSprite.y, R + 10)) return EventBus.emit('ui:market');
     const stall = this.stalls.find((s) => near(s.x, s.y + 4, 30));
     if (stall) return EventBus.emit('ui:trade', stall.index);
     const t = this.structTarget();
     if (t.boat) return this.board(t.boat);
+    const door = this.homes.doorNear(); // หน้าประตูบ้าน = เข้าบ้าน (ซ่อมได้จากด้านข้างบ้าน)
+    if (door) return this.homes.useDoor(door);
     if (t.repair) return void this.repairStructure(t.repair);
     const st = t.st;
     if (st) {
@@ -2123,6 +2269,12 @@ export class GameScene extends Phaser.Scene {
     const node = this.nearestNode(p.x, p.feetY, R, (n) => n.isPickable);
     if (node) return this.pick(node);
     if (this.gather.interact()) return;
+    this.waterInteract();
+  }
+
+  /** ริมน้ำ: ตกปลา (ถือเบ็ด) / ดื่ม / ตักน้ำ — E (ไม่มีอย่างอื่นใกล้ตัว) หรือคลิกน้ำ (systems/MouseMove) */
+  waterInteract() {
+    const p = this.player;
     if (this.waterNearby()) {
       if (p.held && ITEMS[p.held.id].type === 'rod') return this.castLine();
       if (p.char.passive.robot) return EventBus.emit('toast', 'หุ่นยนต์ดื่มน้ำไม่ได้!', '#ef7d57');
@@ -2216,7 +2368,7 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
-  private sleep() {
+  sleep() {
     const dn = this.dayNight;
     if (!dn.isNight && dn.phase !== 'dusk') return EventBus.emit('toast', 'ยังไม่ง่วง — นอนได้ตอนกลางคืน', '#94b0c2');
     if (this.disaster.active) return EventBus.emit('toast', 'นอนไม่ได้ระหว่างภัยพิบัติ!', '#ef7d57');
@@ -2273,17 +2425,18 @@ export class GameScene extends Phaser.Scene {
     EventBus.emit('node:harvested', node.kind);
   }
 
-  useHeld() {
+  /** F / ใช้ของในมือ · quick = เรียกจากช่องใช้ด่วน (ไม่วนกลับไปช่องใช้ด่วนอีก) */
+  useHeld(quick = false) {
     const p = this.player;
     const held = p.held;
-    if (!held) return;
+    if (!held) return void (!quick && this.loadout.useQuick()); // มือว่าง → 🍖 ของใช้ด่วน
     const def = ITEMS[held.id];
     if (def.type === 'box') return this.openBox(held.id as BoxTier);
     if (def.type === 'cosmetic' && def.cosmetic) {
       p.inventory.consumeAt(p.selected);
       MetaSave.addWardrobe(`${def.cosmetic.slot}:${def.cosmetic.id}`);
       p.cosmetic[def.cosmetic.slot] = def.cosmetic.id;
-      p.refreshLook();
+      this.equipFx.playCosmetic(def.cosmetic.slot, def.cosmetic.id, () => p.refreshLook());
       Sfx.play('achievement');
       return EventBus.emit('toast', `เก็บ${def.name}เข้าตู้เสื้อผ้า และสวมใส่แล้ว`, '#a77bdb');
     }
@@ -2298,7 +2451,8 @@ export class GameScene extends Phaser.Scene {
       this.equipFrom(p.selected);
       return;
     }
-    if (!def.food) return;
+    if (!quick && this.loadout.useHeldTool()) return; // ถือเครื่องมือ/คบไฟ → เข้าช่องใช้งาน
+    if (!def.food) return void (!quick && this.loadout.useQuick()); // ของที่กินไม่ได้ → 🍖 ของใช้ด่วน
     if (p.char.passive.robot && def.type === 'food') return EventBus.emit('toast', 'หุ่นยนต์ไม่กินอาหาร — ถือไม้/เหล็กแท่งแล้วกด F', '#ef7d57');
     if (def.type === 'heal' && p.hp >= p.maxHp) return EventBus.emit('toast', 'HP เต็มอยู่แล้ว', '#94b0c2');
     p.eat(def.food);
@@ -2385,7 +2539,7 @@ export class GameScene extends Phaser.Scene {
     p.inventory.slots[index] = prev ? { ...prev } : null;
     p.inventory.version++;
     p.recalc();
-    p.refreshLook();
+    this.equipFx.play(item.id, levelOfSlot(item), () => p.refreshLook()); // ลุคใหม่เปลี่ยนตอนแสงวาบ
     Sfx.play('craft');
     EventBus.emit('toast', `สวม${item.plus ? ` Lv.${item.plus + 1}` : ''} ${def.name} → ${SLOT_NAME[slot]}`, '#a7f070');
     EventBus.emit('gear:changed');
@@ -2518,7 +2672,8 @@ export class GameScene extends Phaser.Scene {
 
   private burnTorch(dt: number) {
     const p = this.player;
-    if (p.holdingTorch && p.inventory.wear(p.selected, dt)) EventBus.emit('toast', 'คบไฟมอดดับแล้ว', '#ef7d57');
+    if (p.held && ITEMS[p.held.id].type === 'light' && p.inventory.wear(p.selected, dt)) EventBus.emit('toast', 'คบไฟมอดดับแล้ว', '#ef7d57');
+    this.loadout.burn(dt, this.dayNight.darkness > 0.3 || this.interiors.darkness > 0); // 🔦 ช่องแสง: มอดเฉพาะตอนมืด
   }
 
   // ======================================================================
@@ -2907,6 +3062,7 @@ export class GameScene extends Phaser.Scene {
 
   /** ยานรับดาเมจ — พัง = ลงจากยาน + ของในห้องเก็บของหล่นเป็นถุง */
   damageVehicle(b: Vehicle, n: number) {
+    this.hpBars.poke(b);
     this.fx.damageNumber(b.x, b.y - 10 - b.alt, n, 0xef7d57);
     if (!b.damage(n)) return;
     const p = this.player;
@@ -3330,6 +3486,7 @@ export class GameScene extends Phaser.Scene {
   // ตาย → เกิดใหม่ (ไม่มีจบ — เนื้อเรื่องเดินต่อ)
   // ======================================================================
   onMobKilled(mob: Mob) {
+    this.mobRespawn.onKill(mob);
     const extraMeat = this.player.char.passive.extraMeat ?? 0;
     const zone = this.lootZoneAt(mob.x, mob.y);
     // บอสดันเจี้ยน/บอสคืนภัยพิบัติ = ข้อยกเว้นเพดานบนเกาะเรา (ได้ถึงกล่องเหล็ก)
@@ -3389,6 +3546,19 @@ export class GameScene extends Phaser.Scene {
   private respawn() {
     const p = this.player;
     this.deathCause = p.lastDamage || 'ไม่ทราบสาเหตุ';
+    // เกิดใหม่แบบจ่ายเงิน (config/openWorld.ts) — ทุกที่ รวมเขตผจญภัย: หยุดเกมแล้วโชว์หน้าต่าง "จ่ายแล้วเกิดใหม่"
+    if (PAID_RESPAWN && !this.showcase) {
+      if (this.gameOverFlag) return;
+      this.gameOverFlag = true;
+      this.auto.stop(true);
+      p.body.setVelocity(0, 0);
+      Sfx.play('death');
+      this.physics.pause();
+      const fee = respawnFee(p.level);
+      this.pendingRespawn = { cause: this.deathCause, fee, canPay: this.wallet.unlimited || this.wallet.coins >= fee, unlimited: this.wallet.unlimited, have: this.wallet.coins, level: p.level };
+      EventBus.emit('ui:paid_respawn', this.pendingRespawn);
+      return;
+    }
     // ตายในเขตผจญภัย = ตายถาวรทันที (ไม่ลดเลเวล ไม่มีซื้อชีวิต) · โหมดโชว์เคสยกเว้น (โลกทดสอบ)
     if (this.computeAdventure() && !this.showcase) {
       const is = this.world.slots[this.world.slotIndexAt(Math.floor(p.x / 16), Math.floor(p.y / 16))];
@@ -3436,6 +3606,46 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
+  /**
+   * จ่ายค่าเกิดใหม่ → เกิดทันทีที่บ้าน (เตียง/บ้าน หรือจุดเกิดบนเกาะเรา) · ของติดตัวครบ · อมตะ 3 วิ
+   * เงินไม่พอ = เกิดได้เหมือนกันแต่เลเวลลด 1 ขั้น (ไม่มีตายถาวร)
+   */
+  /** รอผู้เล่นกด "จ่ายแล้วเกิดใหม่" (UIScene สร้างใหม่ระหว่างนั้น → RespawnPopup เปิดหน้าต่างซ้ำจากค่านี้) */
+  pendingRespawn: { cause: string; fee: number; canPay: boolean; unlimited: boolean; have: number; level: number } | null = null;
+
+  paidRespawn() {
+    const p = this.player;
+    if (!this.gameOverFlag || !this.pendingRespawn) return;
+    this.pendingRespawn = null;
+    const fee = respawnFee(p.level);
+    const paid = this.wallet.spend(fee);
+    this.gameOverFlag = false;
+    this.physics.resume();
+    this.interiors.resetToWorld();
+    this.homes.reset();
+    if (this.riding) {
+      this.riding.riding = false;
+      this.riding = null;
+      p.riding = false;
+    }
+    const bed = this.structures.find((s) => s.def.sleep && !s.getData('foreign') && s.def.layer === 'object');
+    p.setPosition(bed ? bed.x : this.world.spawn.tx * 16 + 8, bed ? bed.y + 10 : this.world.spawn.ty * 16 + 8);
+    const lv0 = p.level;
+    if (!paid) p.loseLevel();
+    p.hp = p.maxHp;
+    p.stamina = p.maxStamina;
+    p.hunger = Math.max(p.hunger, 60);
+    p.thirst = Math.max(p.thirst, 60);
+    p.sanity = Math.max(p.sanity, 60);
+    p.temp = 50;
+    p.protect(3);
+    this.adventure = false;
+    this.cameras.main.flash(500, 255, 240, 200);
+    Sfx.play('achievement');
+    EventBus.emit('toast', paid ? `💖 เกิดใหม่ที่บ้าน (จ่าย ${this.wallet.unlimited ? '∞' : `${fee.toLocaleString()} เหรียญ`}) — ของติดตัวอยู่ครบ` : `💖 เงินไม่พอ — เกิดใหม่ที่บ้านฟรี แต่เลเวลลด Lv.${lv0} → Lv.${p.level}`, paid ? '#a7f070' : '#ef7d57');
+    this.autosave();
+  }
+
   /** ยอมแพ้ → ตายถาวร */
   giveUp() {
     this.permaDeath(false);
@@ -3444,6 +3654,7 @@ export class GameScene extends Phaser.Scene {
   private finishRespawn(loseLevel: boolean) {
     const p = this.player;
     this.interiors.resetToWorld(); // ตายในดันเจี้ยน → กลับขอบเขตโลกเกาะ
+    this.homes.reset();
     if (loseLevel) Sfx.play('death');
     // ของในกระเป๋า (ไม่ใช่ hotbar) ตกเป็นถุงที่จุดตาย + เสียเงิน 10%
     const items: Slot[] = [];
@@ -3453,7 +3664,7 @@ export class GameScene extends Phaser.Scene {
       p.inventory.slots[i] = null;
     }
     p.inventory.version++;
-    const lost = Math.floor(this.wallet.coins * 0.1);
+    const lost = this.wallet.unlimited ? 0 : Math.floor(this.wallet.coins * 0.1); // เงินไม่จำกัด = ไม่เสียเงิน
     this.wallet.spend(lost);
     if (items.length) {
       const g = this.graveSpot();
@@ -3549,13 +3760,15 @@ export class GameScene extends Phaser.Scene {
       version: 3, savedAt: Date.now(), roomId: this.room.id, slot: this.world.home, character: p.char.id,
       worldTime: this.worldTime, day: this.dayNight.day, time: this.dayNight.time, weather: this.weather.state,
       player: {
-        x: p.x, y: p.y, hp: p.hp, hunger: p.hunger, thirst: p.thirst, stamina: p.stamina, temp: p.temp, sanity: p.sanity,
+        x: this.homes.savePos()?.x ?? p.x, y: this.homes.savePos()?.y ?? p.y, hp: p.hp, hunger: p.hunger, thirst: p.thirst, stamina: p.stamina, temp: p.temp, sanity: p.sanity,
         selected: p.selected, slots: p.inventory.serialize(), armor: null, cosmetic: { ...p.cosmetic },
         trained: { ...p.trained },
         level: p.level, xp: p.xp, revives: this.revives, blueprints: [...this.learned],
         interiors: this.interiors.serialize(),
+        home: this.homes.serialize(),
         body: { ...p.nutri },
         equip: Object.fromEntries(Object.entries(p.equip).map(([k, v]) => [k, v ? { ...v } : null])) as Equipment,
+        loadout: this.loadout.serialize(),
       },
       wallet: { coins: this.wallet.coins, gems: this.wallet.gems },
       nodes: this.world.nodes.filter((n) => !n.daily && n.id < EVENT_NODE_BASE && (!n.available || n.hp >= 0)).map((n) => [n.id, n.available, n.hp, n.regrowAt]),
@@ -3570,9 +3783,10 @@ export class GameScene extends Phaser.Scene {
       mailbox: this.daily.mailbox,
       quest: { index: this.quests?.index ?? 0, progress: this.quests?.progress ?? 0 },
       kills: this.kills, counters: this.achievements.counters, visited: [...this.visited],
-      survived: this.disaster.survived, trades: this.market.trades, introSeen: this.introSeen, starterPicked: this.starterPicked, freeBuilds: [...this.freeBuilds], showcase: this.showcase,
+      survived: this.disaster.survived, trades: this.market.trades, introSeen: this.introSeen, starterPicked: this.starterPicked, freeBuilds: [...this.freeBuilds], showcase: this.showcase, allItems: this.allItemsGrant,
       pinned: this.pinned ?? undefined,
       worldEvents: this.worldEvents.serialize(),
+      respawn: this.mobRespawn.serialize(),
       wreckLeft: this.gather.wreckLeft,
     };
   }
@@ -3667,6 +3881,7 @@ export class GameScene extends Phaser.Scene {
     this.visited = new Set(s.visited);
     this.disaster.survived = s.survived;
     this.worldEvents.load(s.worldEvents);
+    this.mobRespawn.load(s.respawn);
     this.gather.wreckLeft = s.wreckLeft ?? this.gather.wreckLeft;
     if (this.gather.wreckLeft <= 0) this.removeWreck();
     this.market.refresh(this.room.seed, s.day);
@@ -3818,7 +4033,7 @@ export class GameScene extends Phaser.Scene {
     return pts.some(([x, y]) => isWater(this.tileAt(Math.floor(x / 16), Math.floor(y / 16))));
   }
 
-  private computeHint(): string | null {
+  computeHint(): string | null {
     if (this.uiOpen) return null;
     const p = this.player;
     const R = BALANCE.reach;
@@ -3833,16 +4048,20 @@ export class GameScene extends Phaser.Scene {
     if (this.build.upgrade) return this.controls.touchMode ? '⬆ โหมดอัพเกรด: หันหน้าเข้าหาของแล้วแตะปุ่มหลัก · แตะ ⬆ = ออก' : '⬆ โหมดอัพเกรด: คลิกสิ่งก่อสร้าง/ยานเพื่ออัพ Lv +1 · U/คลิกขวา = ออก';
     const portal = this.interiors.interactAt();
     if (portal) return portal.label;
+    if (this.homes.inside) return this.homes.hint();
     const near = (x: number, y: number, r = R + 4) => Phaser.Math.Distance.Between(p.x, p.feetY, x, y) < r;
     if (this.crates.some((c) => !c.looted && near(c.sprite.x, c.sprite.y - 4, R))) return 'ค้นกล่องเสบียง';
     if (this.daily.nearest(p.x, p.feetY, R + 4)) return 'เปิดกล่องร่มชูชีพ';
     if (this.graves.some((g) => near(g.x, g.y))) return 'เก็บของคืนจากถุง';
     if (this.postNear()) return '📦 ท่าส่งของ: ซื้อ/ขายทางไกล (แพงกว่าเกาะกลาง)';
+    if (this.supplyNear()) return '♾ เปิดคลังเสบียงไม่จำกัด (หยิบของได้ทุกชิ้น)';
     if (this.mailboxSprite && (this.daily.mailboxReady || this.daily.boxAvailable) && near(this.mailboxSprite.x, this.mailboxSprite.y)) return this.daily.boxAvailable ? 'เปิดตู้จดหมาย (🎁 กล่องฟรีวันนี้)' : 'เปิดตู้จดหมาย';
     if (this.merchantSprite && near(this.merchantSprite.x, this.merchantSprite.y, R + 10)) return 'คุยกับพ่อค้ากลาง (ซื้อ/ขาย/แลกเพชร)';
     if (this.stalls.some((s) => near(s.x, s.y + 4, 30))) return 'แผงตลาด: ดู/ซื้อ/วางขายของ';
     const t = this.structTarget();
     if (t.boat) return `ขึ้น${t.boat.def.name}`;
+    const door = this.homes.doorNear();
+    if (door) return this.homes.doorHint(door);
     if (t.repair) return `ซ่อม${t.repair.def.name} (${Math.ceil(t.repair.hp)}/${t.repair.maxHp})`;
     const st = t.st;
     if (st) {

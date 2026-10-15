@@ -4,8 +4,9 @@
  * ทดสอบ: ?specialopen = บังคับเปิดเกาะมหาสมบัติ · ?centeropen = บังคับเปิดเกาะกลาง
  */
 import { GRID } from '../data/islands';
+import { OPEN_ALL } from '../config/openWorld';
 import { daySchedule, type GateKind, type TimeWindow } from '../data/worldEvents';
-import { MINUTE, WorldClock, bkkClock, bkkDayKey, dayStartOf, fmtLeft as fmt, shiftDayKey } from './WorldClock';
+import { MINUTE, WorldClock, bkkClock, bkkDayKey, dayStartOf, fmtLeft as fmt, msToMidnight, shiftDayKey } from './WorldClock';
 
 /** ช่องเกาะพิเศษ: ขอบล่างกลางของตาราง (ช่องนี้ไม่แจกให้ผู้เล่น) */
 export const SPECIAL_SLOT = (GRID - 1) * GRID + Math.floor(GRID / 2);
@@ -22,6 +23,8 @@ export interface SpecialState {
   round: number;
   /** เวลาเปิดรอบถัดไป (epoch ms) */
   nextOpen: number;
+  /** เปิดตลอด (config/openWorld.ts OPEN_ALL) — ไม่มีเวลาปิด */
+  always?: boolean;
 }
 
 /** รอบเปิดทั้งหมด (epoch ms) ของเมื่อวาน วันนี้ พรุ่งนี้ */
@@ -38,6 +41,8 @@ function windowsAround(kind: GateKind, now: number): { start: number; end: numbe
 }
 
 export function gateState(kind: GateKind, now = WorldClock.now()): SpecialState {
+  // เปิดตลอด: รอบ = วัน (เกาะมหาสมบัติยังรีเซ็ตทรัพยากรทุกเที่ยงคืน)
+  if (OPEN_ALL) return { open: true, msLeft: msToMidnight(now), round: Math.floor((now + 7 * 3_600_000) / 86_400_000), nextOpen: now, always: true };
   const ws = windowsAround(kind, now);
   const cur = ws.find((w) => now >= w.start && now < w.end);
   const next = ws.find((w) => w.start > now) ?? ws[ws.length - 1];
@@ -57,9 +62,15 @@ export function centerState(now = WorldClock.now()): SpecialState {
 /** 1:05:09 / 42:10 */
 export const fmtLeft = fmt;
 
+/** ข้อความเวลาของเกาะที่เปิดอยู่: 'เปิดตลอด' หรือเวลาที่เหลือ '42:10' */
+export function openLeft(st: SpecialState): string {
+  return st.always ? 'เปิดตลอด' : fmt(st.msLeft);
+}
+
 /** เวลาเปิดรอบถัดไป (ข้อความเวลาไทย เช่น '19:40 น.') */
 export function nextOpenText(now = WorldClock.now(), kind: GateKind = 'special'): string {
   const st = gateState(kind, now);
+  if (st.always) return 'เปิดตลอด';
   return `${bkkClock(st.nextOpen)} น.`;
 }
 

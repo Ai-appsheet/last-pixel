@@ -2,8 +2,8 @@ export type SkillId = 'quick_fix' | 'snipe' | 'first_aid' | 'harvest_rain' | 'da
 
 /** ระดับการ์ดฮีโร่ (สีกรอบ/ตรา): gold ทอง · red แดง · special เงิน/ม่วง (AI) — แค่หน้าตา ไม่มีผลต่อค่าพลัง */
 export type HeroTier = 'gold' | 'red' | 'special';
-/** id ตัวละครทั้ง 7 (เรียงตามการ์ด) */
-export type HeroId = 'mechanic' | 'medic' | 'hunter' | 'farmer' | 'scout' | 'shaman' | 'robot';
+/** id ตัวละครทั้ง 8 (เรียงตามการ์ด) */
+export type HeroId = 'mechanic' | 'medic' | 'hunter' | 'farmer' | 'scout' | 'shaman' | 'robot' | 'lifeguard';
 
 export type UnlockRule =
   | { type: 'default' }
@@ -58,6 +58,7 @@ export const CHARACTERS: CharacterDef[] = [
   C('scout', 'ลม', 'นักสำรวจ', 'red', '🧭', 'ผมดำฟู ผ้าคลุมแดง คล่องแคล่ว', { 1: 'R', 8: 'r', 2: 'K', 9: 'k', 3: 'O', 4: 'b', 5: 'B', 6: 'F', 7: 'O' }),
   C('shaman', 'มืด', 'หมอผี', 'red', '🔮', 'ผมยาว ที่คาดหัวขนนก ลายเผ่า', { 1: 'P', 8: 'u', 2: 'k', 9: 'M', 3: 'C', 4: 'P', 5: 'O', 6: 'U', 7: 'O' }),
   C('robot', 'B-07', 'หุ่นยนต์ AI', 'special', 'AI', 'หุ่นยนต์เงินตาฟ้า เสาอากาศบนหัว', { 1: 'L', 8: 'W', 2: 'D', 9: 'F', 3: 'C', 4: 'L', 5: 'D', 6: 'F', 7: 'O', p: 'C' }),
+  C('lifeguard', 'ไข่มุก', 'ไลฟ์การ์ด', 'special', '🏖', 'สาวชายหาดผมยาวสลวย ผิวแทน ชุดบิกินี่แดงปะการัง หุ่นโค้งเว้า', { 1: 'M', 8: 'N', 2: 'K', 9: 'k', 3: 'T', 4: 'R', 5: '#6e2034', 6: 'R', 7: 'r' }),
 ];
 
 export const ZOMBIE_COLORS: Record<string, string> = { 1: 'F', 8: 'D', 2: 'Z', 9: 'H', 3: 'R', 4: 'P', 5: 'O', 6: 'U', 7: 'O', p: 'H' };
@@ -65,7 +66,7 @@ export const RIVAL_COLORS: Record<string, string> = { 1: 'O', 8: 'F', 2: 'k', 9:
 export const MERCHANT_COLORS: Record<string, string> = { 1: 'Y', 8: 'y', 2: 'k', 9: 'M', 3: 'O', 4: 'P', 5: 'U', 6: 'P', 7: 'm' };
 export const SHADE_COLORS: Record<string, string> = { 1: 'O', 8: 'U', 2: 'U', 9: 'O', 3: 'u', 4: 'O', 5: 'U', 6: 'O', 7: 'O', p: 'U' };
 
-/** ข้อมูลการ์ดฮีโร่สำหรับหน้าเลือกตัวละคร (เรียงแล้ว: แถวบน 4 แถวล่าง 3) */
+/** ข้อมูลการ์ดฮีโร่สำหรับหน้าเลือกตัวละคร (เรียงแล้ว: แถวบน 4 แถวล่าง 4) */
 export const HERO_CARDS = CHARACTERS.map(({ id, name, role, tier, badge, skill }) => ({ id: id as HeroId, name, role, tier, badge, skill: skill.name }));
 
 export const getCharacter = (id: string) => CHARACTERS.find((c) => c.id === id) ?? CHARACTERS.find((c) => c.id === 'mechanic')!;

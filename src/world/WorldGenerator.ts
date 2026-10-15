@@ -5,6 +5,7 @@ import { RNG } from '../core/RNG';
 import { CENTER_SLOT, type RoomPlayer } from '../core/RoomService';
 import { BIOMES, GRID, SLOT_SIZE, WORLD_SIZE, nodeTable, type Biome, type Specialty } from '../data/islands';
 import { TILE, isWater } from './tiles';
+import { OPEN_ALL } from '../config/openWorld';
 import { EVENT_TYPES, type EventPlan, type EventTypeId } from '../data/worldEvents';
 
 export type NodeType =
@@ -164,6 +165,8 @@ export class World {
     gy0 = Math.max(0, gy0 - 1);
     gx1 = Math.min(GRID - 1, gx1 + 1);
     gy1 = Math.min(GRID - 1, gy1 + 1);
+    // โหมดเปิดทุกที่: ทั้งตาราง GRID×GRID (ทุกเครื่องขอบเท่ากัน — แล่นไปหาผู้เล่นคนไหนก็ได้ เหลือแค่ขอบนอกสุดของโลก)
+    if (OPEN_ALL) [gx0, gy0, gx1, gy1] = [0, 0, GRID - 1, GRID - 1];
     this.bounds = { x0: gx0 * SLOT_SIZE, y0: gy0 * SLOT_SIZE, x1: (gx1 + 1) * SLOT_SIZE, y1: (gy1 + 1) * SLOT_SIZE };
 
     // ดันเจี้ยนใต้เกาะเรา อยู่แถวพิเศษใต้ตาราง

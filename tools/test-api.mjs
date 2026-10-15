@@ -582,6 +582,63 @@ await step('ชีต Chat เก็บไม่เกิน 2,000 แถว (�
   assert.equal(g.messages[49].id, p.message.id);
 });
 
+await step('presence.put / get / sync: ตัดค่า · ไม่เห็นตัวเอง · จำกัด 1 ครั้ง/วิ · เส้นทาง · กรองตามช่อง · ซ่อน · หมดอายุ · bye', async () => {
+  bad(await call('presence.sync', { x: 1, y: 1 }), 'auth');
+  bad(await call('presence.get'), 'auth');
+  await advance(5000);
+  // A ยืนบนเกาะกลาง (ช่อง 60) — ค่าแปลกๆ ถูกตัด
+  const pa = ok(await call('presence.put', { x: 7000.7, y: -50, s: 60, f: 'u', fl: 1, a: 'atk', c: 'medic', o: 'Bad Key!', h: 'hood', k: 'red', lv: 5000, hp: 140, al: true, z: 'safe', name: ' <อลิซ> ', rd: 'raft', alt: 3 }, ta));
+  assert.equal(typeof pa.serverTime, 'number');
+  const g = ok(await call('presence.get', {}, tb));
+  const ea = g.players.find((p) => p.id === accA.id);
+  assert.ok(ea, 'B ต้องเห็น A');
+  assert.deepEqual([ea.x, ea.y, ea.s, ea.f, ea.fl, ea.a, ea.c, ea.o, ea.h, ea.k, ea.lv, ea.hp, ea.al, ea.z, ea.n, ea.rd, ea.alt, ea.hid], [7000, 0, 60, 'u', 1, 'atk', 'medic', '', 'hood', 'red', 999, 100, 1, 'safe', 'อลิซ', 'raft', 3, 0]);
+  assert.equal(ea.t, pa.serverTime);
+  assert.ok(!ok(await call('presence.get', {}, ta)).players.some((p) => p.id === accA.id), 'ไม่เห็นตัวเอง');
+  // ส่งซ้ำทันที → rate (put) / ข้ามการบันทึกแต่ยังได้รายชื่อ (sync)
+  assert.ok(bad(await call('presence.put', { x: 1, y: 1, s: 60 }, ta), 'rate').wait > 0);
+  const sr = ok(await call('presence.sync', { x: 1, y: 1, s: 60 }, ta));
+  assert.equal(sr.rated, true);
+  assert.equal(ok(await call('presence.get', {}, tb)).players.find((p) => p.id === accA.id).x, 7000);
+  // เส้นทาง: จุดย้อนหลัง (ms ก่อนส่ง) ต่อจากของเดิม เรียงตามเวลา
+  await advance(2500);
+  ok(await call('presence.put', { x: 7100, y: 200, s: 60, tr: [[2000, 7020, 40], [1000, 7060, 120], [0, 7100, 200], ['x', 1e9, 5]] }, ta));
+  const tr = ok(await call('presence.get', {}, tb)).players.find((p) => p.id === accA.id).tr;
+  assert.deepEqual(tr.map((p) => [p[1], p[2]]), [[7000, 0], [7020, 40], [7060, 120], [7100, 200]]);
+  assert.ok(tr.every((p, i) => !i || p[0] > tr[i - 1][0]));
+  // sync: B ส่งของตัวเอง (ช่อง 61 ติดเกาะกลาง) + ได้ A กลับมาในคำขอเดียว · A เห็น B
+  const sb = ok(await call('presence.sync', { x: 7400, y: 300, s: 61, c: 'robot', lv: 3, hp: 50, z: 'adv', area: 1 }, tb));
+  assert.equal(sb.rated, false);
+  assert.ok(sb.players.some((p) => p.id === accA.id));
+  const seenB = ok(await call('presence.get', { s: 60, area: 2 }, ta)).players.find((p) => p.c === 'robot');
+  assert.ok(seenB && seenB.c === 'robot' && seenB.hp === 50 && seenB.z === 'adv');
+  // กรองตามช่อง: C อยู่มุมซ้ายบน (ช่อง 0) ห่างเกาะกลาง 5 ช่อง
+  assert.ok(!ok(await call('presence.sync', { x: 100, y: 100, s: 0, area: 2 }, tc)).players.some((p) => p.id === accA.id));
+  assert.ok(ok(await call('presence.get', { s: 0, area: 5 }, tc)).players.some((p) => p.id === accA.id));
+  assert.ok(ok(await call('presence.get', { s: 0 }, tc)).players.some((p) => p.id === accA.id), 'ไม่ส่ง area = ทั้งโลก');
+  // ซ่อน (เข้าดันเจี้ยน/บ้าน) → คนอื่นไม่เห็น
+  await advance(1100);
+  ok(await call('presence.put', { x: 7100, y: 200, s: 1000, hid: true }, ta));
+  assert.ok(!ok(await call('presence.get', {}, tb)).players.some((p) => p.id === accA.id));
+  await advance(1100);
+  ok(await call('presence.put', { x: 7100, y: 200, s: 60 }, ta));
+  assert.ok(ok(await call('presence.get', {}, tb)).players.some((p) => p.id === accA.id));
+  // ไม่ส่งเกิน 20 วิ → ไม่ตอบ (key ยังอยู่) · ส่งใหม่ = กลับมา
+  await advance(21000);
+  assert.ok(!ok(await call('presence.get', {}, tb)).players.some((p) => p.id === accA.id));
+  ok(await call('presence.put', { x: 7200, y: 220, s: 60 }, ta));
+  const back = ok(await call('presence.get', {}, tb)).players.find((p) => p.id === accA.id);
+  assert.ok(back && back.tr.length === 1, 'เส้นทางเก่ากว่า 6 วิถูกตัด');
+  // key หมดอายุ 60 วิ → หายจาก index · ส่งใหม่ได้ทันที (ไม่ติด rate)
+  await advance(61000);
+  assert.equal(ok(await call('presence.get', {}, tc)).players.length, 0);
+  ok(await call('presence.put', { x: 7300, y: 230, s: 60 }, ta));
+  assert.ok(ok(await call('presence.get', {}, tb)).players.some((p) => p.id === accA.id));
+  // bye → หายทันที
+  ok(await call('presence.put', { bye: true }, ta));
+  assert.ok(!ok(await call('presence.get', {}, tb)).players.some((p) => p.id === accA.id));
+});
+
 await step('logout → token ใช้ไม่ได้', async () => {
   ok(await call('logout', {}, ta));
   bad(await call('me', {}, ta), 'auth');

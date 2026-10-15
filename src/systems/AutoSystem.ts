@@ -360,7 +360,7 @@ export class AutoSystem {
 
   private bestToolPower(kind: 'tree' | 'rock'): number {
     const inv = this.s.player.inventory;
-    let best = kind === 'tree' ? 1 : 0;
+    let best = Math.max(kind === 'tree' ? 1 : 0, this.s.player.beltTool(kind)?.tool[kind] ?? 0); // ⛏ เข็มขัดเครื่องมือ
     for (let i = 0; i < HOTBAR_SIZE; i++) {
       const t = inv.slots[i] && ITEMS[inv.slots[i]!.id].tool;
       if (t) best = Math.max(best, t[kind]);
@@ -371,7 +371,8 @@ export class AutoSystem {
   private chooseTool(kind: 'tree' | 'rock') {
     const p = this.s.player;
     let best = -1;
-    let power = kind === 'tree' ? 1 : 0;
+    const belt = p.beltTool(kind)?.tool[kind] ?? 0;
+    let power = Math.max(kind === 'tree' ? 1 : 0, belt);
     for (let i = 0; i < HOTBAR_SIZE; i++) {
       const t = p.inventory.slots[i] && ITEMS[p.inventory.slots[i]!.id].tool;
       if (t && t[kind] > power) {
@@ -380,6 +381,11 @@ export class AutoSystem {
       }
     }
     if (best >= 0) p.selected = best;
+    else if (belt && p.held && ITEMS[p.held.id].type === 'tool') {
+      // เข็มขัดดีกว่า: ปล่อยเครื่องมือในมือ (GameScene.attack ใช้ของในเข็มขัดเอง)
+      const free = p.inventory.slots.findIndex((sl, i) => i < HOTBAR_SIZE && (!sl || ITEMS[sl.id].type === 'material'));
+      if (free >= 0) p.selected = free;
+    }
   }
 
   /** ใช้อาวุธแรงสุด (ใน hotbar หรืออาวุธหลักที่สวม) */

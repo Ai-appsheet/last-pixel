@@ -99,7 +99,8 @@ export class ChunkRenderer {
     const maskOf = (x: number, y: number, test: (t: number) => boolean) =>
       (test(at(x, y - 1)) ? 1 : 0) | (test(at(x + 1, y)) ? 2 : 0) | (test(at(x, y + 1)) ? 4 : 0) | (test(at(x - 1, y)) ? 8 : 0);
     const notWater = (t: number) => !isWater(t);
-    const isGreen = (t: number) => t === TILE.GRASS || t === TILE.FOREST;
+    // ชั้นความสูง: พื้นป่า/หินยกสูง (มีหน้าผาด้านใต้) · ผนังดันเจี้ยนสูงสุด
+    const raised = (t: number) => t === TILE.FOREST || t === TILE.STONE;
     const ground: number[][] = [];
     const edgeA: number[][] = [];
     const edgeB: number[][] = [];
@@ -122,14 +123,38 @@ export class ChunkRenderer {
         if (isWater(t)) {
           const m = maskOf(wx, wy, notWater);
           if (m) ea = EDGE.FOAM + m;
-        } else if (t === TILE.SAND || t === TILE.DESERT) {
-          const m = maskOf(wx, wy, isWater);
-          if (m) ea = EDGE.WET + m;
-          const mg = skinsGrass(biome) ? 0 : maskOf(wx, wy, isGreen);
-          if (mg) eb = EDGE.GRASS + mg;
-        } else if (t === TILE.GRASS && !skinsGrass(biome)) {
-          const m = maskOf(wx, wy, (n) => n === TILE.FOREST);
-          if (m) ea = EDGE.FOREST + m;
+          if (t === TILE.SHALLOW) {
+            const md = maskOf(wx, wy, (n) => n === TILE.DEEP);
+            if (md) eb = EDGE.DROP + md;
+          }
+        } else if (t === TILE.ROCKWALL) {
+          const m = maskOf(wx, wy, (n) => n !== TILE.ROCKWALL);
+          if (m) ea = EDGE.WALL + m;
+        } else if (t === TILE.CAVE) {
+          const m = maskOf(wx, wy, (n) => n === TILE.ROCKWALL);
+          if (m) ea = EDGE.AO + m;
+        } else if (raised(t)) {
+          // หน้าผาของที่สูง (ด้านที่ติดพื้นต่ำกว่า/ชนิดอื่น)
+          const m = maskOf(wx, wy, (n) => n !== t && n !== TILE.ROCKWALL);
+          if (m) ea = (t === TILE.STONE ? EDGE.ROCK : EDGE.CLIFF) + m;
+        } else {
+          if (t === TILE.SAND || t === TILE.DESERT) {
+            const m = maskOf(wx, wy, isWater);
+            if (m) ea = EDGE.WET + m;
+          }
+          // ลิ้นหญ้าหยักยื่นทับพื้นที่ไม่ใช่หญ้า (ทราย ลานหิน ดิน)
+          if ((t === TILE.SAND || t === TILE.DESERT || t === TILE.BRICK || t === TILE.DIRT) && !skinsGrass(biome)) {
+            const mg = maskOf(wx, wy, (n) => n === TILE.GRASS);
+            if (mg) eb = EDGE.GRASS + mg;
+          }
+          // เงาที่สูงทอดลงพื้นต่ำ
+          if (eb < 0) {
+            const ms = maskOf(wx, wy, raised);
+            if (ms) {
+              if (ea < 0) ea = EDGE.SHADE + ms;
+              else eb = EDGE.SHADE + ms;
+            }
+          }
         }
         a.push(ea);
         b.push(eb);

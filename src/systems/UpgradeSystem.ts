@@ -60,7 +60,7 @@ export class UpgradeSystem {
     const inv = s.materials();
     const mark = (ok: boolean) => (s.creative ? '' : ok ? '✔' : '✘');
     return [
-      ...c.items.map(([i, n]) => `${mark(inv.count(i) >= n)}${ITEMS[i]?.name ?? i} ${s.creative ? n : `${Math.min(inv.count(i), 9999)}/${n}`}`),
+      ...c.items.map(([i, n]) => `${mark(inv.count(i) >= n)}${ITEMS[i]?.name ?? i} ${s.creative ? n : inv.unlimited ? `∞/${n}` : `${Math.min(inv.count(i), 9999)}/${n}`}`),
       `${mark(s.wallet.coins >= c.coins)}💰${c.coins.toLocaleString()}`,
     ].join(' · ');
   }

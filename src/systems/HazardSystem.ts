@@ -17,6 +17,7 @@ export function hazardBox(level: number): BoxTier {
   return level >= 3 ? 'box_iron' : 'box_wood';
 }
 import { IMPACT_MULT, QUAKE, materialOf } from './ShelterSystem';
+import { hazardPower } from '../data/homes';
 
 /**
  * ภัยพิบัติระหว่างวัน — มาเรื่อยๆ ไม่หยุด (นอกจากภัยประจำคืนใน DisasterSystem)
@@ -228,7 +229,8 @@ export class HazardSystem {
     this.tick = 0.5;
     this.told = false;
     this.quakeHits.clear();
-    EventBus.emit('ui:splash', { art: `hz_${h.id}`, title: `⚠ ${h.name}!`, sub: `${h.warn} · ระดับ ${this.level}`, color: h.color });
+    const rec = hazardPower(h.id, this.level); // ภัยที่ซัดตัวบ้าน → เลเวลบ้านที่แนะนำ (data/homes.ts)
+    EventBus.emit('ui:splash', { art: `hz_${h.id}`, title: `⚠ ${h.name}!`, sub: `${h.warn} · ระดับ ${this.level}${rec ? ` · 🏠 แนะนำบ้าน Lv.${rec}+` : ''}`, color: h.color });
     Sfx.play('thunder');
     const s = this.s;
     const lvl = this.level;
@@ -266,6 +268,7 @@ export class HazardSystem {
         s.weather.set('rain', this.left + 5);
         break;
       case 'locusts': {
+        if (s.homes.inside) break; // อยู่ในบ้าน: ภัยรอบตัวไม่ก่อตัวในห้อง (ตัวบ้านรับแรงแทน — HomeSystem)
         const p = s.player;
         const a = Math.random() * Math.PI * 2;
         const dots: Phaser.GameObjects.Image[] = [];
@@ -274,10 +277,10 @@ export class HazardSystem {
         break;
       }
       case 'flood':
-        this.buildFlood();
+        if (!s.homes.inside) this.buildFlood();
         break;
       case 'toxic_fog':
-        for (let i = 0; i < Math.min(8, 3 + lvl); i++) this.addPatch();
+        if (!s.homes.inside) for (let i = 0; i < Math.min(8, 3 + lvl); i++) this.addPatch();
         break;
       case 'eclipse':
         this.darkTint = 0x1a0e2a;
@@ -285,7 +288,7 @@ export class HazardSystem {
         break;
       case 'tornado':
       case 'whirlpool':
-        this.makeVortex(h.id);
+        if (!s.homes.inside) this.makeVortex(h.id);
         break;
       default:
     }
@@ -298,6 +301,10 @@ export class HazardSystem {
     const h = this.current!;
     const lvl = this.level;
     const inside = !!s.shelter.inside;
+    if (s.homes.inside) {
+      this.tick = 1; // อยู่ในห้องบ้าน: ภัยซัดตัวบ้านแทน (HomeSystem) — ไม่มีวงเตือน/ของตกในห้อง
+      return;
+    }
     switch (h.id) {
       case 'quake': {
         this.tick = 0.8;
@@ -371,6 +378,7 @@ export class HazardSystem {
       case 'tornado':
       case 'whirlpool':
         this.tick = 0.5;
+        if (!this.vortex && this.left > 6) this.makeVortex(h.id); // เริ่มตอนอยู่ในบ้าน → ออกมาแล้วค่อยก่อตัว
         this.vortexTick(lvl);
         break;
       default:
@@ -424,6 +432,11 @@ export class HazardSystem {
         break;
       default:
     }
+    if (s.homes.inside) {
+      tint = 0;
+      motes = 0;
+      slow = 1;
+    }
     this.speedMult = slow;
     this.tint.update(dt, color || 0xffffff, tint);
     // ความมืดสุริยุปราคา (ค่อยๆ มืด/สว่าง)
@@ -443,6 +456,7 @@ export class HazardSystem {
       }
       return true;
     });
+    if (s.homes.inside) return; // ของรอบเกาะหยุดรอจนกว่าจะออกจากบ้าน
     this.updatePatches(dt, inside);
     this.updateSwarm(dt, inside);
     this.updateFlood(dt);
@@ -495,7 +509,7 @@ export class HazardSystem {
 
   private hurt(n: number, why: string) {
     const p = this.s.player;
-    if (p.dead) return;
+    if (p.dead || p.sheltered) return;
     p.hp = Math.max(0, p.hp - n);
     p.lastDamage = why;
   }

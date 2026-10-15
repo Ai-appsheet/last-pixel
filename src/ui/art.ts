@@ -6,6 +6,8 @@ export const ART = [
   'title_bg', 'keyart', 'cover', 'intro_1', 'intro_2', 'intro_3', 'intro_4', 'intro_5',
   'dungeon_1', 'dungeon_2', 'dungeon_3', 'boss_golem', 'boss_crab', 'boss_demon',
   'death', 'conquest', 'special_island',
+  // key art โชว์เคสหน้าแรก (แมพ+มหันตภัย อลังการ) — A พายุคลื่นยักษ์ · B ภูเขาไฟจันทร์เลือด · C ศึกสัตว์ในตำนาน
+  'show_a', 'show_b', 'show_c',
   'hz_quake', 'hz_lightning', 'hz_stampede', 'hz_heatwave', 'hz_coldsnap', 'hz_wildfire', 'hz_meteor', 'hz_tsunami',
   'raid_night', 'market_island',
   'cat_weapons', 'cat_gear', 'cat_build', 'cat_boat', 'cat_machine', 'cat_mobs', 'cat_shop', 'cat_elixir',

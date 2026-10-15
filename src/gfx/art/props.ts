@@ -185,9 +185,11 @@ export function cloudShadow(seed: number): PixelCanvas {
 
 /** เงาวงรีใต้ตัวละคร/สัตว์ */
 export function entityShadow(): PixelCanvas {
-  const c = new PixelCanvas(12, 5);
-  c.ellipse(6, 2.5, 6, 2.5, 'rgba(10,12,30,0.3)');
-  c.ellipse(6, 2.5, 4, 1.5, 'rgba(10,12,30,0.42)');
+  // เงานุ่มสามชั้น (ขอบจาง กลางเข้ม)
+  const c = new PixelCanvas(14, 6);
+  c.ellipse(7, 3, 7, 3, 'rgba(10,12,30,0.16)');
+  c.ellipse(7, 3, 5.5, 2.2, 'rgba(10,12,30,0.26)');
+  c.ellipse(7, 3, 3.8, 1.5, 'rgba(10,12,30,0.36)');
   return c;
 }
 

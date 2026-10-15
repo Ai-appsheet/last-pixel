@@ -3,6 +3,7 @@ import { Sfx } from '../core/AudioManager';
 import { EventBus } from '../core/EventBus';
 import { CENTER_SLOT } from '../core/RoomService';
 import { SPECIAL_NAME, SPECIAL_SLOT, gateState, type SpecialState } from '../core/SpecialIsland';
+import { OPEN_ALL } from '../config/openWorld';
 import { MINUTE, WorldClock, bkkClock, bkkDayKey, dayStartOf, fmtLeft } from '../core/WorldClock';
 import { EVENT_TYPES, EVENT_IDS, daySchedule, pickEventSlot, type EventPlan, type EventTypeId, type GateKind } from '../data/worldEvents';
 import { GRID, SLOT_SIZE } from '../data/islands';
@@ -208,6 +209,24 @@ export class WorldEventSystem {
     const name = GATE_NAME[kind];
     const col = GATE_COLOR[kind];
     const day = bkkDayKey(now);
+    // โหมดเปิดตลอด (config/openWorld.ts): ไม่มีพายุ/ป้ายปิด/ประกาศ/เตือน/ส่งกลับ — แค่ลำแสง + ป้ายชื่อ "เปิดตลอด" + รีเซ็ตทรัพยากรรายวัน
+    if (st.always) {
+      if (fx) {
+        fx.storm.setVisible(false);
+        fx.beam.setVisible(true);
+        fx.label.setText(`${kind === 'center' ? '⚖' : '✨'} ${name} — เปิดตลอด`).setColor(col.open);
+        for (const sg of fx.signs) {
+          sg.img.setVisible(false);
+          sg.text.setVisible(false);
+        }
+      }
+      if (st.round !== this.round[kind]) {
+        if (this.round[kind] !== undefined && kind === 'special') this.refillSlot(SPECIAL_SLOT);
+        this.round[kind] = st.round;
+      }
+      this.known[kind] = true;
+      return;
+    }
     if (fx) {
       fx.storm.setVisible(!st.open);
       fx.beam.setVisible(st.open);
@@ -324,15 +343,26 @@ export class WorldEventSystem {
       const b = this.active.get(plan.id);
       if (!b) continue;
       const left = endAt - now;
-      b.label.setText(`${def.icon} ${def.name} — เหลือ ${fmtLeft(left)}`);
-      if (left <= WARN_MS && !b.warned && this.inEventZone(b.slot, p.x, p.y)) {
+      b.label.setText(left > 0 ? `${def.icon} ${def.name} — เหลือ ${fmtLeft(left)}` : `${def.icon} ${def.name} — หมดเวลา · รอคนบนเกาะออกก่อนจม`);
+      if (left <= WARN_MS && left > 0 && !b.warned && this.inEventZone(b.slot, p.x, p.y)) {
         b.warned = true;
-        EventBus.emit('banner', `⚠ ${def.name}กำลังจมหาย ${fmtLeft(left)}`, 'อยู่บนเกาะตอนหาย = ถูกส่งกลับเกาะบ้าน (ของที่เก็บมาอยู่ครบ)', '#ef7d57');
+        EventBus.emit('banner', `⚠ ${def.name}ใกล้หมดเวลา ${fmtLeft(left)}`, OPEN_ALL ? 'อยู่ต่อได้ — เกาะจะจมหลังคุณออกจากเกาะ' : 'อยู่บนเกาะตอนหาย = ถูกส่งกลับเกาะบ้าน (ของที่เก็บมาอยู่ครบ)', '#ef7d57');
       }
-      if (now >= endAt) this.despawn(b);
+      if (now >= endAt && this.canDespawn(b)) this.despawn(b);
     }
     // กิจกรรมที่หลุดตาราง (ข้ามวัน/เวลาเครื่องเปลี่ยน)
-    for (const a of [...this.active.values()]) if (now >= a.endAt) this.despawn(a);
+    for (const a of [...this.active.values()]) {
+      if (now < a.endAt) continue;
+      if (this.canDespawn(a)) this.despawn(a);
+      else a.label.setText(`${EVENT_TYPES[a.plan.type].icon} ${EVENT_TYPES[a.plan.type].name} — หมดเวลา · รอคนบนเกาะออกก่อนจม`);
+    }
+  }
+
+  /** โหมดเปิดตลอด: มีผู้เล่นยืนบนเกาะ (ไม่ได้อยู่บนเรือ) = ยังไม่จม รอจนกว่าจะออก */
+  private canDespawn(a: ActiveEvent): boolean {
+    if (!OPEN_ALL) return true;
+    const p = this.s.player;
+    return !(this.inEventZone(a.slot, p.x, p.y) && !this.s.boatRiding);
   }
 
   private dirText(slot: number): string {

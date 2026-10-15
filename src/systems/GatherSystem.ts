@@ -117,8 +117,9 @@ export class GatherSystem {
       const t = inv.slots[i] && ITEMS[inv.slots[i]!.id].tool;
       if (t && (t.rock >= 1 || t.tree >= 3)) tool = true;
     }
+    if ((s.player.beltTool('rock')?.tool.rock ?? 0) >= 1 || (s.player.beltTool('tree')?.tool.tree ?? 0) >= 3) tool = true; // ⛏ เข็มขัดเครื่องมือ
     if (!tool) {
-      EventBus.emit('toast', '🔧 ต้องมีขวานหรืออีเต้อใน hotbar ถึงจะรื้อซากเครื่องบินได้', '#ef7d57');
+      EventBus.emit('toast', '🔧 ต้องมีขวานหรืออีเต้อ (ช่องเครื่องมือ/hotbar) ถึงจะรื้อซากเครื่องบินได้', '#ef7d57');
       return true;
     }
     const w = s.wreckSprite!;

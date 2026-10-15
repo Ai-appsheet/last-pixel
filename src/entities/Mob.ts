@@ -128,12 +128,14 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
       return;
     }
 
-    const px = player.x;
-    const py = player.feetY;
+    const lure = s.homes?.lure; // ผู้เล่นหลบในบ้าน → ไปรุมหน้าประตูบ้านแทน
+    const px = lure ? lure.x : player.x;
+    const py = lure ? lure.y : player.feetY;
     const dist = Phaser.Math.Distance.Between(this.x, this.feetY, px, py);
     const alive = !player.dead && !s.playerSafe && !this.calm;
     const aggro = this.def.aggroRange * (s.dayNight.isNight ? 1.5 : 1);
     const ai = this.def.ai;
+    const prevState = this.state;
 
     if (this.fleeing && alive) this.state = 'flee';
     else switch (ai) {
@@ -159,6 +161,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
         this.state = alive ? 'chase' : 'wander';
     }
 
+    if (this.state === 'chase' && prevState !== 'chase') s.hpBars.poke(this, this.isBoss); // เริ่มไล่ = เข้าโหมดต่อสู้
     let vx = 0;
     let vy = 0;
     const speed = this.def.speed * (this.chillTime > 0 ? 1 - this.chill : 1);
@@ -199,6 +202,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
         if (dist < sh.range && this.shootCd <= 0 && alive) {
           this.shootCd = sh.cooldown;
           s.enemyShoot(this, sh);
+          s.hpBars.poke(this, this.isBoss);
         }
       }
       const flies = mobFlies(this.def);
@@ -286,6 +290,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
     const s = this.scene;
     const player = s.player;
     this.attackCd = this.isBoss ? 1.3 : 1.0;
+    s.hpBars.poke(this, this.isBoss);
     if (s.boatRiding && (mobSwims(this.def) || this.def.move === 'amphi')) {
       s.damageBoat(this.def.attack * mult);
       return;
@@ -348,6 +353,7 @@ export class Mob extends Phaser.Physics.Arcade.Sprite {
     const armor = (this.def.armor ?? 0) * (1 - (opts.armorPierce ?? 0));
     const dmg = amount * (1 - armor) * (this.frozenTime > 0 && !opts.silent ? 1.2 : 1);
     this.hp -= dmg;
+    if (dmg > 0) this.scene.hpBars.poke(this, this.isBoss, this.hp + dmg);
     if (!opts.silent) {
       this.scene.fx.damageNumber(this.x, this.y - this.displayHeight / 2, dmg, opts.crit ? 0xffcd75 : opts.color ?? 0xffffff, opts.crit);
       this.setTintFill(0xffffff);

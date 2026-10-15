@@ -4,6 +4,7 @@ import { quality } from '../core/Quality';
 import { PALETTE } from '../data/palette';
 import { reducedMotion } from './layout';
 import { fitPixel, txt } from './widgets';
+import { retroLabel, retroPanel } from './retro';
 
 /**
  * ปุ่มสวยๆ แบบ pixel art วาดด้วยโค้ด: ไล่สีแนวตั้ง + ขอบบนสว่าง + ขอบล่างเข้ม + เงาตก + มุมมนแบบพิกเซล
@@ -82,7 +83,34 @@ function cut(r: number, h: number, rad: number) {
 type State = 'idle' | 'hover' | 'down' | 'off';
 
 /** วาดตัวปุ่ม (หน่วยพิกเซล cw×ch) + เงาตกด้านล่าง 2 หน่วย */
+/**
+ * ตัวปุ่มแบบเรียบยุค 90 (หน่วยพิกเซล cw×ch + เงา 2): ทึบสีเทาอมเขียว · เส้นขอบนอก 1 + เส้นในเข้ม 1 · มุมตัด 1
+ * ปุ่มหลัก (emerald/gold) ขอบสีเสจ/ทองหม่น · ชี้ = พื้นสว่างขึ้นนิด + ขอบสว่าง · กด = ยุบลง 1 หน่วย
+ */
 function bodyTexture(scene: Phaser.Scene, theme: FancyTheme, cw: number, ch: number, state: State): string {
+  const key = `fbtn2_${theme}_${cw}x${ch}_${state}`;
+  if (scene.textures.exists(key)) return key;
+  const tex = scene.textures.createCanvas(key, cw, ch + 2)!;
+  const ctx = tex.getContext();
+  const role = theme === 'emerald' ? '#8fbf7a' : theme === 'gold' ? '#e3c178' : theme === 'crimson' ? '#c46a5e' : '#5f7380';
+  const edge = state === 'off' ? '#3a4650' : state === 'hover' ? (role === '#5f7380' ? '#9fb2ba' : role) : role;
+  const fill = state === 'off' ? '#192127' : state === 'idle' ? '#1f2a33' : '#26343e';
+  const oy = state === 'down' ? 1 : 0;
+  const box = (x: number, y: number, w: number, h: number, c: string) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x + 1, y, w - 2, h);
+    ctx.fillRect(x, y + 1, w, h - 2);
+  };
+  if (state !== 'down') box(0, 2, cw, ch, 'rgba(5,8,10,0.55)');
+  box(0, oy, cw, ch, edge);
+  box(1, oy + 1, cw - 2, ch - 2, '#0e1418');
+  box(2, oy + 2, cw - 4, ch - 4, fill);
+  tex.refresh();
+  return key;
+}
+void bodyTextureOld;
+
+function bodyTextureOld(scene: Phaser.Scene, theme: FancyTheme, cw: number, ch: number, state: State): string {
   const key = `fbtn_${theme}_${cw}x${ch}_${state}`;
   if (scene.textures.exists(key)) return key;
   const th = state === 'off' ? THEMES.steel : THEMES[theme];
@@ -302,18 +330,18 @@ export class FancyButton extends Phaser.GameObjects.Container {
     this.shine = scene.add.sprite(0, 0, shineTexture(scene, this.cw, this.ch), 0)
       .setOrigin(0.5, oy).setScale(P).setBlendMode(Phaser.BlendModes.ADD).setVisible(false);
     this.add([this.glow, this.face, this.shine]);
+    // ชุด UI เรียบ: ไม่มีแสงเรือง/แสงวิ้ง
+    this.glow.setVisible(false);
+    this.shine.setAlpha(0);
 
     // ไอคอน + ข้อความ (จัดกึ่งกลางเป็นกลุ่ม)
     const size = opts.size ?? 18;
-    // ชื่อปุ่ม = Noto Sans Thai 600 (14–15 · ปุ่มหลักใหญ่ได้ถึง 18) + เงาตกบาง
-    this.label = txt(scene, 0, 0, opts.label, Math.max(14, Math.min(size, 18)), this.enabled ? '#ffffff' : '#a9bccb', { fontStyle: '600' }).setOrigin(0, 0.5);
-    this.label.setShadow(0, 2, '#0b0d1f', 0, false, true);
-    if (opts.sub) {
-      this.sub = txt(scene, 0, 0, opts.sub, Math.max(10, Math.round(size * 0.6)), this.enabled ? th.sub : '#a9bccb').setOrigin(0, 0.5);
-      this.sub.setStroke('#0b0d1f', 3);
-    }
+    // ชื่อปุ่ม = ตัวพิกเซลหนา + เงา 1 พิกเซล (ชุด UI เรียบ) · ปุ่มหลักสีเสจ · ปุ่มอันตรายสีแดงหม่น
+    const lc = !this.enabled ? '#9aa7a4' : this.theme === 'emerald' ? '#8fbf7a' : this.theme === 'crimson' ? '#d98a7e' : this.theme === 'gold' ? '#e3c178' : '#eef0e6';
+    this.label = retroLabel(scene, 0, 0, opts.label, lc, size >= 18 ? 17 : 15).setOrigin(0, 0.5);
+    if (opts.sub) this.sub = txt(scene, 0, 0, opts.sub, 11, '#9aa7a4').setOrigin(0, 0.5);
     if (opts.icon) {
-      const iconScale = opts.h >= 44 ? 3 : 2;
+      const iconScale = 2;
       this.icon = scene.add.image(0, 0, iconTexture(scene, opts.icon)).setScale(iconScale);
       if (!this.enabled) this.icon.setTint(0x8a95a8);
     }
@@ -450,6 +478,13 @@ export type PanelTrim = 'gold' | 'steel';
 
 /** กรอบหน้าต่างแบบกระจกมืดโปร่งแสง + ขอบไล่สีทอง/เงิน + มุมประดับ (origin มุมซ้ายบน) */
 export function fancyPanel(scene: Phaser.Scene, x: number, y: number, w: number, h: number, trim: PanelTrim = 'gold', opacity = 0.82) {
+  // ชุด UI เรียบ: กรอบพิกเซลบางแบบเดียวทั้งเกม (แบบทองเดิมเก็บไว้ใน fancyPanelOld)
+  void trim;
+  return retroPanel(scene, x, y, w, h, { alpha: Math.max(0.88, opacity) });
+}
+void fancyPanelOld;
+
+function fancyPanelOld(scene: Phaser.Scene, x: number, y: number, w: number, h: number, trim: PanelTrim = 'gold', opacity = 0.82) {
   const cw = Math.round(w / P);
   const ch = Math.round(h / P);
   const key = `fpanel_${trim}_${cw}x${ch}_${Math.round(opacity * 100)}`;

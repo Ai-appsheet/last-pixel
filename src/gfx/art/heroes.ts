@@ -287,6 +287,8 @@ const LINEN: Mat = { d: 's', m: 'S', l: '#f6e4bc' };
 const DENIM: Mat = { d: 'U', m: 'B', l: '#5f86e0' };
 const SHELL: Mat = { d: 'R', m: 'r', l: '#ffb38a', h: 'Y' };
 const SCRUB: Mat = { d: 'B', m: 'b', l: 'C' };
+/** ผิวเปลือย (แขน/ขา/ลำตัวในชุดว่ายน้ำ) — โทนผิวแทนของสาวชายหาด */
+const BARE: Mat = { d: 'k', m: 'K', l: '#f3cfb0' };
 
 // ---------------------------------------------------------------- ชุด
 
@@ -306,6 +308,7 @@ export type Detail =
   | { kind: 'zigzag'; color: string }
   | { kind: 'panel'; base: string; lights: string[] }
   | { kind: 'quiver'; mat: Mat; fletch: string; fletch2: string }
+  | { kind: 'bikini'; color: string; trim: string }
   | { kind: 'lapel'; color: string };
 
 export interface OutfitDef {
@@ -444,6 +447,11 @@ export const OUTFITS: OutfitDef[] = [
     details: [{ kind: 'zigzag', color: 'r' }, { kind: 'necklace', cord: 'm', bead: 'R', tooth: 'W' }],
   },
   {
+    id: 'bikini', name: 'ชุดบิกินี่',
+    top: BARE, sleeve: 'skin', hands: BARE, legs: BARE, boots: { d: '#a8452f', m: 'r', l: 'Y' },
+    details: [{ kind: 'bikini', color: 'R', trim: 'Y' }],
+  },
+  {
     id: 'robot', name: 'ร่างหุ่นยนต์',
     top: STEEL, sleeve: { d: 'F', m: 'D', l: 'L', pattern: 'stripe' }, hands: STEEL, legs: { d: 'F', m: 'D', l: 'L', pattern: 'stripe' },
     boots: DARK_STEEL, shoulder: STEEL, face: { d: 'D', m: 'L', l: 'w', h: 'W' }, spec: 'W',
@@ -455,7 +463,7 @@ export const OUTFITS: OutfitDef[] = [
 // ลายกว้าง 20 แถวเริ่ม y=0 — หัวจิบิอยู่ y=2..13 (กว้างสุด x3..16) ผมฟูเลยหัวออกไป 1px (x2..17, y1)
 // ตาโต y=7..10 (ซ้าย x5..7 ขวา x12..14) หน้าโล่ง x4..15
 
-interface HelmetDef {
+export interface HelmetDef {
   id: string;
   name: string;
   /** all = ซ่อนผมทั้งหมด, top = ซ่อนผมแถว y < clearTop, none = วางทับเฉย ๆ */
@@ -470,7 +478,7 @@ interface HelmetDef {
   spec?: string;
 }
 
-const HELMET_DEFS: HelmetDef[] = [
+export const HELMET_DEFS: HelmetDef[] = [
   { id: 'none', name: 'ไม่สวม', hide: 'none', down: [], side: [] },
   {
     id: 'hood', name: 'ฮู้ดนักล่า', hide: 'all', mat: GREEN, cols: { x: '#0f2a22' },
@@ -910,14 +918,14 @@ export const HELMETS: { id: string; name: string }[] = HELMET_DEFS.map(({ id, na
 
 // ---------------------------------------------------------------- ผ้าคลุม
 
-interface CapeDef {
+export interface CapeDef {
   id: string;
   name: string;
   mat?: Mat;
   clasp: string;
 }
 
-const CAPE_DEFS: CapeDef[] = [
+export const CAPE_DEFS: CapeDef[] = [
   { id: 'none', name: 'ไม่สวม', clasp: 'Y' },
   { id: 'red', name: 'ผ้าคลุมแดง', mat: { d: '#5a1e2e', m: 'R', l: '#d8606f' }, clasp: 'Y' },
   { id: 'blue', name: 'ผ้าคลุมน้ำเงิน', mat: { d: '#1a2350', m: 'B', l: 'b' }, clasp: 'Y' },
@@ -931,10 +939,10 @@ export const CAPES: { id: string; name: string }[] = CAPE_DEFS.map(({ id, name }
 // ---------------------------------------------------------------- ผม
 // ผมฟูใหญ่แบบจิบิ: กลุ่มผมเลยหัว 1px รอบด้าน หน้าม้าถึง y=6 (เหนือตาพอดี) จอนข้างแก้มถึง y=10-11
 
-type HairStyle = 'short' | 'spiky' | 'long' | 'ponytail' | 'bald';
+export type HairStyle = 'short' | 'spiky' | 'long' | 'ponytail' | 'bald';
 type View = 'down' | 'up' | 'side';
 
-const HAIR: Record<Exclude<HairStyle, 'bald'>, Record<View, string[]>> = {
+export const HAIR: Record<Exclude<HairStyle, 'bald'>, Record<View, string[]>> = {
   short: {
     down: [
       '....................',
@@ -1838,6 +1846,36 @@ function drawDetails(f: Ctx, phase: Phase) {
         } else if (view === 'side') px(c, [[12, 14], [12, 15]], d.color);
         break;
       }
+      case 'bikini': {
+        // ชุดว่ายน้ำสองชิ้น: บราสามเหลี่ยม 2 ถ้วย (เว้นร่องกลางเป็นผิว ให้ดูอกอิ่ม) + กางเกงบิกินี่สะโพก
+        if (phase !== 'chest') break;
+        const col = hexOf(d.color);
+        const bik: Mat = { d: darken(col, 0.38), m: col, l: lighten(col, 0.26) };
+        if (view === 'down') {
+          // ถ้วยบราซ้าย/ขวา (เว้น x9,10 เป็นผิว = ร่องอก)
+          shade(c, new Mask().span(14, 6, 8).span(15, 6, 8).add(7, 16), bik, true);
+          shade(c, new Mask().span(14, 11, 13).span(15, 11, 13).add(12, 16), bik, true);
+          // สายคล้องคอ + สายบ่า + ปมกลาง
+          px(c, [[7, 13], [12, 13]], bik.m);
+          px(c, [[9, 14], [10, 14]], d.trim);
+          // กางเกงบิกินี่ (เอว/สะโพก) เว้นช่องขากลาง
+          shade(c, new Mask().span(18, 6, 13).add(6, 19).add(7, 19).add(12, 19).add(13, 19), bik, true);
+          px(c, [[6, 18], [13, 18]], d.trim);
+        } else if (view === 'up') {
+          // ด้านหลัง: สายบราคาด + สายกางเกง
+          shade(c, new Mask().span(15, 6, 13), bik, true);
+          px(c, [[9, 15], [10, 15]], d.trim);
+          px(c, [[6, 14], [13, 14]], bik.m);
+          shade(c, new Mask().span(18, 6, 13), bik, true);
+          px(c, [[6, 18], [13, 18]], d.trim);
+        } else {
+          // ด้านข้าง
+          shade(c, new Mask().span(14, 8, 11).span(15, 9, 11), bik, true);
+          px(c, [[10, 13]], bik.m);
+          shade(c, new Mask().span(18, 7, 12).add(7, 19).add(12, 19), bik, true);
+        }
+        break;
+      }
       case 'plates': {
         if (phase !== 'chest') break;
         const seam: [number, number][] = [];
@@ -2170,4 +2208,5 @@ export const CLASS_LOOKS: Record<HeroId, HeroLook> = {
   scout: { skin: '#8d5a3b', skinShade: '#663f2a', hair: '#262b44', hairShade: '#100f1c', hairStyle: 'spiky', eyes: 'O', outfit: 'leather', helmet: 'none', cape: 'red' },
   shaman: { skin: '#c08458', skinShade: '#8a5638', hair: 'L', hairShade: 'D', hairStyle: 'long', eyes: '#1d1630', outfit: 'shaman', helmet: 'feather_band', cape: 'none' },
   robot: { skin: 'L', skinShade: 'D', hair: 'D', hairShade: 'F', hairStyle: 'bald', eyes: 'C', outfit: 'robot', helmet: 'antenna', cape: 'none' },
+  lifeguard: { skin: 'K', skinShade: 'k', hair: 'M', hairShade: 'm', hairStyle: 'long', eyes: 'T', outfit: 'bikini', helmet: 'none', cape: 'none' },
 };

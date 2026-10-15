@@ -1,6 +1,19 @@
 import Phaser from 'phaser';
 import { Sfx } from '../core/AudioManager';
 import { COLORS, fitPixel, panel, pixelTxt, txt } from './widgets';
+import { RETRO, retroLabel, retroPanel, retroTitle, type RetroPanel } from './retro';
+
+/** ปุ่มตัวหนังสือพิกเซลเล็กบนหัวหน้าต่างแบบเรียบ (x / ▾) — ชี้แล้วเป็นสีทอง */
+function retroHeadButton(scene: Phaser.Scene, x: number, y: number, label: string, onClick: () => void) {
+  const c = scene.add.container(x, y);
+  const t = retroLabel(scene, 0, 0, label, RETRO.css.muted).setOrigin(0.5);
+  c.add(t);
+  c.setSize(26, 26).setInteractive({ useHandCursor: true });
+  c.on('pointerover', () => t.setColor(RETRO.css.gold));
+  c.on('pointerout', () => t.setColor(RETRO.css.muted));
+  c.on('pointerdown', () => onClick());
+  return Object.assign(c, { label: t });
+}
 
 /** ปุ่มกลมเล็กบนแถบหัว (พับ/ปิด) — พื้นที่กดกว้างกว่าตัวปุ่ม ให้นิ้วกดง่าย */
 export function roundButton(scene: Phaser.Scene, x: number, y: number, r: number, color: number, label: string, onClick: () => void) {
@@ -30,17 +43,28 @@ export function roundButton(scene: Phaser.Scene, x: number, y: number, r: number
 export class UIWindow {
   readonly root: Phaser.GameObjects.Container;
   readonly body: Phaser.GameObjects.Container;
-  private bg: Phaser.GameObjects.NineSlice;
+  private bg: Phaser.GameObjects.NineSlice | RetroPanel;
   private header: Phaser.GameObjects.Zone;
   private foldBtn: ReturnType<typeof roundButton>;
   private titleT: Phaser.GameObjects.Text;
   collapsed = false;
   onClose: (() => void) | null = null;
+  /** เรียกตอนเปิด (จากปิด → เปิด) — ใช้ปิดหน้าต่างอื่นในกลุ่มเมนูเดียวกัน */
+  onOpen: (() => void) | null = null;
+  /** ปุ่ม "?" บนหัว (ซ่อน/แสดงคำอธิบายยาว) */
+  private helpBtn: ReturnType<typeof retroHeadButton> | null = null;
+  private helpObjs: Phaser.GameObjects.GameObject[] = [];
+  /** เปิดคำอธิบายอยู่ไหม (โค้ดที่ตั้งข้อความเองดูค่านี้ได้) */
+  helpOn = false;
+  private retro = false;
+  private tabObjs: Phaser.GameObjects.GameObject[] = [];
   static readonly HEAD = 34;
   /** จอเล็ก (มือถือ): หน้าต่างที่สร้างตอนค่านี้เป็น true จะขยายให้เต็มจอเท่าที่ได้ + จัดกลางจอ (UIScene ตั้งก่อนสร้าง) */
   static fit = false;
   /** ตัวคูณขนาดหน้าต่าง (1 = ปกติ) */
   readonly scale: number = 1;
+  /** ใช้แบบเรียบยุค 90 เป็นค่าเริ่มต้น + ย่อหน้าต่างบนคอมให้กว้างไม่เกิน ~70% ของจอ (UIScene ตั้งก่อนสร้าง) */
+  static retroDefault = false;
 
   constructor(
     scene: Phaser.Scene,
@@ -50,8 +74,20 @@ export class UIWindow {
     readonly h: number,
     title: string,
     depth = 10,
+    /** แบบเรียบพิกเซลยุค 90 */
+    retro = UIWindow.retroDefault,
   ) {
     this.root = scene.add.container(x, y).setDepth(depth).setVisible(false);
+    if (retro && !UIWindow.fit) {
+      // คอม: หน้าต่างเล็กลง (กว้าง ≤ 70% · สูง ≤ 88% ของจอ) จัดกลางจอ — ไม่บังเกมทั้งจอ
+      const sw = scene.scale.width;
+      const sh = scene.scale.height;
+      const k = Math.min(1, (sw * 0.7) / w, (sh * 0.88) / h);
+      if (k < 0.99) {
+        this.scale = k;
+        this.root.setScale(k).setPosition(Math.round((sw - w * k) / 2), Math.round((sh - h * k) / 2));
+      }
+    }
     if (UIWindow.fit) {
       const sw = scene.scale.width;
       const sh = scene.scale.height;
@@ -60,6 +96,24 @@ export class UIWindow {
         this.scale = k;
         this.root.setScale(k).setPosition(Math.round((sw - w * k) / 2), Math.round((sh - h * k) / 2));
       }
+    }
+    this.retro = retro;
+    if (retro) {
+      // แบบเรียบ: แผงพิกเซลทึบ · หัว = ชื่อสีทองหม่น + เส้นใต้ 1 พิกเซล · ปุ่ม ▾ / x ตัวหนังสือเล็ก
+      const HEAD = UIWindow.HEAD;
+      this.bg = retroPanel(scene, 0, 0, w, h);
+      const line = scene.add.graphics();
+      line.fillStyle(RETRO.edge, 1).fillRect(12, HEAD - 3, w - 24, 1);
+      this.header = scene.add.zone(8, 4, w - 16, HEAD - 8).setOrigin(0).setInteractive({ useHandCursor: true, draggable: true });
+      const t = retroTitle(scene, 14, HEAD / 2 - 2, title).setOrigin(0, 0.5);
+      fitPixel(t, w - 90);
+      this.titleT = t;
+      this.foldBtn = retroHeadButton(scene, w - 46, HEAD / 2 - 2, '▾', () => this.toggleCollapse());
+      const close = retroHeadButton(scene, w - 20, HEAD / 2 - 2, 'x', () => this.close());
+      this.body = scene.add.container(16, HEAD + 8);
+      this.root.add([this.bg, line, this.header, t, this.foldBtn, close, this.body]);
+      this.dragHeader(scene, w);
+      return;
     }
     this.bg = panel(scene, 0, 0, w, h);
     // แถบหัวสีครีม→ทอง มุมมน + ตัวหนังสือเข้ม (ฟอนต์หัวข้อ)
@@ -90,6 +144,10 @@ export class UIWindow {
     this.body = scene.add.container(16, HEAD + 8);
     this.root.add([this.bg, bar, gl, this.header, t, this.foldBtn, close, this.body]);
     this.root.once(Phaser.GameObjects.Events.DESTROY, () => sweepTimer.remove(false));
+    this.dragHeader(scene, w);
+  }
+
+  private dragHeader(scene: Phaser.Scene, w: number) {
     // ลากแถบหัว: Phaser ให้ dragX = ตำแหน่งเริ่ม + ระยะลากทั้งหมด (หน่วย local) → อิงตำแหน่งหน้าต่างตอนเริ่มลาก
     let start = { x: 0, y: 0 };
     this.header.on('dragstart', () => (start = { x: this.root.x, y: this.root.y }));
@@ -116,6 +174,7 @@ export class UIWindow {
   open() {
     const was = this.root.visible;
     this.root.setVisible(true);
+    if (!was) this.onOpen?.();
     Sfx.play('click');
     // จางเข้าเร็วๆ (ไม่กระตุกตอนเปิด)
     if (!was) {
@@ -152,6 +211,76 @@ export class UIWindow {
     if (!this.visible) return false;
     const h = (this.collapsed ? UIWindow.HEAD + 14 : this.h) * this.scale;
     return x >= this.root.x && x <= this.root.x + this.w * this.scale && y >= this.root.y && y <= this.root.y + h;
+  }
+
+  /**
+   * แท็บบนหัวหน้าต่าง (แทนชื่อ) — หน้าต่างหลักหลายบานทำตัวเป็น "เมนู" เดียว · แท็บที่เลือก = สีทอง + ▶
+   * กดแท็บอื่น = onPick(id) (UIScene สลับไปหน้าต่างนั้น)
+   */
+  setHeaderTabs(tabs: { id: string; label: string; icon?: string }[], active: string, onPick: (id: string) => void) {
+    const scene = this.root.scene;
+    const y = this.retro ? UIWindow.HEAD / 2 - 2 : 6 + (UIWindow.HEAD - 8) / 2;
+    this.titleT.setVisible(false);
+    // เรียกซ้ำได้ (เช่น สลับหมวดในหน้าต่างเดียวกัน) → ลบแท็บเก่าก่อน
+    this.tabObjs.forEach((o) => o.destroy());
+    this.tabObjs = [];
+    let x = 14;
+    const right = this.w - (this.helpBtn ? 92 : 64);
+    const items: Phaser.GameObjects.Text[] = [];
+    const icons: (Phaser.GameObjects.Image | null)[] = [];
+    for (const tb of tabs) {
+      const on = tb.id === active;
+      // ไอคอนเล็ก 18px หน้าชื่อแท็บ (ถ้าโหลดภาพแล้ว)
+      const ic = tb.icon && scene.textures.exists(tb.icon) ? scene.add.image(x + 9, y, tb.icon).setDisplaySize(18, 18).setAlpha(on ? 1 : 0.7) : null;
+      icons.push(ic);
+      if (ic) x += 22;
+      const t = retroLabel(scene, x, y, tb.label, on ? RETRO.css.gold : RETRO.css.muted, 14).setOrigin(0, 0.5);
+      if (!on) {
+        t.setInteractive({ useHandCursor: true });
+        t.on('pointerover', () => t.setColor(RETRO.css.text));
+        t.on('pointerout', () => t.setColor(RETRO.css.muted));
+        t.on('pointerdown', () => onPick(tb.id));
+      }
+      items.push(t);
+      x += t.displayWidth + 14;
+    }
+    // ยาวเกินหัว → ย่อทั้งแถวเท่ากัน
+    const k = x - 14 > right - 14 ? (right - 14) / (x - 14) : 1;
+    let cx = 14;
+    items.forEach((t, i) => {
+      const ic = icons[i];
+      if (ic) {
+        ic.setDisplaySize(18 * k, 18 * k).setX(cx + 9 * k);
+        cx += 22 * k;
+      }
+      t.setScale(t.scaleX * k).setX(cx);
+      cx += t.displayWidth + 14 * k;
+    });
+    const act = items[tabs.findIndex((t) => t.id === active)];
+    const bar = scene.add.graphics();
+    if (act) bar.fillStyle(RETRO.gold, 1).fillRect(act.x, y + act.displayHeight / 2 + 1, act.displayWidth, 2);
+    const iconObjs = icons.filter((o): o is Phaser.GameObjects.Image => !!o);
+    this.root.add([...iconObjs, ...items, bar]);
+    this.tabObjs = [...iconObjs, ...items, bar];
+    return this;
+  }
+
+  /** ปุ่ม "?" บนหัว: ซ่อนคำอธิบายยาวไว้ก่อน กดแล้วแสดง (objs = ของที่ซ่อน/แสดง · ไม่ส่ง = ใช้ helpOn เอง) */
+  addHelp(objs: Phaser.GameObjects.GameObject[] = [], onToggle?: (on: boolean) => void) {
+    this.helpObjs.push(...objs);
+    const apply = () => this.helpObjs.forEach((o) => (o as unknown as Phaser.GameObjects.Components.Visible).setVisible(this.helpOn));
+    if (!this.helpBtn) {
+      const y = this.retro ? UIWindow.HEAD / 2 - 2 : 6 + (UIWindow.HEAD - 8) / 2;
+      this.helpBtn = retroHeadButton(this.root.scene, this.w - 72, y, '?', () => {
+        this.helpOn = !this.helpOn;
+        this.helpBtn?.label.setColor(this.helpOn ? RETRO.css.gold : RETRO.css.muted);
+        apply();
+        onToggle?.(this.helpOn);
+      });
+      this.root.add(this.helpBtn);
+    }
+    apply();
+    return this;
   }
 
   add(objs: Phaser.GameObjects.GameObject | Phaser.GameObjects.GameObject[]) {

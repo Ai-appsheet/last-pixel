@@ -95,3 +95,82 @@ export function buildFxTextures(scene: Phaser.Scene) {
   addPc(scene, 'fx_puff', puff());
   vignette(scene);
 }
+
+// ---------------------------------------------------------------- ออร่าอุปกรณ์ (fx/GearAura.ts)
+
+/** วงเวทรูนบนพื้น (สีขาว ย้อมด้วย tint) — วาด 2 เท่า (HD) แสดงที่ scale 0.5 */
+function runeCircle(size: number, rOut: number, rIn: number, runes: number, star: number): PixelCanvas {
+  const pc = new PixelCanvas(size, size);
+  const c = size / 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const d = Math.hypot(x + 0.5 - c, y + 0.5 - c);
+      if ((d <= rOut && d > rOut - 3) || (d <= rIn && d > rIn - 2.5)) pc.set(x, y, 'W');
+      else if (d <= rOut - 4 && d > rOut - 5) pc.set(x, y, 'w');
+    }
+  }
+  // อักษรรูนเล็กๆ ระหว่างวงนอก-วงใน
+  const GLYPHS = [['W.W', '.W.', 'W.W'], ['WWW', 'W..', 'WWW'], ['.W.', 'WWW', '.W.'], ['W..', 'WWW', '..W']];
+  const rr = (rOut + rIn) / 2 - 1;
+  for (let i = 0; i < runes; i++) {
+    const a = (i / runes) * Math.PI * 2;
+    pc.rows(GLYPHS[i % GLYPHS.length], Math.round(c + Math.cos(a) * rr - 1.5), Math.round(c + Math.sin(a) * rr - 1.5));
+  }
+  // ดาวเส้นตรงข้างใน (หกแฉก/ห้าแฉก)
+  if (star) {
+    const pts: [number, number][] = [];
+    const r = rIn - 3;
+    for (let i = 0; i < star; i++) {
+      const a = -Math.PI / 2 + (i / star) * Math.PI * 2;
+      pts.push([c + Math.cos(a) * r, c + Math.sin(a) * r]);
+    }
+    for (let i = 0; i < star; i++) {
+      const [x0, y0] = pts[i];
+      const [x1, y1] = pts[(i + 2) % star]; // ต่อข้ามจุด = ดาวหกแฉก/ห้าแฉก
+      pc.line(Math.round(x0), Math.round(y0), Math.round(x1), Math.round(y1), 'w', 2);
+    }
+  }
+  return pc;
+}
+
+/** ไล่ alpha นุ่มๆ (วงรีแสงใต้เท้า / เสาแสง) */
+function softTex(scene: Phaser.Scene, key: string, w: number, h: number, pillar: boolean) {
+  const tex = scene.textures.createCanvas(key, w, h)!;
+  const ctx = tex.getContext();
+  if (pillar) {
+    const g = ctx.createLinearGradient(0, 0, w, 0);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.5, 'rgba(255,255,255,1)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    // จางขึ้นด้านบน
+    ctx.globalCompositeOperation = 'destination-in';
+    const v = ctx.createLinearGradient(0, 0, 0, h);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(0.6, 'rgba(0,0,0,0.8)');
+    v.addColorStop(1, 'rgba(0,0,0,1)');
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, w, h);
+  } else {
+    ctx.save();
+    ctx.scale(1, h / w);
+    const g = ctx.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2);
+    g.addColorStop(0, 'rgba(255,255,255,0.9)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.45)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, w);
+    ctx.restore();
+  }
+  tex.refresh();
+  tex.setFilter(Phaser.Textures.FilterMode.LINEAR);
+}
+
+export function buildAuraTextures(scene: Phaser.Scene) {
+  if (scene.textures.exists('aura_circle')) return;
+  addPc(scene, 'aura_circle', runeCircle(72, 35, 25, 12, 6));
+  addPc(scene, 'aura_circle2', runeCircle(40, 19, 13, 8, 5));
+  softTex(scene, 'aura_glow', 64, 32, false);
+  softTex(scene, 'aura_pillar', 16, 64, true);
+}

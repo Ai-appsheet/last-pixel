@@ -5,6 +5,7 @@ import { MetaSave, todayKey } from '../core/MetaSave';
 import { SaveManager } from '../core/SaveManager';
 import { ACHIEVEMENTS } from '../data/achievements';
 import { getCharacter } from '../data/characters';
+import { RETRO, retroCursor, retroLabel, retroPanel } from '../ui/retro';
 import { BIOMES } from '../data/islands';
 import { CONTROL_MODES, getControlMode, setControlMode } from '../core/ControlMode';
 import { getSettings, setSettings } from '../core/Settings';
@@ -37,7 +38,11 @@ const PANEL_Y = 156;
 const MENU_W = 290;
 const MENU_X = COL_X + (COL_W - MENU_W) / 2;
 
-/** หน้าแรก: ภาพ key art นิ่ง (title_bg) + โลโก้/เมนูคอลัมน์ซ้าย — เคลื่อนไหวเบาๆ เท่านั้น (แสงวิ้งโลโก้ หิ่งห้อยไม่กี่ดวง ปุ่มหลักเรืองหายใจ) */
+/**
+ * หน้าแรก (แบบอลังการ): ภาพ key art "ภูเขาไฟปะทุ" นิ่ง (title_bg — ภาพเดียวกับหน้าโหลด) + กรอบทองมุม + วิกเนตต์เข้ม
+ * คอลัมน์ซ้าย: แผ่นป้ายทองหลังโลโก้/ชื่อไทย · เมนูไอคอนภาพวาด · การ์ดสไลด์ key art/บอสด่าน
+ * เคลื่อนไหวเบาๆ เท่านั้น (แสงวิ้งโลโก้ หิ่งห้อย/ประกายไฟไม่กี่ดวง)
+ */
 export class TitleScene extends Phaser.Scene {
   private overlay: Phaser.GameObjects.Container | null = null;
 
@@ -53,7 +58,6 @@ export class TitleScene extends Phaser.Scene {
   private compact = false;
   /** ลดการเคลื่อนไหว / คุณภาพต่ำ → ไม่มีเอฟเฟกต์เคลื่อนไหวเลย */
   private still = false;
-
   create() {
     this.compact = applyUiScale(this);
     this.still = reducedMotion() || quality() === 'low';
@@ -118,12 +122,75 @@ export class TitleScene extends Phaser.Scene {
     else this.add.image(0, 0, 'title_sky').setOrigin(0).setDisplaySize(W, H).setDepth(-10);
     this.add.image(0, 0, 'vignette').setOrigin(0).setAlpha(0.6);
     this.add.image(0, 0, 'tt_leftshade').setOrigin(0);
+    // ตกแต่งอลังการแบบนิ่ง (วิกเนตต์เข้มขึ้น + เงาซ้ายเข้มขึ้น + กรอบทองมุม)
+    this.drawGrandFrame();
     if (this.still) return;
     // หิ่งห้อยไม่กี่ดวง ลอยช้าๆ จางๆ (ฝั่งขวา ไม่ทับเมนู)
     const R = Phaser.Math.Between;
     for (let i = 0; i < 6; i++) {
       const f = this.add.image(R(420, 940), R(230, 500), 'firefly').setScale(2).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
       this.tweens.add({ targets: f, alpha: 0.35, x: f.x + R(-24, 24), y: f.y - R(16, 40), duration: R(5000, 8000), yoyo: true, repeat: -1, delay: R(0, 4000), ease: 'Sine.easeInOut' });
+    }
+    // ประกายไฟ/ขี้เถ้าสีส้มลอยขึ้นช้าๆ (ฝั่งขวา ไม่ทับเมนู) — จางๆ ไม่กี่ดวง ไม่ทำให้ตาลาย
+    this.drawEmbers();
+  }
+
+  /** วิกเนตต์เข้มขึ้น + เงาซ้ายเข้มขึ้น + กรอบทองประดับ 4 มุม + เส้นขอบรอบจอ (นิ่งทั้งหมด) — ขอบเว้นเข้ามาให้เห็นชัดบนจอ 16:9 */
+  private drawGrandFrame() {
+    this.add.image(0, 0, 'vignette').setOrigin(0).setAlpha(0.5).setDepth(0);
+    this.add.image(0, 0, 'tt_leftshade').setOrigin(0).setAlpha(0.75).setDepth(0);
+    const g = this.add.graphics().setDepth(7);
+    const m = 14;
+    const L = 40;
+    const col = 0xffcd75;
+    const dark = 0x1a1030;
+    // เส้นขอบรอบจอ 2 ชั้น (เข้มด้านนอก + ทองด้านใน)
+    g.lineStyle(3, dark, 0.5).strokeRect(m - 1, m - 1, W - 2 * m + 2, H - 2 * m + 2);
+    g.lineStyle(1, col, 0.3).strokeRect(m, m, W - 2 * m, H - 2 * m);
+    // ฉากมุมทอง 4 มุม (เส้นหนา + ขอบเข้มใต้ให้ดูมีมิติ)
+    const corner = (x: number, y: number, dx: number, dy: number) => {
+      g.lineStyle(4, dark, 0.55);
+      g.beginPath();
+      g.moveTo(x + dx, y + dy * L + dy);
+      g.lineTo(x + dx, y + dy);
+      g.lineTo(x + dx * L + dx, y + dy);
+      g.strokePath();
+      g.lineStyle(3, col, 1);
+      g.beginPath();
+      g.moveTo(x, y + dy * L);
+      g.lineTo(x, y);
+      g.lineTo(x + dx * L, y);
+      g.strokePath();
+      // อัญมณีมุม (สี่เหลี่ยมหมุน 45°)
+      g.fillStyle(col, 1);
+      const s = 4;
+      g.fillPoints([new Phaser.Geom.Point(x, y - s * dy - dy), new Phaser.Geom.Point(x + s * dx, y), new Phaser.Geom.Point(x, y + s * dy + dy), new Phaser.Geom.Point(x - s * dx, y)], true);
+    };
+    corner(m, m, 1, 1);
+    corner(W - m, m, -1, 1);
+    corner(m, H - m, 1, -1);
+    corner(W - m, H - m, -1, -1);
+  }
+
+  /** ประกายไฟลอยขึ้น (ADD) จางๆ 8 ดวง ฝั่งขวา */
+  private drawEmbers() {
+    const R = Phaser.Math.Between;
+    for (let i = 0; i < 8; i++) {
+      const e = this.add.image(R(430, 930), R(300, 520), 'firefly').setTint(0xffa64a).setScale(1.4).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0).setDepth(3);
+      const dur = R(5200, 8200);
+      this.tweens.add({
+        targets: e,
+        y: e.y - R(130, 220),
+        duration: dur,
+        repeat: -1,
+        ease: 'Sine.easeOut',
+        delay: R(0, 5000),
+        onRepeat: () => {
+          e.x = R(430, 930);
+          e.y = R(320, 520);
+        },
+      });
+      this.tweens.add({ targets: e, alpha: 0.5, duration: dur / 2, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: R(0, 5000) });
     }
   }
 
@@ -253,6 +320,21 @@ export class TitleScene extends Phaser.Scene {
     // จอเล็ก + เมนู (เข้าระบบแล้ว): คอลัมน์ถูกขยาย ×MENU_K จากมุมซ้ายบน → เลื่อนหัวตามให้ตรงกลางคอลัมน์ (ฟอร์มบัญชีไม่ขยาย)
     const cx = (COL_X + COL_W / 2) * (this.compact && this.menuBottom > 0 ? MENU_K : 1);
     const head = this.add.container(0, 0).setDepth(2);
+    // แผ่นป้ายหัวเรื่องประดับ (กรอบทอง 2 ชั้น + เส้นประดับใต้ชื่อไทย) หลังโลโก้ — ให้ดูอลังการ + อ่านง่ายบนภาพ
+    {
+      const pg = this.add.graphics();
+      const bw = COL_W + 8;
+      const bh = 132;
+      const bx0 = cx - bw / 2;
+      const by0 = 16;
+      pg.fillStyle(0x0b0d1f, 0.5).fillRoundedRect(bx0, by0, bw, bh, 12);
+      pg.lineStyle(2, 0xffcd75, 0.5).strokeRoundedRect(bx0, by0, bw, bh, 12);
+      pg.lineStyle(1, 0x7a2440, 0.6).strokeRoundedRect(bx0 + 3, by0 + 3, bw - 6, bh - 6, 9);
+      pg.lineStyle(1, 0xffcd75, 0.55).lineBetween(cx - 56, by0 + bh - 12, cx + 56, by0 + bh - 12);
+      pg.fillStyle(0xffcd75, 0.9);
+      [cx - 70, cx + 70].forEach((dx) => pg.fillPoints([new Phaser.Geom.Point(dx, by0 + bh - 16), new Phaser.Geom.Point(dx + 4, by0 + bh - 12), new Phaser.Geom.Point(dx, by0 + bh - 8), new Phaser.Geom.Point(dx - 4, by0 + bh - 12)], true));
+      head.add(pg);
+    }
     const shines: Phaser.GameObjects.Sprite[] = [];
     ([['SURVIVOR', 'tt_logo_w1', 40, false], ['ISLES', 'tt_logo_w2', 90, true]] as const).forEach(([word, key, y, blue]) => {
       this.buildLogoTexture(word, key, blue);
@@ -295,51 +377,122 @@ export class TitleScene extends Phaser.Scene {
     const x = MENU_X;
     const y = PANEL_Y;
     const pw = MENU_W;
-    const bw = 264;
     const bx = x + pw / 2;
-    // กล่องเมนูกะทัดรัด (ปุ่มหลัก 44 · รอง 34 · เล็ก 30 · ช่องไฟ 6) — ที่เหลือยกให้การ์ดสไลด์ด้านล่าง
-    const gap = 6;
-    const rows = 44 + gap + 34 + gap + 34 + gap + 30 + gap + 30;
-    fancyPanel(this, x, y, pw, rows + 20, 'gold');
-    // การ์ดไฮไลต์วางใต้กล่องเมนูนี้
-    this.menuBottom = y + rows + 20;
-    let cy = y + 10;
-    const next = (h: number) => {
-      const c = cy + h / 2;
-      cy += h + gap;
-      return c;
+    // ---------- เมนูแบบเกมพิกเซลยุค 90: รายการตัวหนังสือในแผงบาง + ไอคอนภาพวาดชุดเมนูนำหน้า ----------
+    const PAD = 10;
+    type Item = { label: string; sub?: string; color: string; h: number; art: string; run: () => void };
+    const items: Item[] = [
+      save
+        ? { label: 'ไปเกาะของฉัน', sub: [getCharacter(save.character).name, `Lv.${save.player.level ?? 1}`, `วันที่ ${save.day}`].join(' · '), color: RETRO.css.sage, h: 40, art: 'map', run: () => void this.enterIsland() }
+        : { label: 'เริ่มผจญภัย', sub: 'เลือกตัวละคร · สุ่มเกาะ', color: RETRO.css.sage, h: 40, art: 'map', run: () => void this.enterIsland() },
+      { label: 'คลัง & ร้านค้า', color: RETRO.css.text, h: 30, art: 'catalog', run: () => fadeTo(this, 'CatalogScene') },
+      { label: 'ตัวละคร', color: RETRO.css.text, h: 30, art: 'wardrobe', run: () => fadeTo(this, 'CharacterSelectScene', {}) },
+    ];
+    const tiles: { art: string; label: string; run: () => void }[] = [
+      { art: 'trophy', label: 'ความสำเร็จ', run: () => this.showAchievements() },
+      { art: 'rank', label: 'อันดับ', run: () => this.showLeaderboard() },
+      { art: 'guide', label: 'วิธีเล่น', run: () => this.showHelp() },
+      { art: 'settings', label: 'ตั้งค่า', run: () => this.showSettings() },
+    ];
+    // ไอคอนเมนูภาพวาด (public/art/ui/menu_*.png) — โหลดเองตามต้องการ · ระหว่างโหลดซ่อนไว้ แล้วเปลี่ยนเมื่อเสร็จ
+    const iconSwaps: Array<() => void> = [];
+    const menuIcon = (ix: number, iy: number, art: string, size: number) => {
+      const key = `tt_mi_${art}`;
+      const img = this.add.image(Math.round(ix), Math.round(iy), this.textures.exists(key) ? key : 'i_coin').setDisplaySize(size, size);
+      if (!this.textures.exists(key)) {
+        img.setAlpha(0);
+        iconSwaps.push(() => img.active && img.setTexture(key).setDisplaySize(size, size).setAlpha(1));
+      }
+      return img;
     };
-    // ปุ่มหลัก: มีเกาะแล้ว → ไปเกาะของฉันทันที · ยังไม่มี → เลือกตัวละคร → สุ่มเกาะ (เรืองหายใจช้าๆ)
-    if (save) {
-      const ch = getCharacter(save.character);
-      const info = [ch.name, `Lv.${save.player.level ?? 1}`, `วันที่ ${save.day}`].join(' · ');
-      fancyButton(this, bx, next(44), {
-        w: bw, h: 44, label: 'ไปเกาะของฉัน', sub: info, icon: 'play', theme: 'emerald', size: 16, breathe: true,
-        onClick: () => void this.enterIsland(),
+    const TILE = 46;
+    const listH = items.reduce((a, it) => a + it.h, 0);
+    const rows = PAD + listH + 10 + TILE + PAD;
+    retroPanel(this, x, y, pw, rows);
+    this.menuBottom = y + rows;
+    const strip = this.add.rectangle(x + 4, 0, pw - 8, 10, 0xffffff, 0.06).setOrigin(0, 0);
+    const cursor = retroCursor(this, x + 14, 0);
+    const rowsY: number[] = [];
+    let sel = 0;
+    const select = (i: number) => {
+      sel = (i + items.length) % items.length;
+      strip.setY(rowsY[sel]).setSize(pw - 8, items[sel].h);
+      cursor.setY(rowsY[sel] + (items[sel].sub ? 13 : items[sel].h / 2));
+    };
+    let ry = y + PAD;
+    const LX = x + 54; // ข้อความเริ่มหลังไอคอนภาพ (▶ ที่ x+14 · ไอคอนที่ x+34)
+    items.forEach((it, i) => {
+      rowsY.push(ry);
+      menuIcon(x + 34, ry + it.h / 2, it.art, it.sub ? 30 : 24);
+      const t = retroLabel(this, LX, ry + (it.sub ? 13 : it.h / 2), it.label, it.color).setOrigin(0, 0.5);
+      if (it.sub) fitText(txt(this, LX, ry + 29, it.sub, 11, RETRO.css.muted).setOrigin(0, 0.5), pw - LX + x - 14);
+      fitText(t, pw - LX + x - 14);
+      const hit = this.add.zone(x, ry, pw, it.h).setOrigin(0).setInteractive({ useHandCursor: true });
+      hit.on('pointerover', () => select(i));
+      hit.on('pointerdown', () => {
+        Sfx.unlock();
+        Sfx.play('click');
+        it.run();
       });
-    } else {
-      fancyButton(this, bx, next(44), {
-        w: bw, h: 44, label: 'เริ่มผจญภัย', sub: 'เลือกตัวละคร · สุ่มเกาะ', icon: 'sword', theme: 'gold', size: 16, breathe: true,
-        onClick: () => void this.enterIsland(),
+      ry += it.h;
+    });
+    select(0);
+    // ↑/↓ เลือก · Enter/Space ตกลง (เมนูหลักเท่านั้น — ไม่ทำงานตอนมีหน้าต่างย่อย)
+    const kb = this.input.keyboard;
+    const onKey = (e: KeyboardEvent) => {
+      if (this.overlay || this.entering || !this.sys.isActive()) return;
+      if (e.key === 'ArrowDown') select(sel + 1);
+      else if (e.key === 'ArrowUp') select(sel - 1);
+      else if (e.key === 'Enter' || e.key === ' ') {
+        Sfx.play('click');
+        items[sel].run();
+      } else return;
+      Sfx.play('click', 50);
+    };
+    kb?.on('keydown', onKey);
+    this.events.once('shutdown', () => kb?.off('keydown', onKey));
+    // เส้นคั่น + ปุ่มไอคอนเล็ก 4 ช่อง (ไอคอนบน ชื่อเล็กล่าง)
+    const sepY = y + PAD + listH + 4;
+    this.add.rectangle(x + 12, sepY, pw - 24, 1, RETRO.edge, 0.6).setOrigin(0, 0);
+    const tw = (pw - 2 * PAD - 3 * 6) / 4;
+    tiles.forEach((tl, i) => {
+      const tx = x + PAD + i * (tw + 6);
+      const ty = sepY + 6;
+      const box = retroPanel(this, tx, ty, tw, TILE, { fill: RETRO.panel2, alpha: 0.9 });
+      // ไอคอนภาพวาดชุดเมนู (ถ้วยรางวัล/มงกุฎ/คัมภีร์/เฟือง)
+      menuIcon(tx + tw / 2, ty + 15, tl.art, 26);
+      const lab = txt(this, tx + tw / 2, ty + 34, tl.label, 11, RETRO.css.muted).setOrigin(0.5);
+      fitText(lab, tw - 6);
+      const hit = this.add.zone(tx, ty, tw, TILE).setOrigin(0).setInteractive({ useHandCursor: true });
+      hit.on('pointerover', () => {
+        box.setY(ty - 1);
+        lab.setColor(RETRO.css.gold);
       });
-    }
-    fancyButton(this, bx, next(34), {
-      w: bw, h: 34, label: 'คลัง & ร้านค้า', icon: 'book', theme: 'teal', size: 15,
-      onClick: () => fadeTo(this, 'CatalogScene'),
+      hit.on('pointerout', () => {
+        box.setY(ty);
+        lab.setColor(RETRO.css.muted);
+      });
+      hit.on('pointerdown', () => {
+        Sfx.unlock();
+        Sfx.play('click');
+        tl.run();
+      });
     });
-    fancyButton(this, bx, next(34), {
-      w: bw, h: 34, label: 'ตัวละคร', icon: 'shield', theme: 'sky', size: 15,
-      onClick: () => fadeTo(this, 'CharacterSelectScene', {}),
-    });
-    const sy = next(30);
-    fancyButton(this, bx - 68, sy, { w: 128, h: 30, label: 'ความสำเร็จ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showAchievements() });
-    fancyButton(this, bx + 68, sy, { w: 128, h: 30, label: 'อันดับ', icon: 'trophy', theme: 'steel', size: 14, onClick: () => this.showLeaderboard() });
-    // การตั้งค่าทั้งหมด (ควบคุม/เสียง/กล้อง/การแสดงผล) รวมอยู่ในปุ่มตั้งค่า
-    const sy2 = next(30);
-    fancyButton(this, bx - 68, sy2, { w: 128, h: 30, label: 'วิธีเล่น', icon: 'help', theme: 'steel', size: 14, onClick: () => this.showHelp() });
-    fancyButton(this, bx + 68, sy2, { w: 128, h: 30, label: 'ตั้งค่า', icon: 'pad', theme: 'steel', size: 14, onClick: () => this.showSettings() });
 
-    this.menuMsg = txt(this, bx, y + rows + 30, this.pendingMsg ?? '', 12, COLORS.bad, { align: 'center', wordWrap: { width: pw } }).setOrigin(0.5, 0).setStroke('#0b0d1f', 4);
+    // โหลดไอคอนเมนูภาพวาดที่ยังไม่มี แล้วเปลี่ยนภาพเมื่อเสร็จ (ครั้งแรกเท่านั้น · ครั้งต่อไปใช้แคช)
+    const iconNames = ['map', 'catalog', 'wardrobe', 'trophy', 'rank', 'guide', 'settings'];
+    const missingIcons = iconNames.filter((n) => !this.textures.exists(`tt_mi_${n}`));
+    if (missingIcons.length) {
+      for (const n of missingIcons) this.load.image(`tt_mi_${n}`, `art/ui/menu_${n}.png`);
+      this.load.once(Phaser.Loader.Events.COMPLETE, () => {
+        if (!this.sys.isActive()) return;
+        iconNames.forEach((n) => this.textures.exists(`tt_mi_${n}`) && this.textures.get(`tt_mi_${n}`).setFilter(Phaser.Textures.FilterMode.LINEAR));
+        iconSwaps.forEach((f) => f());
+      });
+      this.load.start();
+    }
+
+    this.menuMsg = txt(this, bx, y + rows + 8, this.pendingMsg ?? '', 12, COLORS.bad, { align: 'center', wordWrap: { width: pw } }).setOrigin(0.5, 0).setStroke('#0b0d1f', 4);
     this.pendingMsg = null;
     // มือถือ: ขยายคอลัมน์ซ้าย ×1.18 ยึดมุมซ้ายบน — ปุ่มใหญ่พอให้นิ้วกด (การ์ดไฮไลต์ด้านล่างซ่อนไว้)
     if (this.compact) {
@@ -350,34 +503,26 @@ export class TitleScene extends Phaser.Scene {
 
     // ---------- มุมขวาบน: เสียง + บัญชี + สถิติ (ขวาของมังกรในภาพ x ≥ 746) ----------
     const before2 = new Set(this.children.list);
-    // บัญชี + ออกจากระบบ
-    fancyButton(this, W - 88, 32, {
-      w: 152, h: 42, label: acc.username, sub: 'ออกจากระบบ', icon: 'shield', theme: 'steel', size: 14,
-      onClick: async () => {
-        if (this.entering) return;
-        // ออนไลน์: ส่งเซฟที่ค้างขึ้นเซิร์ฟเวอร์ก่อนออก
-        if (apiEnabled()) {
-          this.entering = true;
-          this.menuMsg?.setText('กำลังบันทึก…').setColor(COLORS.dim);
-          await Sync.flush();
-          if (!this.sys.isActive()) return;
-        }
-        getAccounts().logout();
-        this.scene.restart();
-      },
-    });
-    // ปุ่มเปิด/ปิดเสียง (ซ้ายชิปบัญชี) · ปุ่มลัด 0 ใช้ได้ทุกหน้า
-    const muteBtn = fancyButton(this, W - 192, 32, { w: 46, h: 42, label: Sfx.isMuted ? '🔇' : '🔊', theme: 'steel', size: 18, onClick: () => Sfx.toggleMute() });
-    const onAudio = (m: boolean) => muteBtn.setLabel(m ? '🔇' : '🔊');
-    EventBus.on('audio:changed', onAudio);
-    this.events.once('shutdown', () => EventBus.off('audio:changed', onAudio));
-    this.drawStats(meta, save?.wallet);
+    // แผงเดียวมุมขวาบน: เสียง · ชื่อบัญชี · ออกจากระบบ + สถิติ 2 แถว
+    const logout = async () => {
+      if (this.entering) return;
+      // ออนไลน์: ส่งเซฟที่ค้างขึ้นเซิร์ฟเวอร์ก่อนออก
+      if (apiEnabled()) {
+        this.entering = true;
+        this.menuMsg?.setText('กำลังบันทึก…').setColor(COLORS.dim);
+        await Sync.flush();
+        if (!this.sys.isActive()) return;
+      }
+      getAccounts().logout();
+      this.scene.restart();
+    };
+    this.drawAccount(acc.username, logout, meta, save?.wallet);
     if (this.compact) {
       const tr = this.children.list.filter((o) => !before2.has(o));
       anchorGroup(this, W, 0, MENU_K, 0).add(tr);
     }
     // เวอร์ชัน: มุมขวาล่าง ตัวเล็กจาง
-    txt(this, W - 8, H - 6, 'Survivor Isles v0.5 · PC & Mobile · 2.5D', 11, '#8a95a8').setOrigin(1, 1).setStroke('#0b0d1f', 3);
+    // (เลขเวอร์ชันเอาออก — หน้าแรกเหลือเท่าที่จำเป็น)
   }
 
   // ---------------------------------------------------------------- ไฮไลต์บนหน้าปก
@@ -391,9 +536,9 @@ export class TitleScene extends Phaser.Scene {
     type Slide = { art: string; tag: string; title: string; sub: string; color: string; bg: string; focus?: number };
     const short = (d: string) => (d.split('—').pop() ?? d).trim();
     const maps: Slide[] = (['forest', 'crystal', 'volcanic', 'glacier', 'jungle', 'atoll', 'snow', 'mushroom', 'desert', 'bamboo', 'swamp', 'savanna', 'ruins', 'haunted'] as const)
-      .map((b) => ({ art: `isl_${b}`, tag: 'เกาะ', title: BIOMES[b].name, sub: short(BIOMES[b].desc), color: '#73eff7', bg: '#1f7d7a', focus: 0.5 }));
-    maps.splice(3, 0, { art: 'market_island', tag: 'เกาะกลาง', title: 'ตลาดผู้รอดชีวิต', sub: 'ซื้อขายกับผู้เล่น · ห้ามต่อสู้', color: '#ffcd75', bg: '#1f7d7a', focus: 0.5 });
-    const hz = (art: string, title: string, sub: string): Slide => ({ art, tag: 'มหันตภัย', title, sub, color: '#ef7d57', bg: '#a8323f', focus: 0.35 });
+      .map((b) => ({ art: `isl_${b}`, tag: 'เกาะ', title: BIOMES[b].name, sub: short(BIOMES[b].desc), color: '#73eff7', bg: '#3d6e68', focus: 0.5 }));
+    maps.splice(3, 0, { art: 'market_island', tag: 'เกาะกลาง', title: 'ตลาดผู้รอดชีวิต', sub: 'ซื้อขายกับผู้เล่น · ห้ามต่อสู้', color: '#ffcd75', bg: '#3d6e68', focus: 0.5 });
+    const hz = (art: string, title: string, sub: string): Slide => ({ art, tag: 'มหันตภัย', title, sub, color: '#ef7d57', bg: '#8a4440', focus: 0.35 });
     const disasters: Slide[] = [
       hz('hz_tsunami', 'คลื่นยักษ์', 'พาสัตว์ทะเลขึ้นฝั่ง · ถอยจากหาด'),
       hz('hz_tornado', 'พายุทอร์นาโด', 'ดูดคนและของ · พังสิ่งก่อสร้าง'),
@@ -415,10 +560,32 @@ export class TitleScene extends Phaser.Scene {
       hz('hz_locusts', 'ฝูงตั๊กแตน', 'กินผักในไร่ · ตั้งหุ่นไล่กา'),
       hz('hz_stampede', 'ฝูงสัตว์คลั่ง', 'ตั้งหลักในบ้าน/ป้อม'),
     ];
+    // ภาพ key art ใหม่ (16:9 อลังการ) — โชว์เต็มกรอบ จัดกลาง เป็นสไลด์เปิด
+    const feat = (art: string, title: string, sub: string): Slide => ({ art, tag: 'ไฮไลต์', title, sub, color: '#ffcd75', bg: '#7a5a2a', focus: 0.5 });
+    const features: Slide[] = [
+      feat('show_a', 'พายุคลื่นยักษ์', 'คลื่นสึนามิซัดเกาะ ฟ้าผ่า · สัตว์ทะเลคลั่งขึ้นฝั่ง'),
+      feat('show_b', 'ภูเขาไฟปะทุ', 'จันทร์เลือด ลาวาพุ่ง · ฝูงมอนสเตอร์บุกฐาน'),
+      feat('show_c', 'ศึกสัตว์ในตำนาน', 'มังกรน้ำแข็งปะทะฟีนิกซ์เพลิง'),
+    ];
+    // ตัวอย่างบอสด่าน — โชว์หน้า (ครึ่งบน) ให้เห็นหัวบอส
+    const boss = (art: string, title: string, sub: string): Slide => ({ art, tag: 'บอสด่าน', title, sub, color: '#ff9f9f', bg: '#6a2a3a', focus: 0.32 });
+    const bosses: Slide[] = [
+      boss('boss_demon', 'ราชาปีศาจ', 'เจ้าแห่งเปลวไฟก้นดันเจี้ยน'),
+      boss('boss_crab', 'ราชาปู', 'เจ้าสมุทรกระดองเหล็ก'),
+      boss('legend_kraken', 'คราเคน', 'หมึกยักษ์จากก้นทะเลลึก'),
+      boss('legend_phoenix', 'ฟีนิกซ์', 'นกเพลิงอมตะคืนชีพจากเถ้าถ่าน'),
+      boss('boss_golem', 'โกเลมหิน', 'ยักษ์ศิลาผู้พิทักษ์ซากโบราณ'),
+      boss('legend_frost_dragon', 'มังกรน้ำแข็ง', 'ลมหายใจเยือกแข็งเหนือน่านฟ้า'),
+    ];
+    // สไลด์หลัก = key art ใหม่ + บอสด่าน (สลับกัน) · ตามด้วยมหันตภัยเด่น + เกาะส่วนน้อย (ไม่วนเกาะ 43 ใบ)
     const slides: Slide[] = [];
-    for (let i = 0; i < Math.max(maps.length, disasters.length); i++) {
-      if (maps[i]) slides.push(maps[i]);
-      if (disasters[i]) slides.push(disasters[i]);
+    const lead = [features[0], bosses[0], features[1], bosses[1], features[2], bosses[2], bosses[3], bosses[4], bosses[5]].filter(Boolean) as Slide[];
+    slides.push(...lead);
+    const topDisasters = disasters.slice(0, 6); // มหันตภัยเด่นๆ ไม่กี่อัน
+    const topMaps = maps.slice(0, 4); // เกาะส่วนน้อย
+    for (let i = 0; i < Math.max(topDisasters.length, topMaps.length); i++) {
+      if (topDisasters[i]) slides.push(topDisasters[i]);
+      if (topMaps[i]) slides.push(topMaps[i]);
     }
     const list = slides.filter((s) => this.textures.exists(`art_${s.art}`));
     if (!list.length) return;
@@ -430,14 +597,14 @@ export class TitleScene extends Phaser.Scene {
     const ch = H - y - 42;
     if (ch < 48) return;
     const box = this.add.container(0, 0).setDepth(5);
-    const frame = this.add.graphics();
-    frame.fillStyle(0x0b0d1f, 0.72).fillRoundedRect(x - 6, y - 6, cw + 12, ch + 32, 10);
-    frame.lineStyle(2, 0xffcd75, 0.7).strokeRoundedRect(x - 6, y - 6, cw + 12, ch + 32, 10);
-    box.add(frame);
-    const label = txt(this, x + 2, y + ch + 4, '', 15, COLORS.text, { fontStyle: '600' }).setOrigin(0, 0);
-    const sub = txt(this, x + cw, y + ch + 7, '', 10, COLORS.dim).setOrigin(1, 0);
-    const tag = txt(this, x + 8, y + 7, '', 12, '#ffffff', { fontStyle: '600' }).setPadding(5, 1, 5, 1);
-    const count = txt(this, x + cw - 8, y + 7, '', 10, '#d6e4ee').setOrigin(1, 0).setStroke('#0b0d1f', 3);
+    // กรอบพิกเซลบางแบบเดียวกับเมนู · แถบชื่อ: ชื่อ (ตัวพิกเซล) ซ้าย + ข้อมูลสั้น (ตัวปกติจาง) ขวา
+    box.add(retroPanel(this, x - 6, y - 6, cw + 12, ch + 32));
+    const edge = this.add.graphics();
+    edge.lineStyle(1, RETRO.inner, 1).strokeRect(x - 0.5, y - 0.5, cw + 1, ch + 1);
+    const label = retroLabel(this, x + 2, y + ch + 13, '', RETRO.css.text).setOrigin(0, 0.5);
+    const sub = txt(this, x + cw, y + ch + 13, '', 11, RETRO.css.muted).setOrigin(1, 0.5);
+    const tag = retroLabel(this, x + 6, y + 6, '', RETRO.css.text).setPadding(5, 1, 5, 1);
+    const count = retroLabel(this, x + cw - 6, y + 6, '', RETRO.css.text).setOrigin(1, 0);
     let cur: Phaser.GameObjects.Image | null = null;
     let i = -1;
     const show = (n: number) => {
@@ -455,7 +622,7 @@ export class TitleScene extends Phaser.Scene {
         this.tweens.add({ targets: img, alpha: 1, duration: 600 });
         this.tweens.add({ targets: old, alpha: 0, duration: 600, onComplete: () => old.destroy() });
       }
-      label.setText(s.title).setColor(s.color);
+      label.setText(s.title);
       fitText(label, cw - 120);
       sub.setText(s.sub);
       fitText(sub, cw - label.displayWidth - 12);
@@ -480,7 +647,7 @@ export class TitleScene extends Phaser.Scene {
     };
     const hit = this.add.zone(x + 28, y, cw - 56, ch).setOrigin(0).setInteractive({ useHandCursor: true });
     hit.on('pointerdown', () => step(1));
-    box.add([label, sub, tag, count, hit, arrow(x + 12, '‹', -1), arrow(x + cw - 12, '›', 1)]);
+    box.add([edge, label, sub, tag, count, hit, arrow(x + 12, '‹', -1), arrow(x + cw - 12, '›', 1)]);
     show(0);
     if (this.still) return;
     box.setAlpha(0);
@@ -488,34 +655,37 @@ export class TitleScene extends Phaser.Scene {
   }
 
   /** แผงสถิติมุมขวาบน (ใต้ชิปบัญชี): พลังสูงสุด / รอดนานสุด / เงินในเกาะ (เหรียญ·เพชร) / โบนัสล็อกอิน */
-  private drawStats(meta: ReturnType<typeof MetaSave.load>, wallet?: { coins: number; gems: number }) {
-    const w = 200;
-    const x = W - 14 - w;
-    const y = 60;
-    fancyPanel(this, x, y, w, 88, 'steel', 0.82);
-    const row = (ry: number, icon: 'sword' | 'moon', label: string, value: string, color: string) => {
-      this.add.image(x + 22, ry, iconTexture(this, icon)).setScale(2);
-      txt(this, x + 36, ry, label, 12, COLORS.dim).setOrigin(0, 0.5);
-      fitText(txt(this, x + w - 14, ry, value, 14, color).setOrigin(1, 0.5), 80);
+  /** แผงบางมุมขวาบน: ไอคอนเสียง + ชื่อบัญชี + ลิงก์ออกจากระบบ · พลังสูงสุด/รอดนานสุด · เหรียญ/เพชร/โบนัสล็อกอิน */
+  private drawAccount(name: string, logout: () => void, meta: ReturnType<typeof MetaSave.load>, wallet?: { coins: number; gems: number }) {
+    const w = 236;
+    const x = W - 16 - w;
+    const y = 16;
+    retroPanel(this, x, y, w, 98);
+    // เสียง (ปุ่มลัด 0 ใช้ได้ทุกหน้า)
+    const mute = this.add.image(x + 18, y + 16, Sfx.isMuted ? 'tb_mute' : 'tb_sound').setDisplaySize(16, 16).setInteractive({ useHandCursor: true });
+    mute.on('pointerdown', () => Sfx.toggleMute());
+    const onAudio = (m: boolean) => mute.setTexture(m ? 'tb_mute' : 'tb_sound').setDisplaySize(16, 16);
+    EventBus.on('audio:changed', onAudio);
+    this.events.once('shutdown', () => EventBus.off('audio:changed', onAudio));
+    const out = txt(this, x + w - 12, y + 16, 'ออกจากระบบ', 11, RETRO.css.muted).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
+    out.on('pointerover', () => out.setColor(RETRO.css.gold)).on('pointerout', () => out.setColor(RETRO.css.muted)).on('pointerdown', () => logout());
+    fitText(retroLabel(this, x + 34, y + 16, name, RETRO.css.text).setOrigin(0, 0.5), w - 46 - out.width - 8);
+    this.add.rectangle(x + 10, y + 29, w - 20, 1, RETRO.edge, 0.6).setOrigin(0, 0);
+    // แถว: ไอคอนเล็ก · ชื่อจาง · ค่า
+    const stat = (sx: number, sy: number, icon: string, label: string, value: string, color: string, cw: number) => {
+      this.add.image(sx + 7, sy, icon).setScale(icon.startsWith('fbicon') ? 1 : 0.75);
+      const lab = txt(this, sx + 17, sy, label, 11, RETRO.css.muted).setOrigin(0, 0.5);
+      fitText(txt(this, sx + cw, sy, value, 12, color, { fontStyle: '600' }).setOrigin(1, 0.5), Math.max(24, cw - 17 - lab.width - 6));
     };
-    row(y + 17, 'sword', 'พลังสูงสุด', (meta.bestPower ?? 0).toLocaleString(), COLORS.gold);
-    row(y + 35, 'moon', 'รอดนานสุด', `${meta.bestDays} วัน`, COLORS.good);
-    // เงินของเกาะปัจจุบัน (ยังไม่มีเกาะ = ขีด) — รูปแบบเดียวกับ HUD ในเกม
-    const my = y + 54;
-    const pill = this.add.graphics();
-    pill.fillStyle(0x0b0d1f, 0.55).fillRoundedRect(x + 10, my - 9, w - 20, 18, 9);
-    pill.lineStyle(1, 0xffcd75, 0.45).strokeRoundedRect(x + 10, my - 9, w - 20, 18, 9);
-    this.add.image(x + 24, my, 'i_coin').setScale(1.1);
-    fitText(txt(this, x + 34, my, wallet ? fmtMoney(wallet.coins) : '—', 13, COLORS.gold).setOrigin(0, 0.5), 74);
-    this.add.image(x + 118, my, 'i_gem').setScale(1.1);
-    fitText(txt(this, x + 128, my, wallet ? fmtMoney(wallet.gems) : '—', 13, '#73eff7').setOrigin(0, 0.5), 56);
+    const half = (w - 30) / 2;
+    stat(x + 10, y + 43, iconTexture(this, 'sword'), 'พลังสูงสุด', (meta.bestPower ?? 0).toLocaleString(), RETRO.css.gold, half);
+    stat(x + 20 + half, y + 43, iconTexture(this, 'moon'), 'รอดสุด', `${meta.bestDays} วัน`, RETRO.css.sage, half);
+    stat(x + 10, y + 62, 'i_coin', 'เหรียญ', wallet ? fmtMoney(wallet.coins) : '—', RETRO.css.gold, half);
+    stat(x + 20 + half, y + 62, 'i_gem', 'เพชร', wallet ? fmtMoney(wallet.gems) : '—', '#9fd6e0', half);
     const claimed = meta.lastLogin === todayKey();
-    const login = txt(
-      this, x + 14, y + 74,
-      claimed ? `🔥 ล็อกอินติดต่อกัน ${meta.loginStreak} วัน` : '🎁 โบนัสล็อกอินรออยู่ที่ตู้จดหมาย',
-      11, claimed ? COLORS.good : '#fff2b0',
-    ).setOrigin(0, 0.5);
-    fitText(login, w - 28);
+    this.add.rectangle(x + 10, y + 74, w - 20, 1, RETRO.edge, 0.4).setOrigin(0, 0);
+    const login = txt(this, x + 12, y + 86, claimed ? `ล็อกอินติดต่อกัน ${meta.loginStreak} วัน` : '🎁 โบนัสล็อกอินรออยู่ที่ตู้จดหมาย', 11, claimed ? RETRO.css.sage : RETRO.css.sand).setOrigin(0, 0.5);
+    fitText(login, w - 24);
   }
 
   // ---------------------------------------------------------------- หน้าต่างย่อย
@@ -576,13 +746,19 @@ export class TitleScene extends Phaser.Scene {
 
   /** ไฟสถานะการเชื่อมต่อ (มุมซ้ายล่าง เหนือเลขเวอร์ชัน) */
   private drawNet() {
-    // เข้าระบบแล้ว: มุมขวาบนใต้แผงสถิติ · ฟอร์มบัญชี: มุมซ้ายล่างเหนือเลขเวอร์ชัน
+    // จุดสถานะเล็กๆ (เขียว = ออนไลน์ · เหลือง = กำลังเชื่อมต่อ · เทา = ออฟไลน์) — ชี้ = บอกเป็นข้อความ
+    // เข้าระบบแล้ว: ในแผงบัญชีมุมขวาบน · ฟอร์มบัญชี: มุมซ้ายล่าง
     const right = this.menuBottom > 0;
-    const t = txt(this, right ? W - 14 : 12, right ? (this.compact ? 182 : 152) : H - 26, '', 11, COLORS.dim).setOrigin(right ? 1 : 0, right ? 0 : 1).setStroke('#0b0d1f', 3).setDepth(5);
+    const x = right ? W - 20 : 16;
+    const y = right ? Math.round(122 * (this.compact ? MENU_K : 1)) : H - 16;
+    const dot = this.add.circle(x, y, 3, 0x8fbf7a).setStrokeStyle(1, 0x0b0f12).setDepth(6);
+    const tip = txt(this, x + (right ? -8 : 8), y, '', 11, RETRO.css.muted).setOrigin(right ? 1 : 0, 0.5).setDepth(6).setVisible(false);
+    dot.setInteractive(new Phaser.Geom.Circle(3, 3, 9), Phaser.Geom.Circle.Contains);
+    dot.on('pointerover', () => tip.setVisible(true)).on('pointerout', () => tip.setVisible(false));
     const show = () => {
-      const s = netStatus();
-      t.setText(s === 'online' ? '🟢 ออนไลน์' : s === 'unknown' ? '🟡 กำลังเชื่อมต่อ…' : '⚪ ออฟไลน์ (บันทึกในเครื่อง)');
-      t.setColor(s === 'online' ? COLORS.good : COLORS.dim);
+      const st = netStatus();
+      dot.setFillStyle(st === 'online' ? 0x8fbf7a : st === 'unknown' ? 0xe3c178 : 0x6b7489);
+      tip.setText(st === 'online' ? 'ออนไลน์' : st === 'unknown' ? 'กำลังเชื่อมต่อ…' : 'ออฟไลน์ (บันทึกในเครื่อง)');
     };
     show();
     const off = onNetStatus(() => this.sys.isActive() && show());
@@ -815,7 +991,7 @@ export class TitleScene extends Phaser.Scene {
         inputs.push(remember);
         rememberNow = () => remember.checked;
         if (svc.emailCodes) {
-          const forgot = keep(txt(this, x + pw - 30, at(166, 160), 'ลืมรหัสผ่าน?', 13, '#73eff7').setOrigin(1, 0.5).setStroke('#0b0d1f', 3));
+          const forgot = keep(txt(this, x + pw - 30, at(166, 160), 'ลืมรหัสผ่าน?', 13, RETRO.css.sand).setOrigin(1, 0.5));
           forgot.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
             if (busy) return;
             Sfx.play('click');
@@ -905,7 +1081,7 @@ export class TitleScene extends Phaser.Scene {
     }
     // โฟกัสช่องแรกที่ยังว่าง
     this.time.delayedCall(100, () => (inputs.find((e) => e.type !== 'checkbox' && !e.value) ?? inputs[0])?.focus());
-    keep(txt(this, 12, H - 8, 'Survivor Isles v0.5 · PC & Mobile · 2.5D', 11, '#8a95a8').setOrigin(0, 1));
+    // (เลขเวอร์ชันเอาออก — มีจุดสถานะออนไลน์เล็กๆ มุมซ้ายล่างแทน)
   }
 
   /** ผลจาก AccountService → หน้าใส่รหัส / เข้าเกม / โชว์ข้อผิดพลาด */
@@ -1010,6 +1186,8 @@ export class TitleScene extends Phaser.Scene {
       stepper('ระดับเสียงรวม', pct(a.master), () => vol('master', -0.1), () => vol('master', 0.1));
       stepper('เสียงเอฟเฟกต์', pct(a.sfx), () => vol('sfx', -0.1), () => vol('sfx', 0.1));
       stepper('เพลงประกอบ', pct(a.music), () => vol('music', -0.1), () => vol('music', 0.1));
+      // เดินด้วยเมาส์ (systems/MouseMove) — คอลัมน์ซ้ายมีที่ว่าง (คอลัมน์ขวาเต็มถึงปุ่มปิด)
+      toggle('เดินด้วยเมาส์', g.mouseMove, () => setSettings({ mouseMove: !g.mouseMove }), 'กดค้าง/คลิกพื้นเพื่อเดิน');
 
       // ---- คอลัมน์ขวา: การแสดงผล ----
       LX = 490;

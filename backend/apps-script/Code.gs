@@ -53,6 +53,16 @@ var CFG = {
   CHAT_PAGE: 50,
   CHAT_CACHE_SEC: 10,
   /**
+   * ผู้เล่นในโลก (live) — เก็บใน CacheService อย่างเดียว (ไม่เขียนชีต): key ต่อบัญชีอายุ PRESENCE_TTL_SEC วิ + รายชื่อ (index)
+   * ตอบเฉพาะคนที่อัปเดตภายใน PRESENCE_FRESH_MS · ส่งตำแหน่งได้ 1 ครั้ง/PRESENCE_GAP_MS ต่อบัญชี · เส้นทางย้อนหลัง PRESENCE_TRAIL_MS (≤ PRESENCE_TRAIL_MAX จุด)
+   */
+  PRESENCE_TTL_SEC: 60,
+  PRESENCE_FRESH_MS: 20000,
+  PRESENCE_GAP_MS: 1000,
+  PRESENCE_MAX: 150,
+  PRESENCE_TRAIL_MS: 6000,
+  PRESENCE_TRAIL_MAX: 12,
+  /**
    * OAuth Client ID ของปุ่ม "Sign in with Google" (xxxx.apps.googleusercontent.com) — แนะนำให้ตั้งใน Script Properties ชื่อ GOOGLE_CLIENT_ID แทน
    * (ใส่ที่นี่แล้วรัน setup ก็ได้ setup จะคัดลอกไปไว้ใน Script Properties ให้) · ว่างทั้งคู่ = ปิดการเข้าสู่ระบบด้วย Google
    */
@@ -171,6 +181,9 @@ var ACTIONS = {
   'leaderboard.submit': leaderboardSubmit_,
   'chat.post': chatPost_,
   'chat.get': chatGet_,
+  'presence.put': presencePut_,
+  'presence.get': presenceGet_,
+  'presence.sync': presenceSync_,
 };
 
 function route_(req) {
@@ -1214,6 +1227,155 @@ function chatGet_(req) {
   var list = chatRecent_();
   var out = list.filter(function (m) { return m.time > since && m.channel === channel; });
   return ok_({ messages: out, serverTime: Date.now(), latest: list.length ? list[list.length - 1].time : 0 });
+}
+
+// ------------------------------------------------------------------ ผู้เล่นในโลก (live)
+// CacheService อย่างเดียว — ไม่แตะชีต ไม่ lock · key 'pres:<accId>' (อายุ PRESENCE_TTL_SEC) + 'pres:index' = { at, ids }
+// index แก้แบบไม่ lock: ถ้าส่งพร้อมกันแล้วชื่อหลุด รอบถัดไปของคนนั้น (~2.5 วิ) จะเติมกลับเอง
+
+var PRES_INDEX = 'pres:index';
+var PRES_ANIM = { '': 1, atk: 1, hurt: 1 };
+var PRES_ZONE = { '': 1, home: 1, safe: 1, adv: 1, sea: 1 };
+var PRES_KEY_RE = /^[a-z0-9_]{0,32}$/;
+var PRES_TEX_RE = /^[a-z0-9_@]{0,40}$/;
+/** พิกัดโลกสูงสุด (px) — ตาราง 12 แถว × 144 tile × 16 px ≈ 27,648 */
+var PRES_MAX_XY = 40000;
+
+function presKey_(id) {
+  return 'pres:' + id;
+}
+
+function presParse_(s) {
+  if (!s) return null;
+  try {
+    return JSON.parse(s);
+  } catch (e) {
+    return null;
+  }
+}
+
+function presIndex_(cache) {
+  var o = presParse_(cache.get(PRES_INDEX));
+  return o && Array.isArray(o.ids) ? o : { at: 0, ids: [] };
+}
+
+function presText_(v, re) {
+  var s = String(v === undefined || v === null ? '' : v);
+  return re.test(s) ? s : '';
+}
+
+/** ระยะระหว่างช่องเกาะ (Chebyshev บนตาราง GRID×GRID) */
+function slotDist_(a, b) {
+  var G = CFG.GRID;
+  return Math.max(Math.abs((a % G) - (b % G)), Math.abs(Math.floor(a / G) - Math.floor(b / G)));
+}
+
+/**
+ * ข้อมูลตำแหน่งจากคำขอ (ตัดค่าให้อยู่ในขอบเขตทุกช่อง) — tr = เส้นทางย้อนหลัง [ms ก่อนส่ง, x, y][] → เก็บเป็นเวลาเซิร์ฟเวอร์ ต่อจากของเดิม (prev)
+ * ช่อง: x y (px) · s ช่องเกาะใต้ตัว · f ทิศ (d/u/s) + fl พลิก · a ท่า (atk/hurt) · c o h k = อาชีพ/ชุด/หมวก/ผ้าคลุม · lv · hp (%) · al มีชีวิต · z เขต · rd ยาน (texture) + alt · hid = ซ่อน (อยู่ในดันเจี้ยน/บ้าน)
+ */
+function presEntry_(req, acc, prev, now) {
+  var tr = [];
+  if (prev && Array.isArray(prev.tr)) prev.tr.forEach(function (p) { if (now - p[0] <= CFG.PRESENCE_TRAIL_MS) tr.push(p); });
+  var pts = Array.isArray(req.tr) ? req.tr.slice(-CFG.PRESENCE_TRAIL_MAX) : [];
+  pts.forEach(function (p) {
+    if (!Array.isArray(p)) return;
+    var t = now - clampInt_(p[0], 0, CFG.PRESENCE_TRAIL_MS);
+    if (tr.length && t <= tr[tr.length - 1][0]) return;
+    tr.push([t, clampInt_(p[1], 0, PRES_MAX_XY), clampInt_(p[2], 0, PRES_MAX_XY)]);
+  });
+  var x = clampInt_(req.x, 0, PRES_MAX_XY);
+  var y = clampInt_(req.y, 0, PRES_MAX_XY);
+  if (!tr.length || tr[tr.length - 1][0] < now) tr.push([now, x, y]);
+  var a = String(req.a || '');
+  var z = String(req.z || '');
+  return {
+    id: acc.id, n: cleanName_(req.name) || acc.playerName || acc.username,
+    x: x, y: y, s: clampInt_(req.s, -1, 9999), f: /^[dus]$/.test(String(req.f)) ? String(req.f) : 'd', fl: req.fl ? 1 : 0,
+    a: PRES_ANIM[a] ? a : '', c: presText_(req.c, PRES_KEY_RE), o: presText_(req.o, PRES_KEY_RE), h: presText_(req.h, PRES_KEY_RE), k: presText_(req.k, PRES_KEY_RE),
+    lv: clampInt_(req.lv, 1, 999), hp: clampInt_(req.hp, 0, 100), al: req.al === false || req.al === 0 ? 0 : 1, z: PRES_ZONE[z] ? z : '',
+    rd: presText_(req.rd, PRES_TEX_RE), alt: clampInt_(req.alt, 0, 64), hid: req.hid ? 1 : 0,
+    tr: tr.slice(-CFG.PRESENCE_TRAIL_MAX), t: now,
+  };
+}
+
+/** บันทึกตำแหน่งของเรา (ถ้าไม่ถี่เกิน PRESENCE_GAP_MS) → { entry } หรือ { wait } (วินาที) */
+function presWrite_(req, acc, cache, prev, idx, now) {
+  if (prev && now - Number(prev.t) < CFG.PRESENCE_GAP_MS) return { wait: Math.ceil((CFG.PRESENCE_GAP_MS - (now - Number(prev.t))) / 100) / 10 };
+  var e = presEntry_(req, acc, prev, now);
+  cache.put(presKey_(acc.id), JSON.stringify(e), CFG.PRESENCE_TTL_SEC);
+  // เพิ่มชื่อเราใน index (หรือต่ออายุ index ทุก 2 นาที)
+  if (idx.ids.indexOf(acc.id) < 0 || now - Number(idx.at) > 120000) {
+    var ids = idx.ids.filter(function (id) { return id !== acc.id; });
+    ids.push(acc.id);
+    if (ids.length > CFG.PRESENCE_MAX) ids = ids.slice(-CFG.PRESENCE_MAX);
+    cache.put(PRES_INDEX, JSON.stringify({ at: now, ids: ids }), 1800);
+  }
+  return { entry: e };
+}
+
+/**
+ * คนอื่นที่อัปเดตภายใน PRESENCE_FRESH_MS (ไม่รวมเรา / คนที่ซ่อน) · area ≥ 0 และรู้ช่องของเรา (slot) = เฉพาะคนที่ห่างไม่เกิน area ช่อง
+ * ตัดชื่อที่ key หมดอายุออกจาก index ไปด้วย → { players, self (ข้อมูลเดิมของเรา), idx }
+ */
+function presList_(cache, meId, slot, area, now) {
+  var idx = presIndex_(cache);
+  var got = idx.ids.length ? cache.getAll(idx.ids.map(presKey_)) || {} : {};
+  var G2 = CFG.GRID * CFG.GRID;
+  var out = [];
+  var keep = [];
+  var self = null;
+  idx.ids.forEach(function (id) {
+    var e = presParse_(got[presKey_(id)]);
+    if (!e) return;
+    keep.push(id);
+    if (id === meId) {
+      self = e;
+      return;
+    }
+    if (now - Number(e.t) > CFG.PRESENCE_FRESH_MS || e.hid) return;
+    if (area >= 0 && slot >= 0 && slot < G2 && (!(e.s >= 0 && e.s < G2) || slotDist_(e.s, slot) > area)) return;
+    out.push(e);
+  });
+  if (keep.length < idx.ids.length) {
+    idx = { at: idx.at, ids: keep };
+    cache.put(PRES_INDEX, JSON.stringify(idx), 1800);
+  }
+  if (!self && meId) self = presParse_(cache.get(presKey_(meId)));
+  return { players: out, self: self, idx: idx };
+}
+
+function presArea_(req) {
+  return req.area === undefined || req.area === null || req.area === '' ? -1 : clampInt_(req.area, -1, CFG.GRID);
+}
+
+/** ส่งตำแหน่งของเรา (bye = ออกจากโลก ลบทันที) → { serverTime } · ถี่เกิน 1 ครั้ง/วิ → rate + wait */
+function presencePut_(req, acc) {
+  var cache = CacheService.getScriptCache();
+  var now = Date.now();
+  if (req.bye) {
+    cache.remove(presKey_(acc.id));
+    return ok_({ serverTime: now, bye: true });
+  }
+  var w = presWrite_(req, acc, cache, presParse_(cache.get(presKey_(acc.id))), presIndex_(cache), now);
+  if (w.wait) return fail_('ส่งตำแหน่งถี่เกินไป', 'rate', { wait: w.wait });
+  return ok_({ serverTime: now });
+}
+
+/** ผู้เล่นคนอื่นในโลก — s = ช่องของเรา · area = ห่างไม่เกินกี่ช่อง (ไม่ส่ง = ทั้งโลก) */
+function presenceGet_(req, acc) {
+  var now = Date.now();
+  var l = presList_(CacheService.getScriptCache(), acc.id, clampInt_(req.s, -1, 9999), presArea_(req), now);
+  return ok_({ players: l.players, serverTime: now });
+}
+
+/** put + get ในคำขอเดียว (เกมใช้อันนี้ — ครึ่งเดียวของจำนวนคำขอ) · ถี่เกิน = ข้ามการบันทึก (rated: true) แต่ยังได้รายชื่อ */
+function presenceSync_(req, acc) {
+  var cache = CacheService.getScriptCache();
+  var now = Date.now();
+  var l = presList_(cache, acc.id, clampInt_(req.s, -1, 9999), presArea_(req), now);
+  var w = presWrite_(req, acc, cache, l.self, l.idx, now);
+  return ok_({ players: l.players, serverTime: now, rated: !!w.wait });
 }
 
 // ------------------------------------------------------------------ ตัวช่วย

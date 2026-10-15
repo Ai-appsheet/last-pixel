@@ -76,20 +76,23 @@ export function boosted(scene: Phaser.Scene, size: number) {
  * ข้อความบนโลกเกม/ภาพ ใส่ขอบบางเอง (outline())
  */
 export function txt(scene: Phaser.Scene, x: number, y: number, text: string, size0 = 16, color = COLORS.text, extra: Style = {}) {
-  const size = boosted(scene, size0);
   const family = extra.fontFamily ?? FONT;
   const body = size0 < 15;
-  const weight = extra.fontStyle ?? (body ? '400' : '600');
+  // ตัวหนังสือทั่วไปเล็กลง 1px (≥ 10) · จอคมชัด = ตัวบาง 300 · จอธรรมดา 400 · ตัวเล็กหนาสุด 500
+  const size = boosted(scene, family === FONT && body ? Math.max(10, size0 - 1) : size0);
+  const thin = renderScale() >= 1.75 ? '300' : '400';
+  const want = extra.fontStyle !== undefined ? String(extra.fontStyle) : body ? thin : '600';
+  const weight = body && family === FONT && (want === '600' || want === '700') ? '500' : want;
   const t = scene.add.text(x, y, text, {
     fontFamily: family,
     fontSize: `${size}px`,
-    fontStyle: weight,
     color,
     stroke: '#0b0d1f',
     strokeThickness: family === PIXEL_FONT ? Math.max(2, Math.round(size / 8)) : 0,
     resolution: textResolution(),
     metrics: family === PIXEL_FONT ? undefined : thaiMetrics(size, family, weight),
     ...extra,
+    fontStyle: weight,
   });
   if (body) t.setShadow(0, 1, 'rgba(11,13,31,0.55)', 0, false, true);
   else t.setShadow(0, Math.max(1, Math.round(size / 14)), '#0b0d1f', 0, true, true);
@@ -178,8 +181,9 @@ export function pixelTxt(scene: Phaser.Scene, x: number, y: number, text: string
 export function chunkyTxt(scene: Phaser.Scene, x: number, y: number, text: string, size = 20, color = COLORS.cream, extra: Style = {}, opts: PixelOpts = {}) {
   return makePixel(scene, x, y, text, size, color, extra, { bold: false, ...opts }, '"Mitr", Kanit, Tahoma, sans-serif', '600', (D) => {
     // ฟอนต์บนแคนวาส ~20px (เล็กกว่านี้สระ/วรรณยุกต์ไทยตันเป็นก้อน) แล้วขยายเลขเต็ม ≥ 2
-    const m = Math.max(2, Math.round((size * D) / 20));
-    return [m, Phaser.Math.Clamp(Math.round((size * D) / m), 12, 24)];
+    // จอความละเอียดต่ำ (ฟอนต์ ×2 จะเหลือ < 16px — สระ/วรรณยุกต์ตัน) → ×1 ขอบแข็งพอดีพิกเซลจอ (ยังคมและอ่านง่าย)
+    const m = (size * D) / 2 < 16 ? 1 : Math.max(2, Math.round((size * D) / 20));
+    return [m, Phaser.Math.Clamp(Math.round((size * D) / m), 10, 24)];
   });
 }
 
@@ -227,10 +231,11 @@ export function button(
 ): Button {
   const bg = scene.add.nineslice(x, y, enabled ? 'ui_btn' : 'ui_btn_off', undefined, w, h, 8, 8, 8, 8);
   const hover = scene.add.nineslice(x, y, 'ui_btn_hover', undefined, w, h, 8, 8, 8, 8).setVisible(false);
-  // ป้ายปุ่ม: Noto Sans Thai 600 ขนาด 14–15 (ปุ่มใหญ่ตามที่ขอ) · เงาตกบาง ไม่มีขอบหนา · ยาวเกินปุ่มย่อให้พอดี
-  const t = txt(scene, x, y - 1, label, size >= 18 ? size : Math.min(15, Math.max(14, size)), enabled ? COLORS.text : '#8a95a8', { fontStyle: '600' }).setOrigin(0.5);
-  t.setShadow(0, 1, '#0b0d1f', 0, false, true);
-  const fit = () => fitPixel(t, w - 10);
+  // ป้ายปุ่ม: ตัวพิกเซลหนา + เงา 1 พิกเซล (ชุด UI เรียบยุค 90) · ยาวเกินปุ่ม → ลดตัวคูณ/ย่อ (fitPixel)
+  // ป้ายปุ่ม: Noto Sans Thai 500 ขนาด 13 (บาง คม อ่านง่าย) + เงา 1px
+  const t = txt(scene, x, y - 1, label, size >= 24 ? 16 : 14, enabled ? '#eef0e6' : '#9aa7a4', { fontStyle: '500' }).setOrigin(0.5);
+  t.setShadow(0, 1, '#0b0f12', 0, false, true);
+  const fit = () => fitPixel(t, w - 12);
   fit();
   if (enabled) {
     const all = [bg, hover, t];

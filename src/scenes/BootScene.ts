@@ -9,6 +9,7 @@ import { installCrispText } from '../ui/crispText';
 import { TiltPipeline } from '../gfx/TiltPipeline';
 import { coverImage, queueArt } from '../ui/art';
 import { fadeTo } from '../ui/transition';
+import { Sfx } from '../core/AudioManager';
 
 /** แจ้งหน้าโหลด HTML (app/LoadingScreen.tsx) — ความคืบหน้า 0..1 / พร้อมแล้ว */
 const report = (v: number) => window.dispatchEvent(new CustomEvent('si:progress', { detail: v }));
@@ -53,6 +54,9 @@ export class BootScene extends Phaser.Scene {
   }
 
   create() {
+    // ตั้งเพลงหลักไว้ตั้งแต่หน้าโหลด → พอผู้ใช้แตะครั้งแรก (AudioManager ปลดล็อกให้เอง) เพลงจะเริ่มเล่นทันที
+    // และเล่นต่อเนื่องไปจนถึงหน้าแรกและในเกม (GameScene เปลี่ยนเป็นเพลงกลางวัน/กลางคืนเอง)
+    Sfx.startMusic('title');
     // ตัวหนังสือคมชัดทั้งเกม (ui/crispText.ts) — ต้องติดตั้งก่อนสร้างข้อความแรก
     installCrispText(this.game);
     const w = this.scale.width;
@@ -73,7 +77,7 @@ export class BootScene extends Phaser.Scene {
       registerCostumes(this);
       report(0.92);
       const fonts = document.fonts
-        ? Promise.all([document.fonts.load(`400 16px ${FONT}`), document.fonts.load(`500 16px ${FONT}`), document.fonts.load(`600 16px ${FONT}`), document.fonts.load(`700 16px ${HEAD_FONT}`), document.fonts.load(`16px ${PIXEL_FONT}`), document.fonts.load(`16px ${PIXEL_TH}`)])
+        ? Promise.all([document.fonts.load(`300 16px ${FONT}`), document.fonts.load(`400 16px ${FONT}`), document.fonts.load(`500 16px ${FONT}`), document.fonts.load(`600 16px ${FONT}`), document.fonts.load(`700 16px ${HEAD_FONT}`), document.fonts.load(`16px ${PIXEL_FONT}`), document.fonts.load(`16px ${PIXEL_TH}`)])
         : Promise.resolve();
       Promise.race([fonts, new Promise((r) => setTimeout(r, 3000))]).finally(() => {
         label.destroy();

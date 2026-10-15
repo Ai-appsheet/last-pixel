@@ -258,6 +258,7 @@ export class CreatureSystem {
     if (!where) return;
     for (const def of Phaser.Utils.Array.Shuffle(legendMobs())) {
       if (day < (def.minDay ?? 1)) continue;
+      if (s.mobRespawn?.isDead(`legend:${def.id}`)) continue; // ล้มแล้วรอรอบชั่วโมงหน้า
       const rule = def.spawn?.find((r) => r.where === where && (r.time === 'any' || (r.time === 'night') === night) && Math.random() < r.chance);
       if (rule && this.spawnLegend(def)) return;
     }

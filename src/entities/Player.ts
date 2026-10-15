@@ -15,13 +15,22 @@ import { lookKey } from '../gfx/UpgradeLook';
 import { MAX_LEVEL, levelStats, xpNeed } from '../data/level';
 import { addStats, emptyStats, gearMult, powerScore, type EquipSlot, type Stats } from '../data/equipment';
 import { freshBody, tickBody, type BodyState } from '../systems/BodySystem';
+import { BELT_KEYS, type LoadoutKey } from '../data/loadout';
 
-export type Equipment = Record<EquipSlot, Slot | null>;
+/** อุปกรณ์ 12 ช่อง + ช่องใช้งาน (เข็มขัดเครื่องมือ 2 ช่อง + แสง — data/loadout.ts) */
+export type Equipment = Record<EquipSlot | LoadoutKey, Slot | null>;
 export const emptyEquipment = (): Equipment => ({
   weapon: null, offhand: null, head: null, body: null, legs: null, feet: null, hands: null, back: null, neck: null, ring1: null, ring2: null, bag: null,
+  tool1: null, tool2: null, lamp: null,
 });
 
 type Facing = 'down' | 'up' | 'side';
+
+/** ค่าเครื่องมือของช่อง (ดาเมจ ×เลเวลอัพเกรด) */
+const toolOf = (s: Slot) => {
+  const t = ITEMS[s.id].tool;
+  return t ? (s.plus ? { ...t, damage: t.damage * plusMult(s.plus) } : t) : null;
+};
 
 /** สภาพแวดล้อมรอบตัวที่ GameScene ส่งให้ทุกเฟรม */
 export interface PlayerEnv {
@@ -88,6 +97,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   thirstMult = 1;
   /** ตัวคูณความเร็วจากพื้น/ภัย (โคลน น้ำท่วม พายุทราย/หิมะ) — ตั้งโดย GameScene ทุกเฟรม */
   envSpeed = 1;
+  /** อยู่ในบ้านของเรา (HomeSystem) — มอน/ผู้เล่นอื่น/ภัยตีไม่โดน */
+  sheltered = false;
   /** พื้นลื่น (น้ำแข็ง): ความเร็วค่อยๆ เปลี่ยน ไถลต่อหลังปล่อยปุ่ม */
   slippery = false;
   /** สมดุลร่างกาย (โปรตีน/พลังงาน/วิตามิน/ป่วย) — systems/BodySystem.ts */
@@ -127,14 +138,19 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.heldImg = scene.add.image(x, y, 'px').setVisible(false);
   }
 
+  /** ภาพอาวุธในมือ (ออร่าใช้ใส่แสงเรือง) */
+  get heldSprite() {
+    return this.heldImg;
+  }
   get dead() {
     return this.hp <= 0;
   }
   get isDodging() {
     return this.dodgeTime > 0;
   }
+  /** ของในมือ — แถบหมวด (ui/LoadoutBar.ts): ปกติมือว่าง (selected = -1) ถือเฉพาะของขว้างที่เลือกในช่องอาวุธ/ตอนใช้ของ */
   get held() {
-    return this.inventory.slots[this.selected];
+    return this.inventory.slots[this.selected] ?? null;
   }
   get maxHp() {
     return this.char.stats.hp + Math.round(this.stats.hp);
@@ -257,13 +273,50 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   get lightRadius() {
     const s = this.held;
     const light = s ? ITEMS[s.id].light : undefined;
-    return (light ? light.radius : BALANCE.playerLight) + this.stats.light;
+    const lamp = this.equip.lamp ? ITEMS[this.equip.lamp.id].light : undefined; // 🔦 ช่องแสง: สว่างตลอดไม่ต้องถือ
+    return Math.max(light?.radius ?? 0, lamp?.radius ?? 0, BALANCE.playerLight) + this.stats.light;
   }
-  /** ถือคบไฟ หรือ มีตะเกียงที่มือรอง (ให้ความอบอุ่น) */
+  /** ถือคบไฟ · มีของในช่องแสง · หรือตะเกียงที่มือรอง (ให้ความอบอุ่น) */
   get holdingTorch() {
     const s = this.held;
-    return (!!s && ITEMS[s.id].type === 'light') || !!(this.equip.offhand && ITEMS[this.equip.offhand.id].equip?.warm);
+    return (!!s && ITEMS[s.id].type === 'light') || !!this.equip.lamp || !!(this.equip.offhand && ITEMS[this.equip.offhand.id].equip?.warm);
   }
+
+  // ---------- ช่องใช้งาน (data/loadout.ts) ----------
+  /** เครื่องมือในเข็มขัดที่แรงสุดสำหรับต้นไม้/หิน */
+  beltTool(kind: 'tree' | 'rock'): { key: LoadoutKey; slot: Slot; tool: NonNullable<ReturnType<typeof toolOf>> } | null {
+    let best: { key: LoadoutKey; slot: Slot; tool: NonNullable<ReturnType<typeof toolOf>> } | null = null;
+    for (const key of BELT_KEYS) {
+      const slot = this.equip[key];
+      const tool = slot ? toolOf(slot) : null;
+      if (tool && tool[kind] > (best?.tool[kind] ?? 0)) best = { key, slot: slot!, tool };
+    }
+    return best;
+  }
+  /** คันเบ็ดในเข็มขัด */
+  get beltRod(): LoadoutKey | null {
+    return BELT_KEYS.find((k) => this.equip[k] && ITEMS[this.equip[k]!.id].type === 'rod') ?? null;
+  }
+  /** มีคันเบ็ด (ถือในมือ หรือในเข็มขัด) */
+  get hasRod() {
+    return (!!this.held && ITEMS[this.held.id].type === 'rod') || !!this.beltRod || this.inventory.slots.some((s) => !!s && ITEMS[s.id].type === 'rod');
+  }
+  /** สึกของในช่องใช้งาน — คืน true ถ้าพัง (ช่องว่าง) */
+  wearLoadout(key: LoadoutKey, amount: number): boolean {
+    const s = this.equip[key];
+    if (!s || s.dur === undefined) return false;
+    s.dur -= amount;
+    if (s.dur > 0) return false;
+    this.equip[key] = null;
+    return true;
+  }
+  /** โชว์เครื่องมือจากเข็มขัดในมือชั่วครู่ (ตอนตัด/ขุด/ตกปลา) */
+  flashTool(slot: Slot) {
+    this.toolFlash = slot;
+    this.toolFlashT = 0.45;
+  }
+  private toolFlash: Slot | null = null;
+  private toolFlashT = 0;
   get feetY() {
     return this.y + 11;
   }
@@ -426,7 +479,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.shadowImg.setPosition(Math.round(this.x), Math.round(this.y + 11)).setVisible(!this.riding);
     let held = this.held;
     let def = held ? ITEMS[held.id] : undefined;
-    if (!(def && ['tool', 'weapon', 'light', 'ranged', 'rod'].includes(def.type)) && this.equip.weapon) {
+    this.toolFlashT = Math.max(0, this.toolFlashT - dt);
+    if (this.toolFlashT > 0 && this.toolFlash) {
+      held = this.toolFlash; // ⛏ เครื่องมือจากเข็มขัดขึ้นมือชั่วครู่
+      def = ITEMS[held.id];
+    } else if (!(def && ['tool', 'weapon', 'light', 'ranged', 'rod'].includes(def.type)) && this.equip.weapon) {
       held = this.equip.weapon;
       def = ITEMS[held.id];
     }
@@ -458,7 +515,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   /** โดนโจมตี — คืนดาเมจจริงหลังหักเกราะ (0 = ไม่โดน) */
   hurt(amount: number, from?: { x: number; y: number }): number {
-    if (this.dead || this.invuln > 0 || this.dodgeTime > 0) return 0;
+    if (this.dead || this.sheltered || this.invuln > 0 || this.dodgeTime > 0) return 0;
     const dmg = Math.max(1, amount * (1 - this.damageReduction));
     this.hp = Math.max(0, this.hp - dmg);
     this.invuln = BALANCE.hurtInvuln;

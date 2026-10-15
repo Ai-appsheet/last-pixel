@@ -14,6 +14,7 @@ import { fitText } from './fancyButton';
 import { UIWindow } from './Window';
 import { placeArtCover, showItemIcon, withItemArt, withItemThumb } from './itemArt';
 import { COLORS, txt } from './widgets';
+import { ALL_ITEMS, INF_STOCK } from '../config/allItems';
 
 /**
  * 📐 สมุดแปลน — รวม "สร้างสิ่งก่อสร้าง" + "คราฟต์ไอเทม/อาวุธ" ไว้ที่เดียว
@@ -168,8 +169,8 @@ class Btn {
   setActive(a: boolean) {
     this.active = a;
     this.hover.setVisible(a || this.over);
-    // แท็บที่เลือก = พื้นทอง → ตัวหนังสือเข้ม (อ่านออก)
-    this.t.setColor(a ? COLORS.ink : COLORS.text).setShadow(0, 1, a ? '#fff2b0' : '#0b0d1f', 0, false, true);
+    // แท็บที่เลือก = ตัวหนังสือทองหม่น (พื้นปุ่มแบบเรียบเป็นสีเข้ม)
+    this.t.setColor(a ? '#e3c178' : COLORS.text).setShadow(0, 1, '#0b0d1f', 0, false, true);
   }
 
   setBadge(n: number) {
@@ -356,6 +357,7 @@ export class BlueprintWindow {
   constructor(private scene: Phaser.Scene, private gs: GameScene, private toast: (text: string, color?: string) => void) {
     this.collect();
     const w = (this.win = new UIWindow(scene, 20, 58, WIN_W, WIN_H, '📐 สมุดแปลน'));
+    w.addHelp([], () => this.drawDetail());
 
     // ---- แถวบน: หมวดหลัก + ตัวกรอง ----
     this.secBtns = {
@@ -582,7 +584,7 @@ export class BlueprintWindow {
       const sb = BUILD[st];
       reqs.push({ icon: sb?.texture ?? 'px', frame: sb?.frame, name: `🔒 ต้องมี${STATION_NAMES[st]}บนเกาะ`, have: 0, need: 1, ok: false, station: st });
     }
-    const parts = free ? [] : [...plan.take].filter(([id]) => isPart(id));
+    const parts = free || inv.unlimited ? [] : [...plan.take].filter(([id]) => isPart(id));
     const progress = reqs.length ? reqs.reduce((s, q) => s + (q.ok ? 1 : Math.min(1, q.have / Math.max(1, q.need))), 0) / reqs.length : 1;
     return { bp, reqs, progress: known ? progress : 0, ready: reqs.every((q) => q.ok), matsOk, known, parts };
   }
@@ -892,7 +894,7 @@ export class BlueprintWindow {
       else notes.push(b.anywhere ? '📍 วางได้ทุกเกาะ (ยกเว้นเขตตลาดเกาะกลาง)' : '📍 วางได้เฉพาะเกาะของคุณ');
       if (b.power === 'use') notes.push('⚡ ต้องมีไฟ: วางใกล้เครื่องปั่นไฟหรือกังหันลม');
       if (b.crop) notes.push('🌱 ใส่เมล็ดแล้วกด E เพื่อปลูก');
-      notes.push(gs.creative ? '✨ โหมดสร้างสรรค์: ไม่ใช้วัสดุ' : '🔨 กดสร้างเลย → คลิก/แตะบนพื้นใกล้ตัว · Esc/คลิกขวา = ยกเลิก · รื้อคืนวัสดุ 50%');
+      notes.push(gs.creative ? '✨ โหมดสร้างสรรค์: ไม่ใช้วัสดุ' : ALL_ITEMS ? '♾ โหมดของครบ: วัสดุไม่จำกัด · กดสร้างเลย → คลิก/แตะบนพื้นใกล้ตัว · Esc/คลิกขวา = ยกเลิก' : '🔨 กดสร้างเลย → คลิก/แตะบนพื้นใกล้ตัว · Esc/คลิกขวา = ยกเลิก · รื้อคืนวัสดุ 50%');
     } else {
       const r = bp.recipe!;
       const d = ITEMS[r.output.item];
@@ -962,9 +964,10 @@ export class BlueprintWindow {
         row.jump = `b:${q.station}`;
       } else {
         const st = q.stored ?? 0;
-        row.count.setText(`${st ? '📦' : ''}${q.ok ? '✔' : '✘'} ${Math.min(q.have, 9999)}/${q.need}`).setColor(q.ok ? COLORS.good : COLORS.bad);
+        const inf = q.have >= INF_STOCK; // โหมดของครบ: วัสดุไม่จำกัด
+        row.count.setText(inf ? `♾✔ ∞/${q.need}` : `${st ? '📦' : ''}${q.ok ? '✔' : '✘'} ${Math.min(q.have, 9999)}/${q.need}`).setColor(q.ok ? COLORS.good : COLORS.bad);
         row.jump = this.recipeKeyFor(q.item!);
-        hint = `${st ? `📦 จากคลัง ${st} · ` : ''}หาได้จาก: ${this.source(q.item!)}${row.jump ? ' · แตะดูแปลน ›' : ''}`;
+        hint = `${inf ? '♾ คลังเสบียงไม่จำกัด (ไม่หักของจริง) · ' : st ? `📦 จากคลัง ${st} · ` : ''}หาได้จาก: ${this.source(q.item!)}${row.jump ? ' · แตะดูแปลน ›' : ''}`;
       }
       row.hint.setY(y + 18).setColor(q.ok ? '#8fa3b8' : COLORS.dim);
       clip(row.hint, hint, PW - 76);
@@ -985,6 +988,8 @@ export class BlueprintWindow {
     this.notes.setY(y + 2);
     const lines = Math.max(0, Math.floor((PH - 14 - (up ? 32 : 0) - (y + 2)) / 14));
     this.notes.setMaxLines(lines).setText(lines ? notes.join('\n') : '');
+    // หมายเหตุยาว → ซ่อนไว้หลังปุ่ม "?" บนหัวหน้าต่าง
+    this.notes.setVisible(this.win.helpOn);
 
     // ---- ปุ่มหลัก ----
     if (e.ready) btn.set(true, '🔨 สร้างเลย');

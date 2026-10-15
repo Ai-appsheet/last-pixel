@@ -2,16 +2,17 @@ import Phaser from 'phaser';
 import { PALETTE } from '../data/palette';
 import { SPRITES } from '../data/sprites';
 import { CHARACTERS, MERCHANT_COLORS, RIVAL_COLORS, SHADE_COLORS, ZOMBIE_COLORS } from '../data/characters';
-import { PixelCanvas, dither } from './PixelCanvas';
+import { PixelCanvas, dither, setTone } from './PixelCanvas';
+import { worldTone } from './palette';
 import {
-  acacia, bambooClump, bigOak, birch, bush, coral, crystalCluster, deadTree, decorTiles, glowMushroomIcon, mangrove, maple, mushTree, oak, palm, pine, rock,
-  sakura, shroomPatch, stump, tuft, willow,
+  acacia, bambooClump, bigOak, birch, bush, cactus, coral, crystalCluster, deadTree, decorTiles, glowMushroomIcon, mangrove, maple, mushTree, oak, oreRock, palm, pine, rock,
+  sakura, shroomPatch, snowPine, stump, tuft, willow,
 } from './art/nature';
 import {
   airdrop, arenaEmblem, banner, brazier, campfire, cloudShadow, crate, entityShadow, glowCanvas, mailbox, marketStall,
   parachute, pillar, planeWreck, signpost, spikeTrap, woodWall,
 } from './art/props';
-import { bed, cactus, cropStage, farmPlot, furnace, itemIcons, oreRock, snowPine, stoneWall, wildCrop, workbench } from './art/icons';
+import { bed, cropStage, farmPlot, furnace, itemIcons, stoneWall, wildCrop, workbench } from './art/icons';
 import { buildUiTextures } from './art/ui';
 import { itemIcons3 } from './art/icons3';
 import { itemIcons2 } from './art/icons2';
@@ -20,6 +21,7 @@ import { weaponIcons } from './art/weapons';
 import { buildCreatureTextures, creatureIcons } from './art/creatures';
 import { extraArt } from './art/icons_extra';
 import { postArt } from './art/post';
+import { homeInteriorArt } from './art/homeInterior';
 import { buildBuildingTextures } from './art/buildings';
 import { vehicleArt } from './art/vehicles';
 import { buildMonsterTextures, CHIBI_HUMANOID_HD, humanoidFrame, strip } from './art/monsters';
@@ -141,6 +143,16 @@ function tiny(scene: Phaser.Scene, key: string, rows: string[]) {
 }
 
 export function buildAllTextures(scene: Phaser.Scene) {
+  try {
+    buildAll(scene);
+  } finally {
+    setTone(null);
+  }
+}
+
+function buildAll(scene: Phaser.Scene) {
+  // ฉากโลก (พื้น ต้นไม้ ของประกอบ สิ่งก่อสร้าง) → แปลงเข้าพาเลตต์โลก
+  setTone(worldTone);
   // ---------- พื้นและขอบ ----------
   stripTexture(scene, 'tiles_a', groundTiles(0));
   stripTexture(scene, 'tiles_b', groundTiles(1));
@@ -236,6 +248,7 @@ export function buildAllTextures(scene: Phaser.Scene) {
   scene.textures.addCanvas('glow', glowCanvas(64, [255, 170, 80]));
   scene.textures.addCanvas('glow_cool', glowCanvas(32, [200, 255, 120]));
 
+  setTone(null);
   // ---------- ตัวละคร / สัตว์ ----------
   for (const c of CHARACTERS) humanoid(scene, `char_${c.id}`, c.colors);
   humanoid(scene, 'zombie', ZOMBIE_COLORS);
@@ -253,13 +266,16 @@ export function buildAllTextures(scene: Phaser.Scene) {
   for (const [key, art] of Object.entries(itemIcons3())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art);
   for (const [key, art] of Object.entries(gearIcons())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art);
   for (const [key, art] of Object.entries(weaponIcons())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art);
+  setTone(worldTone);
   buildBuildingTextures(scene);
   for (const [key, art] of Object.entries(vehicleArt())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art);
+  setTone(null);
   buildMonsterTextures(scene);
   buildCreatureTextures(scene);
   for (const [key, art] of Object.entries(creatureIcons())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art);
   for (const [key, art] of Object.entries(extraArt())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art); // กิจกรรมตามเวลาจริง/สมดุลร่างกาย
   for (const [key, art] of Object.entries(postArt())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art); // 📦 ท่าส่งของ
+  for (const [key, art] of Object.entries(homeInteriorArt())) if (!scene.textures.exists(key)) canvasTexture(scene, key, art); // 🏠 เฟอร์นิเจอร์ในบ้าน
   // กล่องเปิดแล้ว (หีบซากโบราณ)
   if (!scene.textures.exists('reward_chest_open')) {
     const src = scene.textures.get('reward_chest').getSourceImage() as HTMLCanvasElement;

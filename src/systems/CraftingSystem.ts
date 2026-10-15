@@ -1,6 +1,7 @@
 import { ITEMS } from '../data/items';
 import { RECIPES, type Recipe } from '../data/recipes';
 import type { Inventory } from '../components/Inventory';
+import { INF_STOCK } from '../config/allItems';
 
 /** คำนวณจำนวนวัตถุดิบจริงหลังหักส่วนลดของตัวละคร (เช่น ช่าง ×0.9) */
 export function costOf(qty: number, materialCost = 1): number {
@@ -28,12 +29,12 @@ export interface MaterialSource {
   remove(id: string, qty: number): boolean;
 }
 
-/** กระเป๋า + คลัง: นับรวมกัน · หักจากกระเป๋าก่อน ที่ขาดค่อยหักจากคลัง (เรียงใกล้ → ไกล) */
+/** กระเป๋า + คลัง: นับรวมกัน · หักจากกระเป๋าก่อน ที่ขาดค่อยหักจากคลัง (เรียงใกล้ → ไกล) · unlimited = โหมดของครบ (มีทุกอย่าง INF_STOCK หักแล้วไม่ลด) */
 export class MaterialPool implements MaterialSource {
   private totals = new Map<string, number>();
   private ver = -1;
 
-  constructor(readonly inv: Inventory, readonly stores: Inventory[] = []) {}
+  constructor(readonly inv: Inventory, readonly stores: Inventory[] = [], readonly unlimited = false) {}
 
   /** รวมเลขเวอร์ชันของคลังทั้งหมด (ของในหีบเปลี่ยน = นับใหม่) */
   get version() {
@@ -54,12 +55,13 @@ export class MaterialPool implements MaterialSource {
   }
 
   count(id: string): number {
+    if (this.unlimited && id !== 'coin') return INF_STOCK;
     if (this.inv.infinite && id !== 'coin') return 999;
     return this.inv.count(id) + this.stored(id);
   }
 
   remove(id: string, qty: number): boolean {
-    if (this.inv.infinite && id !== 'coin') return true;
+    if ((this.unlimited || this.inv.infinite) && id !== 'coin') return true;
     if (this.count(id) < qty) return false;
     const fromBag = Math.min(this.inv.count(id), qty);
     if (fromBag > 0) this.inv.remove(id, fromBag);

@@ -97,7 +97,7 @@ export class BuildSystem {
         const t = s.tileAt(X, Y);
         const slot = s.world.islandAt(X, Y) >= 0 ? s.world.islandAt(X, Y) : s.world.slotIndexAt(X, Y);
         const own = slot === s.world.home;
-        if (s.isSafeTile(X, Y)) return 'เกาะกลางห้ามสร้าง (เขตตลาด)';
+        if (s.isSafeTile(X, Y)) return s.homes.isRoomTile(X, Y) ? 'สร้างในห้องบ้านไม่ได้' : 'เกาะกลางห้ามสร้าง (เขตตลาด)';
         if (def.layer === 'terrain') {
           if (!own) return 'ปรับพื้นได้เฉพาะเกาะของคุณ';
           if (def.terrain === 'fill') {

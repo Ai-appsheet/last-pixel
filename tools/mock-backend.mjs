@@ -204,6 +204,17 @@ function makeContext(ss, clock, mail, google) {
         },
         put: (k, v, ttl = 600) => void cache.set(k, { v: String(v), exp: now() + ttl * 1000 }),
         remove: (k) => void cache.delete(k),
+        // เหมือน CacheService จริง: getAll คืน object เฉพาะ key ที่ยังไม่หมดอายุ
+        getAll: (keys) => {
+          const out = {};
+          for (const k of keys) {
+            const e = cache.get(k);
+            if (e && e.exp >= now()) out[k] = e.v;
+          }
+          return out;
+        },
+        putAll: (obj, ttl = 600) => Object.entries(obj).forEach(([k, v]) => cache.set(k, { v: String(v), exp: now() + ttl * 1000 })),
+        removeAll: (keys) => keys.forEach((k) => cache.delete(k)),
       }),
     },
     MailApp: {

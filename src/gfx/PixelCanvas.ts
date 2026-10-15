@@ -32,6 +32,37 @@ function rgbaOf(c: string): [number, number, number, number] {
   return v;
 }
 
+/**
+ * โทนสีตอนเขียนผืนลง texture (ใช้กับภาพในโลก: พื้น ต้นไม้ สิ่งก่อสร้าง → พาเลตต์โลก)
+ * null = สีตามจริง (ไอคอน UI ตัวละคร มอน) · แคชผลแปลงต่อสี
+ */
+type Tone = (key: string, v: [number, number, number, number]) => [number, number, number, number];
+let tone: Tone | null = null;
+const TONED = new Map<string, [number, number, number, number]>();
+const TONED_CSS = new Map<string, string>();
+export function setTone(fn: Tone | null) {
+  if (fn === tone) return;
+  tone = fn;
+  TONED.clear();
+  TONED_CSS.clear();
+}
+function colorOf(c: string): [number, number, number, number] {
+  const v = rgbaOf(c);
+  if (!tone) return v;
+  let t = TONED.get(c);
+  if (!t) TONED.set(c, (t = tone(c, v)));
+  return t;
+}
+function cssOf(c: string): string {
+  if (!tone) return resolve(c);
+  let s = TONED_CSS.get(c);
+  if (!s) {
+    const [r, g, b, a] = colorOf(c);
+    TONED_CSS.set(c, (s = `rgba(${r},${g},${b},${(a / 255).toFixed(3)})`));
+  }
+  return s;
+}
+
 /** ผสมสีสองสี (ตัวอักษรพาเลตต์หรือ #hex) → #hex */
 export function mixHex(a: string, b: string, t: number): string {
   const A = rgbaOf(a);
@@ -252,7 +283,7 @@ export class PixelCanvas {
       for (let x = 0; x < this.W; x++) {
         const c = this.px[y * this.W + x];
         if (!c) continue;
-        ctx.fillStyle = resolve(c);
+        ctx.fillStyle = cssOf(c);
         ctx.fillRect(ox + x * scale, oy + y * scale, scale, scale);
       }
     }
@@ -265,7 +296,7 @@ export class PixelCanvas {
     for (let i = 0; i < this.px.length; i++) {
       const c = this.px[i];
       if (!c) continue;
-      const v = rgbaOf(c);
+      const v = colorOf(c);
       d[i * 4] = v[0];
       d[i * 4 + 1] = v[1];
       d[i * 4 + 2] = v[2];

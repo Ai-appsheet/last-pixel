@@ -4,6 +4,7 @@ import { BIOMES, type Biome } from '../data/islands';
 import { MOBS } from '../data/mobs';
 import type { GameScene } from '../scenes/GameScene';
 import { TILE, isWater } from '../world/tiles';
+import { SPAWN_STOCK, nightStock, type SpawnCat } from './RespawnSystem';
 
 /** สัตว์ไม่ดุ (หนี/สู้เมื่อโดนตี) — นับรวมในเพดานสัตว์ */
 const isPassive = (id: string) => ['flee', 'neutral'].includes(MOBS[id]?.ai ?? '');
@@ -61,12 +62,19 @@ export class SpawnSystem {
     const c = (id: string) => counts[id] ?? 0;
     const sum = (ids: string[]) => [...new Set(ids)].reduce((a, id) => a + c(id), 0);
     const slot = s.world.slots[s.currentSlot];
+    // มอนที่ฆ่าแล้วไม่เกิดซ้ำจนถึงรอบชั่วโมงหน้า (RespawnSystem) — หักโควตาตามเกาะ/ประเภท
+    const rs = s.mobRespawn;
+    const ok = (area: number, cat: SpawnCat, stock: number) => !rs || rs.canSpawn(area, cat, stock);
     // กลางทะเล (เฉพาะเมื่ออยู่เหนือน้ำจริง — ยานบินลอยเหนือเกาะยังเกิดมอนตามปกติ): งูทะเล + สัตว์ทะเลลึก
     if (s.boatRiding && isWater(s.tileAt(Math.floor(p.x / 16), Math.floor(p.y / 16)))) {
       const dark = s.dayNight.darkness > 0.3;
+      const area = s.world.slotIndexAt(Math.floor(p.x / 16), Math.floor(p.y / 16));
+      if (!ok(area, 'sea', SPAWN_STOCK.sea)) return;
+      this.tag = [area, 'sea'];
       if (c('serpent') < 1 && Math.random() < 0.12 && dark) this.trySpawn('serpent', 'deep', 140, 220);
       const sea = dark ? SEA_NIGHT : SEA_DAY;
       if (sum(sea) < 3 && Math.random() < 0.18) this.trySpawn(Phaser.Utils.Array.GetRandom(sea), 'deep', 140, 240);
+      this.tag = null;
       return;
     }
     if (!slot || slot.biome === 'central' || s.playerSafe) return;
@@ -74,24 +82,36 @@ export class SpawnSystem {
     const night = s.dayNight.isNight;
     const wild = biome.wildlife.filter((id) => !MOBS[id]?.nightOnly || night);
     const passive = wild.filter(isPassive);
-    if (passive.length && sum(passive) < BALANCE.passiveMobCap) {
+    const area = slot.index;
+    if (passive.length && sum(passive) < BALANCE.passiveMobCap && ok(area, 'passive', SPAWN_STOCK.passive)) {
       const id = Phaser.Utils.Array.GetRandom(passive);
+      this.tag = [area, 'passive'];
       this.trySpawn(id, 'land', 190, 330, HERD[slot.biome]?.[id] ?? 1);
     }
     const hostileWild = wild.filter((id) => !isPassive(id));
-    if (hostileWild.length && sum(hostileWild) < 3 && Math.random() < 0.25) this.trySpawn(Phaser.Utils.Array.GetRandom(hostileWild));
+    if (hostileWild.length && sum(hostileWild) < 3 && Math.random() < 0.25 && ok(area, 'hostile', SPAWN_STOCK.hostile)) {
+      this.tag = [area, 'hostile'];
+      this.trySpawn(Phaser.Utils.Array.GetRandom(hostileWild));
+    }
     // น้ำตื้นใกล้ฝั่ง: ปิรันย่ามาเป็นฝูง 3 ตัว · แมงกะพรุน
     const shore = SHORE[slot.biome];
-    if (shore && sum(shore[0]) < 3 && Math.random() < shore[1]) {
+    if (shore && sum(shore[0]) < 3 && Math.random() < shore[1] && ok(area, 'shore', SPAWN_STOCK.shore)) {
       const id = Phaser.Utils.Array.GetRandom(shore[0]);
+      this.tag = [area, 'shore'];
       this.trySpawn(id, 'shallow', 100, 220, id === 'piranha' ? 3 : 1);
     }
     if (night) {
       const ambient = biome.nightMobs;
-      if (ambient.reduce((a, id) => a + c(id), 0) < Math.ceil((s.inGrace ? 1 : 2) * biome.danger)) this.trySpawn(Phaser.Utils.Array.GetRandom(ambient), 'land', 160, 240);
+      this.tag = [area, 'night'];
+      if (ambient.reduce((a, id) => a + c(id), 0) < Math.ceil((s.inGrace ? 1 : 2) * biome.danger) && ok(area, 'night', nightStock(biome.danger))) this.trySpawn(Phaser.Utils.Array.GetRandom(ambient), 'land', 160, 240);
+      this.tag = null; // เงาหลอน (สติต่ำ) = ภาพหลอน ไม่นับโควตา
       if (p.sanity < 30 && c('shade') < 3) this.trySpawn('shade', 'land', 90, 160);
     }
+    this.tag = null;
   }
+
+  /** ป้ายโควตาของการเกิดรอบนี้ [เกาะ, ประเภท] (null = ไม่นับ) */
+  private tag: [number, SpawnCat] | null = null;
 
   /** where: land = บก · deep = ทะเลลึก · shallow = น้ำตื้น · (สัตว์ชายหาดเลือกพื้นทรายเอง) · group = จำนวนตัวในฝูง */
   trySpawn(mobId: string, where: Where = 'land', minDist = 190, maxDist = 330, group = 1) {
@@ -107,7 +127,10 @@ export class SpawnSystem {
       if (where === 'deep' ? t !== TILE.DEEP : where === 'shallow' ? t !== TILE.SHALLOW : where === 'beach' ? t !== TILE.SAND || s.isTileBlocked(tx, ty) : isWater(t) || s.isTileBlocked(tx, ty)) continue;
       if (s.isSafeTile(tx, ty)) continue;
       if (s.shelter.at(tx * 16 + 8, ty * 16 + 8)) continue; // เขตปลอดภัยรอบบ้าน: มอนไม่เกิดเอง
-      for (let k = 0; k < group; k++) s.spawnMob(mobId, tx * 16 + 8 + (k ? Phaser.Math.Between(-10, 10) : 0), ty * 16 + 8 + (k ? Phaser.Math.Between(-6, 6) : 0));
+      for (let k = 0; k < group; k++) {
+        const m = s.spawnMob(mobId, tx * 16 + 8 + (k ? Phaser.Math.Between(-10, 10) : 0), ty * 16 + 8 + (k ? Phaser.Math.Between(-6, 6) : 0));
+        if (this.tag && s.mobRespawn) s.mobRespawn.tag(m, this.tag[0], this.tag[1]);
+      }
       return;
     }
   }

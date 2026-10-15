@@ -7,6 +7,9 @@ import PixelText from './PixelText';
  * หน้าโหลด (HTML ล้วน — โผล่ทันทีตั้งแต่เปิดเว็บ ก่อนโค้ดเกมโหลดเสร็จ)
  * ภาพ key art นิ่งเต็มจอ (ไม่ซูม/ไม่เลื่อน) + โลโก้ + ชื่อไทย + หลอดโหลด + เคล็ดลับ — เคลื่อนไหวแค่แสงวิ้งช้าๆ บนโลโก้กับหิ่งห้อยไม่กี่ดวง
  * เกมแจ้งความคืบหน้าผ่าน window event 'si:progress' (detail 0..1) และปิดหน้าโหลดด้วย 'si:ready'
+ *
+ * ดีไซน์: จัดกึ่งกลางสะอาด (โลโก้ + ชื่อเรื่องกลางบน · หลอดโหลด/เคล็ดลับกลางล่าง) เอฟเฟกต์เบาๆ นิ่งๆ
+ * พื้นหลัง: key art "ภูเขาไฟปะทุ" (ภาพเดียวกับหน้าแรก ให้ต่อเนื่องกันตอนโหลดเสร็จ) — title_bg.jpg 960w / title_bg_hd.jpg 1920w
  */
 const BASE = `${(process.env.NEXT_PUBLIC_BASE_PATH ?? '').replace(/\/+$/, '')}/art/loader/`;
 
@@ -23,7 +26,7 @@ const TIPS = [
 
 /** ข้อความสถานะตามช่วงความคืบหน้า (ไม่วนเร็ว — เปลี่ยนตามการโหลดจริง) */
 const status = (p: number) =>
-  p >= 1 ? 'พร้อมแล้ว! ออกเดินทางกัน' : p < 0.3 ? 'กำลังเตรียมหมู่เกาะ…' : p < 0.6 ? 'กำลังโหลดภาพและเสียง…' : p < 0.85 ? 'กำลังสร้างตัวละครและมอนสเตอร์…' : 'เกือบเสร็จแล้ว…';
+  p >= 1 ? 'พร้อมแล้ว — ออกเดินทางสู่หมู่เกาะ!' : p < 0.3 ? 'กำลังปลุกหมู่เกาะให้ตื่น…' : p < 0.6 ? 'กำลังเติมสีท้องฟ้าและเสียงคลื่น…' : p < 0.85 ? 'กำลังเรียกเหล่าผู้รอดชีวิตและมอนสเตอร์…' : 'ปลุกมหันตภัยใกล้เสร็จแล้ว…';
 
 /** หิ่งห้อย: ตำแหน่ง/ความเร็วคงที่ (ไม่สุ่มทุกครั้งที่ render) */
 const FLIES = [
@@ -115,17 +118,17 @@ export default function LoadingScreen() {
           <img src={`${BASE}logo_w1.png`} alt="" className="w1" />
           <img src={`${BASE}logo_w2.png`} alt="" className="w2" />
         </h1>
+        {/* ชื่อเรื่อง = หัวเรื่องเดียวที่เป็นตัวพิกเซลใหญ่ (นอกจากโลโก้) */}
         <p className="si-sub">
           <PixelText text="เอาชีวิตรอดบนหมู่เกาะ" px={15} scale={big ? 3 : 2} color="#fff6d8" color2="#ffcd75" />
         </p>
-        <p className="si-tag">
-          <PixelText text="สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า" px={12} scale={2} color="#e8ecff" color2="#9fd8ff" shadow="#1a2a5a" />
-        </p>
+        {/* คำโปรย = ตัวเล็ก-บาง อ่านง่าย (ไม่ใช่ตัวพิกเซล) */}
+        <p className="si-tag">สร้างฐาน · ล่องเรือ · ล้มบอส · รอดให้ถึงรุ่งเช้า</p>
       </header>
 
       <div className="si-bottom">
         <div className="si-row">
-          <span className="si-step"><PixelText text={status(prog)} px={12} scale={2} color="#fff2b0" /></span>
+          <span className="si-step">{status(prog)}</span>
           <span className="si-pct">{pct}%</span>
         </div>
         <div className="si-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
@@ -134,7 +137,7 @@ export default function LoadingScreen() {
         <div className="si-tips">
           {TIPS.map((s, i) => (
             <p key={i} className={i === tip ? 'on' : ''} aria-hidden={i !== tip}>
-              <PixelText text={`เคล็ดลับ  ${s}`} px={11} scale={2} color="#e8ecff" shadow="#0b0d1f" />
+              <span className="si-tiplabel">เคล็ดลับ</span> {s}
             </p>
           ))}
         </div>

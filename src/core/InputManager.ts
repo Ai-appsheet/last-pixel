@@ -31,6 +31,10 @@ export class InputManager {
   autoMove: Phaser.Math.Vector2 | null = null;
   /** ผู้เล่นกำลังบังคับเดินเอง (ไม่นับออโต้) */
   manualMoving = false;
+  /** ทิศเดินจากเมาส์ (systems/MouseMove) — คีย์/จอย/จอยสัมผัสทับได้เสมอ */
+  mouseMove: Phaser.Math.Vector2 | null = null;
+  /** กำลังเดินด้วยคีย์/จอย/จอยสัมผัส (MouseMove ใช้ยกเลิกการเดินด้วยเมาส์) */
+  keyMoving = false;
   /** ทิศเล็งจากอนาล็อกขวา (null = ไม่ได้เล็ง) */
   padAim: Phaser.Math.Vector2 | null = null;
 
@@ -112,7 +116,9 @@ export class InputManager {
 
   move(): Phaser.Math.Vector2 {
     const m = this.manualMove();
-    this.manualMoving = m.lengthSq() > 0;
+    this.keyMoving = m.lengthSq() > 0;
+    this.manualMoving = this.keyMoving || !!this.mouseMove;
+    if (!this.keyMoving && this.mouseMove) return this.mouseMove.clone().limit(1);
     if (!this.manualMoving && this.autoMove) return this.autoMove.clone().limit(1);
     return m;
   }

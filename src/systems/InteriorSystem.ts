@@ -35,6 +35,8 @@ export class InteriorSystem {
   readonly spots: Interactable[] = [];
   private torchLights: LightSource[] = [];
   private spawnedDay = new Map<number, number>();
+  /** ชั่วโมง (RespawnSystem.hour) ที่ปล่อยมอนรอบล่าสุดของแต่ละชั้น */
+  private spawnedHour = new Map<number, number>();
   /** วันที่เกิดมอนล่าสุดจากเซฟ (มอนไม่ได้เซฟ → โหลดแล้วเกิดมอนใหม่ แต่หีบไม่รีเซ็ตซ้ำ) */
   private savedDay = new Map<number, number>();
   /** ดันเจี้ยนที่ล้มบอสได้แล้ว (พิชิต) */
@@ -61,7 +63,9 @@ export class InteriorSystem {
       const y = (p.ty + 1) * T;
       this.sprite(d.entrance, x, y, 48, 40);
       this.gateLabels.set(d.index, this.label(x, y - 44, '', '#ef7d57'));
-      this.spots.push({ x, y: y + 6, r: 40, label: `เข้า${d.name}${d.recommend ? ` (แนะนำ ${d.recommend})` : ''}`, run: () => this.enter(d.index) });
+      const spot: Interactable = { x, y: y + 6, r: 40, label: `เข้า${d.name}${d.recommend ? ` (แนะนำ ${d.recommend})` : ''}`, run: () => this.enter(d.index) };
+      this.spots.push(spot);
+      this.gateSpots.set(d.index, spot);
     }
     this.refreshGateLabels();
     const p = this.s.player;
@@ -69,11 +73,23 @@ export class InteriorSystem {
     if (isInterior(here)) this.setInside(here);
   }
 
+  private gateSpots = new Map<number, Interactable>();
+  private labelTimer = 0;
+
+  /** ข้อความสถานะชั้น (ชั่วโมงนี้): "เคลียร์แล้ว ✓" / "บอสยังอยู่ · มอน 7 ตัว" */
+  floorText(index: number): string {
+    const st = this.floorStatus(index);
+    return st.cleared ? 'เคลียร์แล้ว ✓' : st.bossAlive ? `บอสยังอยู่ · มอน ${st.left} ตัว` : `บอสล้มแล้ว · มอนเหลือ ${st.left} ตัว`;
+  }
+
   private refreshGateLabels() {
     for (const [i, t] of this.gateLabels) {
       const d = interiorDef(i)!;
       const done = this.conquered.has(i);
-      t.setText(`${d.gate}\n${done ? '✔ พิชิตแล้ว' : d.recommend ?? ''}`).setColor(done ? '#a7f070' : '#ef7d57');
+      const st = this.floorStatus(i);
+      t.setText(`${d.gate}\n${done ? '✔ พิชิตแล้ว' : d.recommend ?? ''}\n${this.floorText(i)} · ${this.s.mobRespawn.refreshText}`).setColor(st.cleared ? '#a7f070' : done ? '#a7f070' : '#ef7d57');
+      const spot = this.gateSpots.get(i);
+      if (spot) spot.label = `เข้า${d.name} · ${this.floorText(i)} · ${this.s.mobRespawn.refreshText}`;
     }
   }
 
@@ -93,6 +109,12 @@ export class InteriorSystem {
   update() {
     const s = this.s;
     const p = s.player;
+    // ป้ายปากถ้ำ: สถานะชั้น + นับถอยหลังรอบเกิดใหม่ (ทุก 1 วิ) · อยู่ในดันเจี้ยนตอนขึ้นชั่วโมงใหม่ = มอนเกิดใหม่ทันที
+    if (--this.labelTimer <= 0) {
+      this.labelTimer = 60;
+      this.refreshGateLabels();
+      if (this.current !== null && this.spawnedHour.get(this.current) !== s.mobRespawn.hour && interiorDef(this.current)?.kind === 'dungeon') this.spawnDungeon(this.current);
+    }
     const here = s.world.slotIndexAt(Math.floor(p.x / T), Math.floor(p.y / T));
     if (isInterior(here) && this.current !== here && !this.busy) this.setInside(here);
     else if (!isInterior(here) && this.current !== null && !this.busy) this.resetToWorld();
@@ -173,6 +195,7 @@ export class InteriorSystem {
   }
 
   private setInside(index: number) {
+    if (!interiorDef(index)) return; // ห้องในบ้าน (HomeSystem) ไม่ใช่ดันเจี้ยน
     this.current = index;
     this.s.world.ensureSlot(index);
     this.build(index);
@@ -299,30 +322,64 @@ export class InteriorSystem {
     return key;
   }
 
-  private spawnDungeon(index: number) {
-    const day = this.s.dayNight.day;
-    if (this.spawnedDay.get(index) === day) return;
-    this.spawnedDay.set(index, day);
-    const restock = this.savedDay.get(index) !== day;
-    const s = this.s;
-    // ล้างมอนเก่าของดันเจี้ยนนี้
-    for (const m of s.mobList()) if (m.getData('dungeon') === index) m.destroy();
-    const L: InteriorLayout = s.world.layouts.get(index)!;
-    const d = interiorDef(index)!;
+  /**
+   * แผนมอนของดันเจี้ยนในชั่วโมงนั้น (deterministic จากช่อง + ชั่วโมง) — id ต่อจุดเกิด `d<ช่อง>#<ลำดับ>` / `d<ช่อง>#boss`
+   * ใช้ทั้งตอนปล่อยมอน และตอนบอกสถานะ "เคลียร์แล้ว ✓ / บอสยังอยู่" บนแผนที่
+   */
+  plan(index: number, hour = this.s.mobRespawn.hour): { id: string; mob: string; x: number; y: number; boss: boolean }[] {
+    const cached = this.planCache.get(index);
+    if (cached && cached.hour === hour) return cached.list;
+    this.s.world.ensureSlot(index);
+    const L: InteriorLayout | undefined = this.s.world.layouts.get(index);
+    const d = interiorDef(index);
+    if (!L || !d) return [];
     const conf = DUNGEON_MOBS[d.tier ?? 1];
-    const rng = new Phaser.Math.RandomDataGenerator([`${index}:${day}`]);
+    const rng = new Phaser.Math.RandomDataGenerator([`${index}:${hour}`]);
+    const list: { id: string; mob: string; x: number; y: number; boss: boolean }[] = [];
     L.rooms.slice(1).forEach((r) => {
       if (rng.frac() < 0.3) return; // บางห้องว่าง (มีแต่ของ)
       const n = rng.between(1, 2) + (d.tier ?? 1) - 1;
       for (let i = 0; i < n; i++) {
-        const id = this.scaled(rng.pick(conf.mobs), conf.mult);
+        const mob = rng.pick(conf.mobs);
         const x = (r.cx + rng.between(-r.w / 2 + 2, r.w / 2 - 2)) * T;
         const y = (r.cy + rng.between(-r.h / 2 + 2, r.h / 2 - 2)) * T;
-        s.spawnMob(id, x, y).setData('dungeon', index);
+        list.push({ id: `d${index}#${list.length}`, mob, x, y, boss: false });
       }
     });
-    if (L.boss) s.spawnMob(this.scaled(conf.boss, conf.mult, true), L.boss.tx * T, L.boss.ty * T).setData('dungeon', index).setData('boss', true);
-    // หีบเกิดใหม่
+    if (L.boss) list.push({ id: `d${index}#boss`, mob: conf.boss, x: L.boss.tx * T, y: L.boss.ty * T, boss: true });
+    this.planCache.set(index, { hour, list });
+    return list;
+  }
+  private planCache = new Map<number, { hour: number; list: { id: string; mob: string; x: number; y: number; boss: boolean }[] }>();
+
+  /** สถานะชั้นนี้ในชั่วโมงนี้: มอนเหลือกี่ตัว · บอสยังอยู่ไหม */
+  floorStatus(index: number): { left: number; total: number; bossAlive: boolean; cleared: boolean } {
+    const rs = this.s.mobRespawn;
+    const list = this.plan(index);
+    const left = list.filter((e) => !rs.isDead(e.id)).length;
+    const bossAlive = list.some((e) => e.boss && !rs.isDead(e.id));
+    return { left, total: list.length, bossAlive, cleared: left === 0 };
+  }
+
+  /** ปล่อยมอนดันเจี้ยน — เกิดใหม่ทุกต้นชั่วโมง (นาฬิกาจริง) · ตัวที่ฆ่าแล้วในชั่วโมงนี้ไม่กลับมา (ออก-เข้า/โหลดใหม่ก็ไม่เกิด) */
+  private spawnDungeon(index: number) {
+    const s = this.s;
+    const hour = s.mobRespawn.hour;
+    if (this.spawnedHour.get(index) === hour) return;
+    this.spawnedHour.set(index, hour);
+    // หีบเกิดใหม่วันละครั้งตามเดิม
+    const day = s.dayNight.day;
+    const restock = this.savedDay.get(index) !== day && this.spawnedDay.get(index) !== day;
+    this.spawnedDay.set(index, day);
+    // ล้างมอนเก่าของดันเจี้ยนนี้
+    for (const m of s.mobList()) if (m.getData('dungeon') === index) m.destroy();
+    const d = interiorDef(index)!;
+    const conf = DUNGEON_MOBS[d.tier ?? 1];
+    for (const e of this.plan(index, hour)) {
+      if (s.mobRespawn.isDead(e.id)) continue;
+      const m = s.spawnMob(this.scaled(e.mob, conf.mult, e.boss), e.x, e.y).setData('dungeon', index).setData('spawnId', e.id);
+      if (e.boss) m.setData('boss', true);
+    }
     if (restock) for (const n of s.world.nodes) if (s.world.slotIndexAt(n.tx, n.ty) === index && n.type === 'ruin_chest' && !n.available) n.regrowAt = 0;
   }
 
