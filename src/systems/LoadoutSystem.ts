@@ -159,7 +159,15 @@ export class LoadoutSystem {
       return;
     }
     const at = Math.max(0, list.findIndex((c) => c.current));
-    this.pick(kind, list[(at + dir + list.length) % list.length]);
+    const cur = list[at];
+    // ข้ามชิ้นที่ "เหมือนกับที่ใส่อยู่" (เช่น ดาบเหล็ก 2 เล่ม) — ไม่งั้นจะสลับเล่มเดิมวนอยู่ที่เดิม ดูเหมือนค้าง
+    const same = (a: LoadChoice, b: LoadChoice) => a.slot.id === b.slot.id && (a.slot.plus ?? 0) === (b.slot.plus ?? 0);
+    const n = list.length;
+    for (let k = 1; k < n; k++) {
+      const c = list[(((at + dir * k) % n) + n) % n];
+      if (!same(c, cur)) return this.pick(kind, c);
+    }
+    EventBus.emit('toast', `${LOAD_INFO[kind].icon} มี${LOAD_INFO[kind].name}ชนิดเดียว`, '#94b0c2');
   }
 
   /** เลือกชิ้นนี้ลงช่องหมวด */
